@@ -1,0 +1,46 @@
+version: "3.9"
+
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.3
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false   # simplificación, sin auth
+    ports:
+      - "9200:9200"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.19.3
+    container_name: kibana
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - XPACK_SAMPLE_DATA_ENABLED=true   # <--- habilita sample data
+    ports:
+      - "5601:5601"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  kibana-init:
+    image: curlimages/curl:8.15.0
+    container_name: kibana-init
+    depends_on:
+      kibana:
+        condition: service_healthy
+    entrypoint: >
+      sh -c "
+      echo 'Esperando a Kibana...';
+      sleep 5;
+      curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
+      echo 'Sample Web Logs instalados en Kibana';
+      " 
