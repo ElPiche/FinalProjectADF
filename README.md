@@ -6,3 +6,7 @@ Proyecto final tecnólogo en informática Framework de detección de anomalías
 
 [Jira](https://braian-granero.atlassian.net/jira/software/projects/KAN/boards/1)
 
+
+### Setup 
+
+Para levantar proyecto: `docker compose up -d`
