@@ -17,6 +17,7 @@ Para este caso, se busca levantar los servicios necesarios para la operativa a t
 ### Flujo
 En este caso uno, estáremos trayendo datos "artificiales" que nos ofrece Kibana, por el momento no tenemos definido como vamos a cargar datos a Elastic por otros medios.
 
+
 Una vez traídos los datos a través de Kibana, estos podrán ser consultados de varias maneras, entre ellas existe *ESQL* que es lenguaje de query muy similar a SQL con el cual consultar los datos.
 
 Un ejemplo de ello podría ser:
@@ -75,7 +76,9 @@ el resultado de esta consulta sería:
 }
 ```
 
-Tras esto, con Telegraf vamos a extraer estos datos [haciendo uso de 2 plugins]([https://docs.influxdata.com/telegraf/v1/plugins](https://docs.influxdata.com/telegraf/v1/plugins "https://docs.influxdata.com/telegraf/v1/plugins")) que se encuentran configurados en el archivo [telegraf.conf](https://github.com/ElPiche/FinalProjectADF/blob/main/telegraf.conf) y convertir esos datos a series para que puedan ser guardados en InfluxDB, de ahí el Motor DA podrá operar sobre ellos.
+Tras esto, con Telegraf vamos a extraer estos datos [haciendo uso de 2 plugins]([https://docs.influxdata.com/telegraf/v1/plugins](https://docs.influxdata.com/telegraf/v1/plugins "https://docs.influxdata.com/telegraf/v1/plugins")) que se encuentran configurados en el archivo [telegraf.conf](https://github.com/ElPiche/FinalProjectADF/blob/main/telegraf.conf) el susodicho tiene una consulta de elastic hardcodeada en un tag de `body`, en donde se extraen los datos y se serializan.
+
+y convertir esos datos a series para que puedan ser guardados en InfluxDB, de ahí el Motor DA podrá operar sobre ellos.
 
 Por el momento, el motor ofrece 3 ventanas de tiempo a elegir: 5, 15 y 60 minutos (configurables) en donde se calcula la distribución normal de códigos HTTP en esos interválos de tiempo.
 Con estas distribuciones, se consigue la desviación estándar con la cual luego se aplica Z Score (también configurable) para detectar anomalías.
@@ -87,7 +90,25 @@ A desarrollar (o encontrar).
 
 ### Tentativas
 - Resolver cómo vamos a cargar logs reales a Elastic
-	- ¿Proceso ETL?
+	- ¿Proceso ETL? -> Por el momento tenemos un pequeño script que aplica un ReGeX a logs "sucios" para poder extraer los conteos de http code en formato de series. truncando los intervalos de tiempo para poder ofrecer series regulares con el siguiente formato:
+		```JSON
+		{
+	    "timestamp": "2025-08-27T13:28:00.000",
+	    "status_code_200": 4,
+	    "status_code_500": 0
+	  },
+	  {
+	    "timestamp": "2025-08-27T13:29:00.000",
+	    "status_code_200": 4,
+	    "status_code_500": 0
+	  },
+	  {
+	    "timestamp": "2025-08-27T13:30:00.000",
+	    "status_code_200": 1,
+	    "status_code_500": 0
+	  },
+		```
+	
 	- ¿Pre-filtrado de datos?
 - ¿Como va el motor de DA a extraer los datos desde InfluxDB? 
 	- ¿Vale la pena guardar las queries de influx en una carpeta aparte para que las consuma el motor DA?
