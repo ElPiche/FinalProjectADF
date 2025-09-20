@@ -31,6 +31,24 @@ services:
       timeout: 5s
       retries: 10
 
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.19.4
+    container_name: logstash
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ./pipeline:/usr/share/logstash/pipeline
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5044:5044"   # beats input (ejemplo)
+      - "9600:9600"   # monitoring API
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9600"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   kibana-init:
     image: curlimages/curl:8.15.0
     container_name: kibana-init
