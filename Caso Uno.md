@@ -1,11 +1,12 @@
 # Caso Uno
-Para el prototipo 0, el primer caso en compasa solamente las tecnologías individuales que constituyen la mayoría de la lógica de negocios, siendo estas:
+Para el prototipo 0, el primer caso abarca solamente las tecnologías individuales que constituyen la mayoría de la lógica de negocios, siendo estas:
 
 - ElasticSearch v8.19.3 -> para el guardado de logs sin procesar
 - Kibana v8.19.3 -> para el cargado de datos preliminares y visualización de los mismos
-- Telegraf v1.35.4 -> para la extracción de datos alojados en Elastic
+- ~~Telegraf v1.35.4 -> para la extracción de datos alojados en Elastic~~
 - InfluxDB v2.7.12 -> para guardar las series procesadas
 - Motor DA  -> para operar sobre los datos de Influx, y posibilitar el análisis de datos
+- LogStash 8.19.4 -> para la extracción de datos desde Elastic
 
 Este flujo le decidimos llamar "Operativa Vertical" dada su naturaleza lineal.
 
@@ -27,7 +28,7 @@ FROM .ds-kibana_sample_data_logs-2025.09.15-000001 | STATS count = COUNT(*), fir
 ```
 En donde hacemos un conteo de códigos HTTP que se encuentran entre el valor mínimo del timestamp y el máximo, y por último los ordenamos basado en el número de la respuesta.
 
-el resultado de esta consulta sería:
+El resultado de esta consulta sería:
 ``` JSON
 { 
 	"documents_found": 14074,
@@ -76,9 +77,35 @@ el resultado de esta consulta sería:
 }
 ```
 
-Tras esto, con Telegraf vamos a extraer estos datos [haciendo uso de 2 plugins]([https://docs.influxdata.com/telegraf/v1/plugins](https://docs.influxdata.com/telegraf/v1/plugins "https://docs.influxdata.com/telegraf/v1/plugins")) que se encuentran configurados en el archivo [telegraf.conf](https://github.com/ElPiche/FinalProjectADF/blob/main/telegraf.conf) el susodicho tiene una consulta de elastic hardcodeada en un tag de `body`, en donde se extraen los datos y se serializan.
+Tras esto, utilizaremos LogStash para extraer y limpiar estos datos que conseguimos con la consulta ESQL haciendo uso de la [configuración de LogStash](https://github.com/ElPiche/FinalProjectADF/blob/main/pipeline/logstash.conf), dentro de la misma de forma tentativa tenemos la siguiente consulta:
 
-y convertir esos datos a series para que puedan ser guardados en InfluxDB, de ahí el Motor DA podrá operar sobre ellos.
+```POSTGRESQL
+"query": "FROM .ds-kibana_sample_data_logs-* | STATS count = COUNT(*), first_occurrence = MIN(@timestamp), last_occurrence = MAX(@timestamp) BY response | SORT response"
+```
+Que por el momento es un conteo de los códigos HTTP y los intervalos en que aparecen que se actualiza cada 60 segundos
+```
+request_timeout => 60
+    schedule => { every => "60s" }
+    codec => "json"
+ ```
+pero se busca conseguir que nos devuelva las series ya armadas para guardarlas.
+
+La configuración actual también cuenta con un filtro, débido a que el [plugin que utilizamos](https://www.elastic.co/docs/reference/logstash/plugins/plugins-inputs-elasticsearch#:~:text=The%20ES,being%20preceded%20by%20deprecation%20warnings) para consultar a Elastic a través de ESQL nos devuelve los headers del GET, para ello hacemos uso de la siguiente línea de configuración:
+```JSON
+# Eliminar todo lo que no sea los campos finales deseados
+  mutate {
+    remove_field => [
+      "values",
+      "columns",
+      "http_poller_metadata",
+      "host",
+      "@version",
+      "event",
+      "agent"
+    ]
+```
+
+Al momento de redactar esto, estámos tentativamente deliberando en remover InfluxDB y cargar estas series ya sea en una segunda instancia de Elastic, lo cual nos brindaria facilidad con el MCP que ya sabemos que funciona, o en su defecto en un MongoDB que ya nos permitiria guardar las series tal cuales como JSON binario, y poder operar con ellas desde nuestro Motor DA.
 
 Por el momento, el motor ofrece 3 ventanas de tiempo a elegir: 5, 15 y 60 minutos (configurables) en donde se calcula la distribución normal de códigos HTTP en esos interválos de tiempo.
 Con estas distribuciones, se consigue la desviación estándar con la cual luego se aplica Z Score (también configurable) para detectar anomalías.
@@ -112,5 +139,8 @@ A desarrollar (o encontrar).
 	- ¿Pre-filtrado de datos?
 - ¿Como va el motor de DA a extraer los datos desde InfluxDB? 
 	- ¿Vale la pena guardar las queries de influx en una carpeta aparte para que las consuma el motor DA?
-	- ¿o el motor consulta contra Influx directamente?
-	- ¿tener los 2 script 
+	- ¿O el motor consulta contra Influx directamente?
+
+ - Reemplazo de Influx
+ 	- ¿Sería mejor una 2nda instancia de Elastic?
+	- ¿O una de MongoDB?
