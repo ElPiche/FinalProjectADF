@@ -1,0 +1,5 @@
+# Habilita la API de monitoring en 0.0.0.0:9600 (expuesta por tu -p 9600:9600)
+api.http.host: "0.0.0.0"
+log.level: info
+config.reload.automatic: true
+config.reload.interval: 5s 
