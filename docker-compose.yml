@@ -9,6 +9,8 @@ services:
       - xpack.security.enabled=false   # simplificación, sin auth
     ports:
       - "9200:9200"
+    volumes:
+      - elastic_data:/usr/share/elasticsearch/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200"]
       interval: 10s
@@ -52,6 +54,7 @@ services:
       timeout: 5s
       retries: 10
 
+
   kibana-init:
     image: curlimages/curl:8.15.0
     container_name: kibana-init
@@ -67,7 +70,7 @@ services:
       "
 
   mongodb:
-    image: mongo:7.0
+    image: mongo:8.0
     container_name: mongodb
     restart: unless-stopped
     environment:
@@ -92,3 +95,4 @@ services:
 
 volumes:
   mongo_data:
+  elastic_data: 
