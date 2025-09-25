@@ -44,7 +44,6 @@ services:
       curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
       echo 'Sample Web Logs instalados en Kibana';
       "
-
   
   mongo:
       image: mongo
@@ -64,7 +63,10 @@ services:
         retries: 15
 
   logstash:
-    image: docker.elastic.co/logstash/logstash:8.19.4
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: logstash-mongo
     container_name: logstash
     depends_on:
       - elasticsearch
@@ -82,11 +84,12 @@ services:
       timeout: 5s
       retries: 10
 
-
-
   algorithm-detection:
     build: 
       context: .
       dockerfile: Dockerfile
     container_name: algorithm-detection
     restart: "no"
+
+volumes:
+  mongo_data:
