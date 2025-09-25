@@ -31,24 +31,6 @@ services:
       timeout: 5s
       retries: 10
 
-  logstash:
-    image: docker.elastic.co/logstash/logstash:8.19.4
-    container_name: logstash
-    depends_on:
-      - elasticsearch
-    volumes:
-      - ./pipeline:/usr/share/logstash/pipeline
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    ports:
-      - "5044:5044"   # beats input (ejemplo)
-      - "9600:9600"   # monitoring API
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9600"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   kibana-init:
     image: curlimages/curl:8.15.0
     container_name: kibana-init
@@ -62,6 +44,45 @@ services:
       curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
       echo 'Sample Web Logs instalados en Kibana';
       "
+
+  
+  mongo:
+      image: mongo
+      container_name: mongoDb
+      restart: unless-stopped
+      environment:
+        - MONGO_INITDB_ROOT_USERNAME=admin
+        - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
+      ports:
+        - "27017:27017"
+      volumes:
+        - mongo_data:/data/db
+      healthcheck:
+        test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+        interval: 10s
+        timeout: 5s
+        retries: 15
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.19.4
+    container_name: logstash
+    depends_on:
+      - elasticsearch
+    volumes:
+      - ./logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./pipeline:/usr/share/logstash/pipeline
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5044:5044"   # beats input (ejemplo)
+      - "9600:9600"   # monitoring API
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9600"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+
 
   algorithm-detection:
     build: 

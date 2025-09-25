@@ -12,3 +12,8 @@ RUN pip install --no-cache-dir pandas numpy
 
 # Comando de ejecución por defecto
 CMD ["python", "da-algorithm-zScore.py"]
+
+FROM docker.elastic.co/logstash/logstash:8.19.4
+
+#Instalación plugin mongo db para logstash
+RUN logstash-plugin install logstash-output-mongodb
