@@ -1,12 +1,11 @@
 # Caso Uno
 Para el prototipo 0, el primer caso abarca solamente las tecnologías individuales que constituyen la mayoría de la lógica de negocios, siendo estas:
 
-- ElasticSearch v8.19.3 -> para el guardado de logs sin procesar
-- Kibana v8.19.3 -> para el cargado de datos preliminares y visualización de los mismos
-- ~~Telegraf v1.35.4 -> para la extracción de datos alojados en Elastic~~
-- InfluxDB v2.7.12 -> para guardar las series procesadas
-- Motor DA  -> para operar sobre los datos de Influx, y posibilitar el análisis de datos
-- LogStash 8.19.4 -> para la extracción de datos desde Elastic
+- ElasticSearch v8.19.3 -> Para el guardado de logs sin procesar
+- Kibana v8.19.3 -> Para el cargado de datos preliminares y visualización de los mismos
+- MongoDB v8.0 -> Para el guardado de series y resultados de detecciones
+- Motor DA  -> Para operar sobre los datos de MongoDB, y posibilitar el análisis de datos
+- LogStash 8.19.4 -> Para la extracción de datos desde Elastic
 
 Este flujo le decidimos llamar "Operativa Vertical" dada su naturaleza lineal.
 
@@ -104,13 +103,27 @@ La configuración actual también cuenta con un filtro, débido a que el [plugin
       "agent"
     ]
 ```
+Este archivo de configuración además, cuenta con hot reload, permitiendo así una fácil integración con el eventual MCP, en donde el asistente ayudará a generar queries y filtros que se inyectarán en tiempo real para extraer series específicas a Mongo.
 
-Al momento de redactar esto, estámos tentativamente deliberando en remover InfluxDB y cargar estas series ya sea en una segunda instancia de Elastic, lo cual nos brindaria facilidad con el MCP que ya sabemos que funciona, o en su defecto en un MongoDB que ya nos permitiria guardar las series tal cuales como JSON binario, y poder operar con ellas desde nuestro Motor DA.
+Dentro del mismo, podemos describir a donde queremos que los datos extraidos vayan, actualmente tenemos la siguiente línea para conectarlo a nuestra instancia de MongoDB:
+```JSON
+output {
+
+  mongodb {
+    uri => "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin"
+    database => "logsdb"
+    collection => "grouped_response_code"
+    isodate => true
+    id => "%{response}"
+  }
+```
 
 Por el momento, el motor ofrece 3 ventanas de tiempo a elegir: 5, 15 y 60 minutos (configurables) en donde se calcula la distribución normal de códigos HTTP en esos interválos de tiempo.
 Con estas distribuciones, se consigue la desviación estándar con la cual luego se aplica Z Score (también configurable) para detectar anomalías.
 
 Eventualmente se creará un sistema de alarmas que utilizara el Z Score de estos intervalos de tiempo.
+
+También se espera ser capaz de ofrecer un mínimo de 3 diferentes algorítmos de detección de anomalías incluyendo el Z score.
 
 ### Incidencias
 A desarrollar (o encontrar).
