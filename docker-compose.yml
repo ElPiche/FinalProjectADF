@@ -32,10 +32,13 @@ services:
       retries: 10
 
   logstash:
-    image: docker.elastic.co/logstash/logstash:8.19.4
+    build: 
+      context: .
+      dockerfile: Dockerfile.logstash
     container_name: logstash
     depends_on:
       - elasticsearch
+      - mongodb
     volumes:
       - ./pipeline:/usr/share/logstash/pipeline
     environment:
@@ -63,9 +66,29 @@ services:
       echo 'Sample Web Logs instalados en Kibana';
       "
 
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--username", "admin", "--password", "1q2w3E*", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   algorithm-detection:
     build: 
       context: .
       dockerfile: Dockerfile
     container_name: algorithm-detection
     restart: "no"
+
+volumes:
+  mongo_data:

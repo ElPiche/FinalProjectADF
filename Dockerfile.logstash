@@ -1,0 +1,5 @@
+FROM docker.elastic.co/logstash/logstash:8.19.4
+# Instalar plugin de salida a MongoDB
+RUN logstash-plugin install logstash-output-mongodb
+# (Opcional) verificar plugins
+RUN logstash-plugin list --verbose | grep mongodb || (echo "Plugin mongodb no instalado" && exit 1)
