@@ -1,0 +1,242 @@
+[
+  {
+    "date": "2025-09-01",
+    "type_of_day": "workable",
+    "average_200": 38.009027777777774,
+    "standard_deviation_200": 41.24378684346216,
+    "average_500": 3.622916666666667,
+    "standard_deviation_500": 10.20805945986145
+  },
+  {
+    "date": "2025-09-02",
+    "type_of_day": "workable",
+    "average_200": 38.92916666666667,
+    "standard_deviation_200": 41.51512676749517,
+    "average_500": 2.8097222222222222,
+    "standard_deviation_500": 9.236144662905255
+  },
+  {
+    "date": "2025-09-03",
+    "type_of_day": "workable",
+    "average_200": 38.43194444444445,
+    "standard_deviation_200": 40.989255448648706,
+    "average_500": 3.1847222222222222,
+    "standard_deviation_500": 9.662579212192238
+  },
+  {
+    "date": "2025-09-04",
+    "type_of_day": "workable",
+    "average_200": 38.80138888888889,
+    "standard_deviation_200": 41.27195182928259,
+    "average_500": 2.8381944444444445,
+    "standard_deviation_500": 9.33305078227297
+  },
+  {
+    "date": "2025-09-05",
+    "type_of_day": "workable",
+    "average_200": 38.359722222222224,
+    "standard_deviation_200": 40.844691895923155,
+    "average_500": 3.3222222222222224,
+    "standard_deviation_500": 10.070511962189597
+  },
+  {
+    "date": "2025-09-06",
+    "type_of_day": "non-workable",
+    "average_200": 12.785416666666666,
+    "standard_deviation_200": 5.942549469491968,
+    "average_500": 3.3694444444444445,
+    "standard_deviation_500": 10.122030121683284
+  },
+  {
+    "date": "2025-09-07",
+    "type_of_day": "non-workable",
+    "average_200": 12.997222222222222,
+    "standard_deviation_200": 6.058780228057734,
+    "average_500": 3.203472222222222,
+    "standard_deviation_500": 9.662310184889861
+  },
+  {
+    "date": "2025-09-08",
+    "type_of_day": "workable",
+    "average_200": 38.94513888888889,
+    "standard_deviation_200": 41.19415094710784,
+    "average_500": 2.9652777777777777,
+    "standard_deviation_500": 9.481053997966784
+  },
+  {
+    "date": "2025-09-09",
+    "type_of_day": "workable",
+    "average_200": 38.675694444444446,
+    "standard_deviation_200": 40.61608205901415,
+    "average_500": 2.676388888888889,
+    "standard_deviation_500": 8.838021863134692
+  },
+  {
+    "date": "2025-09-10",
+    "type_of_day": "workable",
+    "average_200": 39.06527777777778,
+    "standard_deviation_200": 41.412750315989165,
+    "average_500": 2.9458333333333333,
+    "standard_deviation_500": 9.237269849571422
+  },
+  {
+    "date": "2025-09-11",
+    "type_of_day": "workable",
+    "average_200": 38.69097222222222,
+    "standard_deviation_200": 41.59709024742877,
+    "average_500": 3.4034722222222222,
+    "standard_deviation_500": 10.025075670991013
+  },
+  {
+    "date": "2025-09-12",
+    "type_of_day": "workable",
+    "average_200": 38.87569444444444,
+    "standard_deviation_200": 41.617978265111546,
+    "average_500": 3.2131944444444445,
+    "standard_deviation_500": 9.865162847939681
+  },
+  {
+    "date": "2025-09-13",
+    "type_of_day": "non-workable",
+    "average_200": 13.17013888888889,
+    "standard_deviation_200": 6.025502667748356,
+    "average_500": 3.1840277777777777,
+    "standard_deviation_500": 9.853768645781814
+  },
+  {
+    "date": "2025-09-14",
+    "type_of_day": "non-workable",
+    "average_200": 13.025694444444444,
+    "standard_deviation_200": 6.02416083478985,
+    "average_500": 3.160416666666667,
+    "standard_deviation_500": 9.792352242397836
+  },
+  {
+    "date": "2025-09-15",
+    "type_of_day": "workable",
+    "average_200": 38.76111111111111,
+    "standard_deviation_200": 41.210723270219795,
+    "average_500": 3.2666666666666666,
+    "standard_deviation_500": 10.133973987038818
+  },
+  {
+    "date": "2025-09-16",
+    "type_of_day": "workable",
+    "average_200": 38.764583333333334,
+    "standard_deviation_200": 41.37780971398678,
+    "average_500": 2.8868055555555556,
+    "standard_deviation_500": 9.071431046253526
+  },
+  {
+    "date": "2025-09-17",
+    "type_of_day": "workable",
+    "average_200": 39.53611111111111,
+    "standard_deviation_200": 41.310365498058694,
+    "average_500": 2.71875,
+    "standard_deviation_500": 9.003168840252163
+  },
+  {
+    "date": "2025-09-18",
+    "type_of_day": "workable",
+    "average_200": 38.701388888888886,
+    "standard_deviation_200": 41.60676293805628,
+    "average_500": 3.4472222222222224,
+    "standard_deviation_500": 10.13391874672949
+  },
+  {
+    "date": "2025-09-19",
+    "type_of_day": "workable",
+    "average_200": 39.28888888888889,
+    "standard_deviation_200": 41.17323714163719,
+    "average_500": 2.9694444444444446,
+    "standard_deviation_500": 9.488541626971944
+  },
+  {
+    "date": "2025-09-20",
+    "type_of_day": "non-workable",
+    "average_200": 13.400694444444444,
+    "standard_deviation_200": 5.840347507055189,
+    "average_500": 2.8631944444444444,
+    "standard_deviation_500": 9.376683978683792
+  },
+  {
+    "date": "2025-09-21",
+    "type_of_day": "non-workable",
+    "average_200": 12.870833333333334,
+    "standard_deviation_200": 5.894484235778176,
+    "average_500": 3.1333333333333333,
+    "standard_deviation_500": 9.772264363962234
+  },
+  {
+    "date": "2025-09-22",
+    "type_of_day": "workable",
+    "average_200": 38.65763888888889,
+    "standard_deviation_200": 41.2437643777843,
+    "average_500": 3.345833333333333,
+    "standard_deviation_500": 10.209881402287879
+  },
+  {
+    "date": "2025-09-23",
+    "type_of_day": "workable",
+    "average_200": 38.235416666666666,
+    "standard_deviation_200": 40.92280902681159,
+    "average_500": 3.2354166666666666,
+    "standard_deviation_500": 9.709512388375332
+  },
+  {
+    "date": "2025-09-24",
+    "type_of_day": "workable",
+    "average_200": 38.37638888888889,
+    "standard_deviation_200": 41.245750700097716,
+    "average_500": 3.259027777777778,
+    "standard_deviation_500": 9.794212762680086
+  },
+  {
+    "date": "2025-09-25",
+    "type_of_day": "workable",
+    "average_200": 37.59722222222222,
+    "standard_deviation_200": 40.24199201575426,
+    "average_500": 3.2583333333333333,
+    "standard_deviation_500": 9.939074305698917
+  },
+  {
+    "date": "2025-09-26",
+    "type_of_day": "workable",
+    "average_200": 38.05416666666667,
+    "standard_deviation_200": 40.29948496610976,
+    "average_500": 3.004166666666667,
+    "standard_deviation_500": 9.552967623205204
+  },
+  {
+    "date": "2025-09-27",
+    "type_of_day": "non-workable",
+    "average_200": 13.113194444444444,
+    "standard_deviation_200": 6.044918110172414,
+    "average_500": 3.2694444444444444,
+    "standard_deviation_500": 9.929545258714583
+  },
+  {
+    "date": "2025-09-28",
+    "type_of_day": "non-workable",
+    "average_200": 13.253472222222221,
+    "standard_deviation_200": 5.898167737005211,
+    "average_500": 2.954861111111111,
+    "standard_deviation_500": 9.547440741900354
+  },
+  {
+    "date": "2025-09-29",
+    "type_of_day": "workable",
+    "average_200": 38.922222222222224,
+    "standard_deviation_200": 41.68308650291191,
+    "average_500": 3.3354166666666667,
+    "standard_deviation_500": 9.96285644345316
+  },
+  {
+    "date": "2025-09-30",
+    "type_of_day": "workable",
+    "average_200": 38.65763888888889,
+    "standard_deviation_200": 40.80300830973797,
+    "average_500": 2.915277777777778,
+    "standard_deviation_500": 9.34586246220945
+  }
+]
