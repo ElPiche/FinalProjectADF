@@ -7,10 +7,17 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false   # simplificación, sin auth
+      - "ES_JAVA_OPTS=-Xms512m -Xmx1g"  # Limitar heap de Java a 1GB
     ports:
       - "9200:9200"
     volumes:
       - elastic_data:/usr/share/elasticsearch/data
+    deploy:
+      resources:
+        limits:
+          memory: 2g    # Limitar memoria total del contenedor a 2GB
+        reservations:
+          memory: 512m # Reservar 512MB mínimo
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200"]
       interval: 10s
