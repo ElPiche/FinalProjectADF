@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "elasticsearch": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ES_URL",
+        "mcp/elasticsearch",
+        "stdio"
+      ],
+      "env": {
+        "ES_URL": "http://host.docker.internal:9200"
+      }
+    },
+    "structured-output": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-v",
+        "c:/Users/Elinzar/Documents/Tecnologo/Projecto2025/FinalProjectADF/KB-MCP:/app/config",
+        "mcp/structured-output"
+      ],
+      "env": {}
+    }
+  }
+}
