@@ -1,0 +1,14 @@
+{
+
+"Query_elastic": {
+	"query": "data"
+},
+"Scheduling":{
+	"startDate": "",
+	"endDate": ""
+},
+"DA_Alg_Parameters":{
+	"Algortihm": "zScore"
+}
+
+}
