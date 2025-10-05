@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   elasticsearch:
-    image: elasticsearch:9.1.4
+    image: elasticsearch:8.19.4
     container_name: elasticsearch
     environment:
       - discovery.type=single-node
@@ -28,7 +28,8 @@ services:
     image: docker.elastic.co/kibana/kibana:8.19.3
     container_name: kibana
     depends_on:
-      - elasticsearch
+      elasticsearch:
+        condition: service_healthy
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - XPACK_SAMPLE_DATA_ENABLED=true   # <--- habilita sample data
