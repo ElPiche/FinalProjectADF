@@ -1,0 +1,27 @@
+{
+    "DA_Config":{
+        "DA_Alg_Parameters": [
+            {
+                "Algorithm": "ZScore",
+                "Parameters": {
+                "threshold": 3.0,
+                "window_size": 100
+                }
+            },
+            {
+                "Algorithm": "ARMA",
+                "Parameters": {
+                "n_estimators": 200,
+                "contamination": 0.05
+                }
+            },
+            {
+                "Algorithm": "K-means",
+                "Parameters": {
+                "n_estimators": 200,
+                "contamination": 0.05
+                }
+            }
+        ]
+    }
+}

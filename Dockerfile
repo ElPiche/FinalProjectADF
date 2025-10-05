@@ -5,7 +5,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Copiar script
-COPY da-algorithm-zScore.py .
+COPY MotorDA/da-algorithm-zScore.py .
 
 # Instalar dependencias necesarias
 RUN pip install --no-cache-dir pandas numpy
