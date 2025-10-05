@@ -1,0 +1,12 @@
+{
+  "Query_elastic": {
+    "query": ".ds-kibana_sample_data_logs-2025.10.02-000001"
+  },
+  "Scheduling": {
+    "startDate": "2025-09-21",
+    "endDate": "2025-11-20"
+  },
+  "DA_Alg_Parameters": {
+    "Algorithm": "zScore"
+  }
+}

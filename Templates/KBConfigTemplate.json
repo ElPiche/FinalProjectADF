@@ -1,0 +1,42 @@
+{
+  "KB_Config": {
+	"Id": "UUID",
+	"Description": "Nombre de la configuracion",
+    "Query_Elastic": {
+      "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= '2025-10-01T00:00:00.000Z' AND @timestamp < '2025-11-01T00:00:00.000Z' | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == '200', status_code_5xx_counter = COUNT(*) WHERE response >= '500' AND response < '600' BY es_timestamp | SORT es_timestamp"
+    },
+    "Scheduling": {
+      "TrainingPeriod": {
+        "from": "2025-09-01T00:00:00Z",
+        "to": "2025-09-30T23:59:59Z"
+      },
+      "Detection": {
+        "frequency": "5m",
+        "start": "2025-10-01T00:00:00Z"
+      }
+    },
+    "DA_Alg_Parameters": [
+      {
+        "Algorithm": "ZScore",
+        "Parameters": {
+          "threshold": 3.0,
+          "window_size": 100
+        }
+      },
+      {
+        "Algorithm": "ARMA",
+        "Parameters": {
+          "n_estimators": 200,
+          "contamination": 0.05
+        }
+      },
+	  {
+        "Algorithm": "K-means",
+        "Parameters": {
+          "n_estimators": 200,
+          "contamination": 0.05
+        }
+      }
+    ]
+  }
+}
