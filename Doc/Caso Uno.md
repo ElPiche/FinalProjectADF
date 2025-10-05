@@ -1,7 +1,7 @@
 # Caso Uno
 Para el prototipo 0, el primer caso abarca solamente las tecnologías individuales que constituyen la mayoría de la lógica de negocios, siendo estas:
 
-- ElasticSearch v8.19.3 -> Para el guardado de logs sin procesar
+- ElasticSearch v9.1.4 -> Para el guardado de logs sin procesar
 - Kibana v8.19.3 -> Para el cargado de datos preliminares y visualización de los mismos
 - MongoDB v8.0 -> Para el guardado de series y resultados de detecciones
 - Motor DA  -> Para operar sobre los datos de MongoDB, y posibilitar el análisis de datos
