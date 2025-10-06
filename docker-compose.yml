@@ -37,8 +37,8 @@ services:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
       interval: 10s
-      timeout: 5s
-      retries: 10
+      timeout: 50s
+      retries: 100
 
   logstash:
     build: 
