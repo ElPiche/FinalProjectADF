@@ -1,23 +1,49 @@
 version: "3.9"
 
 services:
-  elasticsearch:
-    image: elasticsearch:9.1.4
-    container_name: elasticsearch
+  elasticsearch-dataset:
+    image: elasticsearch:8.19.4
+    container_name: elasticsearch-dataset
     environment:
       - discovery.type=single-node
-      - xpack.security.enabled=false   # simplificación, sin auth
-      - "ES_JAVA_OPTS=-Xms512m -Xmx1g"  # Limitar heap de Java a 1GB
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
     ports:
       - "9200:9200"
     volumes:
-      - elastic_data:/usr/share/elasticsearch/data
+      - elastic_data:/usr/share/elasticsearch-dataset/data
     deploy:
       resources:
         limits:
-          memory: 2g    # Limitar memoria total del contenedor a 2GB
+          memory: 2g
         reservations:
-          memory: 512m # Reservar 512MB mínimo
+          memory: 512m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  elasticsearch-anomalies:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.4
+    container_name: elasticsearch-anomalies
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
+      # - action.destructive_requires_name=true
+      - cluster.name=anomalies-cluster
+      - node.name=anomalies-node
+    ports:
+      - "9201:9200"          # host:container (corregido)
+    volumes:
+      - elastic_anomalies_data:/usr/share/elasticsearch/data   # ruta estándar
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+        reservations:
+          memory: 512m
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200"]
       interval: 10s
@@ -27,11 +53,12 @@ services:
   kibana:
     image: docker.elastic.co/kibana/kibana:8.19.3
     container_name: kibana
+    restart: "no"          # No reiniciar; se detendrá tras cargar datos
     depends_on:
-      - elasticsearch
+      - elasticsearch-dataset
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-      - XPACK_SAMPLE_DATA_ENABLED=true   # <--- habilita sample data
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
+      - XPACK_SAMPLE_DATA_ENABLED=true
     ports:
       - "5601:5601"
     healthcheck:
@@ -40,42 +67,62 @@ services:
       timeout: 50s
       retries: 100
 
+  kibana-anomalies:
+    image: docker.elastic.co/kibana/kibana:8.19.3
+    container_name: kibana-anomalies
+    depends_on:
+      - elasticsearch-anomalies
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-anomalies:9200
+    ports:
+      - "5602:5601"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   logstash:
-    build: 
+    build:
       context: .
       dockerfile: Dockerfile.logstash
     container_name: logstash
     depends_on:
-      - elasticsearch
+      - elasticsearch-dataset
       - mongodb
-      - kibana
+      # (kibana ya no es requerido para ejecución)
     restart: unless-stopped
     volumes:
       - ./pipeline:/usr/share/logstash/pipeline
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
     ports:
-      - "5044:5044"   # beats input (ejemplo)
-      - "9600:9600"   # monitoring API
+      - "5044:5044"
+      - "9600:9600"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9600"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-
   kibana-init:
-    image: curlimages/curl:8.15.0
+    image: docker:27-cli           # Imagen con cliente docker
     container_name: kibana-init
     depends_on:
       kibana:
         condition: service_healthy
-    entrypoint: > 
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: >
       sh -c "
-      echo 'Esperando a Kibana...';
-      sleep 5;
-      curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
-      echo 'Sample Web Logs instalados en Kibana';
+        echo 'Esperando a Kibana...';
+        apk add --no-cache curl >/dev/null;
+        until curl -sf http://kibana:5601/api/status >/dev/null; do sleep 2; done;
+        echo 'Instalando sample data (logs)...';
+        curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
+        echo 'Sample data instalado. Deteniendo Kibana...';
+        docker stop kibana;
+        echo 'Kibana detenido.';
       "
 
   mongodb:
@@ -95,13 +142,7 @@ services:
       timeout: 5s
       retries: 10
 
-  algorithm-detection:
-    build: 
-      context: .
-      dockerfile: Dockerfile
-    container_name: algorithm-detection
-    restart: "no"
-
 volumes:
   mongo_data:
-  elastic_data: 
+  elastic_data:
+  elastic_anomalies_data:
