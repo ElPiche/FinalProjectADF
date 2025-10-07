@@ -1,22 +1,6 @@
-#Script de deployer encargado de obtener datos desde la KB.
-#Partirlo en dos configuraciones logstash y DA.
-
-#1. Obtener configuración desde carpetaKB
-#2. Leer archivo
-#3. Partir archivo en dos configuraciones
-#4. Crear configuración de logstash
-#5. Crear configuración motor DA
-
-#import argparse
 import json
-#import logging
 import os
-#import re
 from pathlib import Path
-#from typing import Optional, Tuple
-
-
-#Logstash_Pipeline_DIR = Path("./pipeline")
 
 #Esta configuración puede venir desde la KB o algún env
 KB_DIR = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\pipeline")
@@ -27,7 +11,6 @@ ElasticURL = "http://elasticsearch-dataset:9200/"
 MongoUrl = "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin"
 MongoDatabase = "logsdb"
 MongoCollection = "grouped_response_code_v2"
-
 
 logstashTemplate=r'''
     input {
@@ -51,111 +34,200 @@ logstashTemplate=r'''
     }
     '''.strip()
 
-daconfigTempalte=r'''{
-    "Connection_Config":{
+daconfigTemplate = r'''{
+    "Connection_Config": {
         "Url": "{{ Url }}",
-        "Database":"{{ Database }}",
+        "Database": "{{ Database }}",
         "Collection": "{{ Collection }}"
     },
-    "DA_Config":{
-        "DA_Alg_Parameters": [
-            {
-                "Algorithm": "ZScore",
-                "Parameters": {
-                "threshold": 3.0,
-                "window_size": 100
-                }
-            },
-            {
-                "Algorithm": "ARMA",
-                "Parameters": {
-                "n_estimators": 200,
-                "contamination": 0.05
-                }
-            },
-            {
-                "Algorithm": "K-means",
-                "Parameters": {
-                "n_estimators": 200,
-                "contamination": 0.05
-                }
-            }
-        ]
+    "Scheduling": {
+        "TrainingPeriod": {
+            "from": "{{ TrainingFrom }}",
+            "to": "{{ TrainingTo }}"
+        },
+        "Detection": {
+            "frequency": "{{ FrequencySeconds }}",
+            "start": "{{ DetectionStart }}"
+        }
+    },
+    "DA_Config": {
+        "DA_Alg_Parameters": {{ DA_Alg_Parameters }}
+    },
+    "Meta": {
+        "Id": "{{ Id }}",
+        "Description": "{{ Description }}"
     }
-}'''
+}'''.strip()
 
+#Helpers###
 
+#Escapar comillas
 def escape_for_ls_double_quotes(s: str) -> str:
     return s.replace('"', r'\"')
 
-if not folder_path.exists():
-    print(f"La carpeta {folder_path} no existe.")
-else:
-    # Recorremos los archivos de la carpeta
+#Validar existencia de directorios
+def ensure_dirs():
+    KB_DIR.mkdir(parents=True, exist_ok=True)
+    MotorDA_folder_path.mkdir(parents=True, exist_ok=True)
+
+#Parsear frecuencia
+def parse_frequency_to_seconds(freq: str) -> int:
+    """
+    Convierte expresiones tipo '5m', '2h30m', '1d' o 'PT5M' en segundos.
+    Si ya viene como número, lo devuelve tal cual.
+    Ejemplo:
+        '5m'  -> 300
+        'PT1H' -> 3600
+        '2h15m' -> 8100
+        '600' -> 600
+    """
+    if not freq:
+        return 60  # valor por defecto 1 min
+
+    s = str(freq).strip().lower()
+
+    # Si es puramente numérico
+    if s.isdigit():
+        return int(s)
+
+    # ISO8601 tipo PT5M, PT1H, P1DT10M
+    import re
+    iso = re.match(r"p(?:(?P<d>\d+)d)?t?(?:(?P<h>\d+)h)?(?:(?P<m>\d+)m)?(?:(?P<s>\d+)s)?", s, re.IGNORECASE)
+    if iso:
+        d = int(iso.group("d") or 0)
+        h = int(iso.group("h") or 0)
+        m = int(iso.group("m") or 0)
+        sec = int(iso.group("s") or 0)
+        return d*86400 + h*3600 + m*60 + sec
+
+    # Compacto (5m, 2h30m, 1d2h etc.)
+    pattern = re.findall(r"(\d+)([smhd])", s)
+    total = 0
+    for val, unit in pattern:
+        v = int(val)
+        if unit == "s":
+            total += v
+        elif unit == "m":
+            total += v * 60
+        elif unit == "h":
+            total += v * 3600
+        elif unit == "d":
+            total += v * 86400
+    if total > 0:
+        return total
+
+    raise ValueError(f"No pude interpretar la frecuencia: {freq}")
+####
+
+#Armar config de logstash
+def build_logstash_conf(data: dict) -> str | None:
+    kb = data.get("KB_Config", {})
+    q = kb.get("Query_Elastic", {})
+    query_str = q.get("query")
+    if not query_str:
+        print("⚠️ No se encontró 'KB_Config.Query_Elastic.query'. Salteando Logstash para este archivo.")
+        return None
+
+
+    det = (kb.get("Scheduling", {}) or {}).get("Detection", {}) or {}
+    freq_raw = det.get("frequency", "1m")
+    try:
+        freq_seconds = parse_frequency_to_seconds(freq_raw)
+    except Exception as e:
+        print(f"⚠️ Frecuencia inválida '{freq_raw}': {e}. Uso 60s por defecto.")
+        freq_seconds = 60
+
+    conf = logstashTemplate
+    conf = conf.replace('{{ query }}', escape_for_ls_double_quotes(query_str))
+    conf = conf.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
+    conf = conf.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
+    conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(MongoCollection))
+    conf = conf.replace('{{ es_host }}', escape_for_ls_double_quotes(ElasticURL))
+    conf = conf.replace('{{ cron }}', str(freq_seconds))  # cada minuto
+    return conf
+
+#Armar config de DA
+def build_da_conf_str(data: dict) -> dict | None:
+
+    kb = data.get("KB_Config", {})
+    scheduling = kb.get("Scheduling", {})
+    training = scheduling.get("TrainingPeriod", {})
+    detection = scheduling.get("Detection", {})
+    alg_params = kb.get("DA_Alg_Parameters", [])
+
+    missing = []
+    if not training or not training.get("from") or not training.get("to"):
+        missing.append("Scheduling.TrainingPeriod.{from,to}")
+    if not detection or not detection.get("frequency") or not detection.get("start"):
+        missing.append("Scheduling.Detection.{frequency,start}")
+    if not isinstance(alg_params, list) or len(alg_params) == 0:
+        missing.append("DA_Alg_Parameters")
+
+    if missing:
+        print(f"⚠️ Faltan secciones para DA: {', '.join(missing)}. Salteando DA para este archivo.")
+        return None
+
+    freq_raw = detection.get("frequency", "1m")
+    try:
+        freq_seconds = parse_frequency_to_seconds(freq_raw)
+    except Exception as e:
+        print(f"⚠️ Frecuencia inválida '{freq_raw}': {e}. Uso 60s por defecto.")
+        freq_seconds = 60
+
+    # Reemplazos config DA
+    conf = daconfigTemplate
+    conf = conf.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
+    conf = conf.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
+    conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(MongoCollection))
+    conf = conf.replace('{{ TrainingFrom }}', training.get("from", ""))
+    conf = conf.replace('{{ TrainingTo }}', training.get("to", ""))
+    conf = conf.replace('{{ DetectionStart }}', detection.get("start", ""))
+    conf = conf.replace('{{ FrequencySeconds }}', str(freq_seconds))
+    conf = conf.replace('{{ Id }}', str(kb.get("Id", "")))
+    conf = conf.replace('{{ Description }}', escape_for_ls_double_quotes(kb.get("Description", "")))
+
+    # DA_Alg_Parameters es una lista, la serializamos como JSON
+    conf = conf.replace('{{ DA_Alg_Parameters }}', json.dumps(alg_params, ensure_ascii=False, indent=4))
+
+    return conf
+
+def main():
+    ensure_dirs()
+
+    if not folder_path.exists():
+        print(f"❌ La carpeta de KB {folder_path} no existe.")
+        return
+
     for file in folder_path.iterdir():
+        if file.suffix.lower() != ".json":
+            continue
 
-        # Solo procesamos archivos con extensión .json
-        if file.suffix.lower() == ".json":
-            
-            print(f"\n📄 Leyendo archivo: {file.name}")
+        print(f"\n📄 Leyendo archivo: {file.name}")
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                data = json.load(f)
 
-            try:
-                with open(file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+            # ===== LOGSTASH (.conf) =====
+            ls_conf = build_logstash_conf(data)
+            if ls_conf:
+                kb_id = (data.get("KB_Config", {}) or {}).get("Id")
+                ls_name = (kb_id or file.stem)
+                out_conf_path = KB_DIR / f"{ls_name}.conf"
+                out_conf_path.write_text(ls_conf, encoding="utf-8")
+                print(f"✅ Generado configuración de Logstash: {out_conf_path}")
 
-                    #Configuración de logstash
-                    query_elastic = data.get("KB_Config", {}).get("Query_Elastic")
+            # ===== MOTOR DA (.da.json) =====
+            da_conf_str = build_da_conf_str(data)
+            if da_conf_str:
+                kb_id = (data.get("KB_Config", {}) or {}).get("Id")
+                da_name = (kb_id or file.stem)
+                out_da_path = MotorDA_folder_path / f"{da_name}_da.json"
+                out_da_path.write_text(da_conf_str, encoding="utf-8")
+                print(f"✅ Generado configuración de Motor DA: {out_da_path}")
 
-                    if not query_elastic:
-                        print("⚠️ No se encontró el fragmento 'Query_Elastic' en este archivo. Salteando.")
-                        continue
-                    
-                    query_str = query_elastic.get("query")
-                    
-                    if not query_str:
-                        print("⚠️ No se encontró el campo 'query' dentro de 'Query_Elastic'. Salteando.")
-                        continue
-
-                    conf_content = logstashTemplate
-                    conf_content = conf_content.replace('{{ query }}', escape_for_ls_double_quotes(query_str))
-                    conf_content = conf_content.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
-                    conf_content = conf_content.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
-                    conf_content = conf_content.replace('{{ Collection }}',escape_for_ls_double_quotes(MongoCollection))
-                    conf_content = conf_content.replace('{{ es_host }}', escape_for_ls_double_quotes(ElasticURL))
-                    conf_content = conf_content.replace('{{ cron }}', escape_for_ls_double_quotes("* * * * *")) #cada minuto
-
-                    # Nombre de salida: mismo nombre que el JSON, pero .conf en ./KB
-                    #TODO: Darle el nombre formado con el UUID.
-                    out_path = KB_DIR / f"{file.stem}.conf"
-                    out_path.write_text(conf_content, encoding="utf-8")
-
-                    print(f"✅ Generado configuración de logstash: {out_path}")
-                    #Fin configuración de logstash
-
-                    #Configuracion motorDA
-                    DA_Parameters = data.get("KB_Config", {}).get("DA_Alg_Parameters")
-                    
-                    if not DA_Parameters:
-                        print("⚠️ No se encontró el fragmento 'DA_Alg_Parameters' en este archivo. Salteando.")
-                        continue
-
-                    Detection = data.get("KB_Config", {}).get("Detection")
-                    
-                    if not Detection:
-                        print("⚠️ No se encontró el fragmento 'Detection' en este archivo. Salteando.")
-                        continue
-
-                    frequency = Detection.get("frequency") #TODO: parsear time de la frecuencia.
-                    start = Detection.get("start") 
-
-                    configuration_content = daconfigTempalte
-                    configuration_content = configuration_content.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
-                    configuration_content = configuration_content.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
-                    configuration_content = configuration_content.replace('{{ Collection }}', escape_for_ls_double_quotes(MongoCollection))
+        except Exception as e:
+            print(f"⚠️ Error al procesar {file.name}: {e}")
 
 
-
-                    
-
-            except Exception as e:
-                print(f"⚠️ Error al leer {file.name}: {e}")
+if __name__ == "__main__":
+    main()
