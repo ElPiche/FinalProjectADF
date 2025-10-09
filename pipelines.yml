@@ -1,0 +1,4 @@
+- pipeline.id: logstash
+  path.config: C:/Users/Usuario/Desktop/ProyectoFinalRepo/FinalProjectADF/pipeline/logstash.conf
+  pipeline.workers: 1
+  queue.type: memory
