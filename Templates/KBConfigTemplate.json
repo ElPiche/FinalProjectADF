@@ -12,7 +12,7 @@
       },
       "Detection": {
         "one_shot": true,
-        "frequency": "5m",
+        "frequency": "* * * * *",
         "start": "2025-10-01T00:00:00Z"
       }
     },
@@ -21,7 +21,7 @@
         "Algorithm": "ZScore",
         "Parameters": {
           "threshold": 3.0,
-          "observed_value":"status_code_200_counter"
+          "observed_value":"observed value e.g: status_code_200_counter"
         }
       }
     ]
