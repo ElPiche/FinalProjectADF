@@ -1,11 +1,15 @@
 import json
 import os
+import yaml
 from pathlib import Path
+
+#pip install pyyaml
 
 #Esta configuración puede venir desde la KB o algún env
 KB_DIR = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\pipeline")
 MotorDA_folder_path = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\MotorDA/MotorDAConfig")
 folder_path = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\KB")
+PIPELINES_FILE = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\pipelines.yml")
 
 ElasticURL = "http://elasticsearch-dataset:9200/"
 MongoUrl = "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin"
@@ -14,23 +18,22 @@ MongoCollection = "grouped_response_code_v2"
 
 logstashTemplate=r'''
     input {
-    elasticsearch {
-        id => hourly_cron_job
-        hosts => [ "{{ es_host }}" ]
-        query_type => "esql"
-        query => "{{ query }}"
-        schedule => "{{ cron }}"
-    }
+        elasticsearch {
+            id => "{{ id }}"
+            hosts => [ "{{ es_host }}" ]
+            query_type => "esql"
+            query => "{{ query }}"{{ SCHEDULE_LINE }}
+        }
     }
 
     output {
-    mongodb {
-        uri => "{{ Url }}"
-        database => "{{ Database }}"
-        collection => "{{ Collection }}"
-        isodate => true
-    }
-    stdout { codec => rubydebug }
+        mongodb {
+            uri => "{{ Url }}"
+            database => "{{ Database }}"
+            collection => "{{ Collection }}"
+            isodate => true
+        }
+        stdout { codec => rubydebug }
     }
     '''.strip()
 
@@ -59,7 +62,40 @@ daconfigTemplate = r'''{
     }
 }'''.strip()
 
+
 #Helpers###
+
+#Actualizar pipelines.yml
+def update_pipelines_yml(conf_path: Path):
+    """
+    Agrega una entrada al pipelines.yml si no existe.
+    """
+    pipeline_id = conf_path.stem  # ej: query_001
+    entry = {
+        "pipeline.id": pipeline_id,
+        "path.config": str(conf_path).replace("\\", "/"),  # usa / para compatibilidad
+        "pipeline.workers": 1,
+        "queue.type": "memory"
+    }
+
+    # Cargar YAML actual
+    if PIPELINES_FILE.exists():
+        with open(PIPELINES_FILE, "r", encoding="utf-8") as f:
+            try:
+                pipelines = yaml.safe_load(f) or []
+            except Exception:
+                pipelines = []
+    else:
+        pipelines = []
+
+    # Verificar si ya existe
+    if any(p.get("pipeline.id") == pipeline_id for p in pipelines):
+        print(f"ℹ️ Pipeline '{pipeline_id}' ya existe en pipelines.yml, no se duplica.")
+    else:
+        pipelines.append(entry)
+        with open(PIPELINES_FILE, "w", encoding="utf-8") as f:
+            yaml.safe_dump(pipelines, f, sort_keys=False)
+        print(f"✅ Agregado pipeline '{pipeline_id}' al pipelines.yml")
 
 #Escapar comillas
 def escape_for_ls_double_quotes(s: str) -> str:
@@ -117,6 +153,43 @@ def parse_frequency_to_seconds(freq: str) -> int:
         return total
 
     raise ValueError(f"No pude interpretar la frecuencia: {freq}")
+
+#segundos a CRON
+def seconds_to_cron(total_seconds: int) -> str:
+    """
+    Convierte segundos a una expresión cron compatible con el input 'elasticsearch'
+    (resolución de minuto). Redondea hacia arriba si no es múltiplo exacto.
+    Casos:
+      - <60s  -> "* * * * *" (cada minuto)
+      - N min -> "*/N * * * *"
+      - N h   -> "0 */N * * *"
+      - N d   -> "0 0 */N * *"
+      - Mixed -> redondea a minutos: "*/M * * * *"
+    """
+    if total_seconds <= 0:
+        return "* * * * *"  # safe default: cada minuto
+
+    # Menos de un minuto: subí a 1 min
+    if total_seconds < 60:
+        return "* * * * *"
+
+    # Redondeo a minuto hacia arriba
+    from math import ceil
+    minutes = ceil(total_seconds / 60)
+
+    # Días exactos
+    if minutes % (60 * 24) == 0:
+        days = minutes // (60 * 24)
+        return "0 0 * * *" if days == 1 else f"0 0 */{days} * *"
+
+    # Horas exactas
+    if minutes % 60 == 0:
+        hours = minutes // 60
+        return "0 * * * *" if hours == 1 else f"0 */{hours} * * *"
+
+    # Minutos genérico
+    return "* * * * *" if minutes == 1 else f"*/{minutes} * * * *"
+
 ####
 
 #Armar config de logstash
@@ -128,22 +201,33 @@ def build_logstash_conf(data: dict) -> str | None:
         print("⚠️ No se encontró 'KB_Config.Query_Elastic.query'. Salteando Logstash para este archivo.")
         return None
 
+    job_id = str(kb.get("Id") or "job_" + os.urandom(3).hex())
 
     det = (kb.get("Scheduling", {}) or {}).get("Detection", {}) or {}
+    one_shot = bool(det.get("one_shot", False))
+    
     freq_raw = det.get("frequency", "1m")
+
     try:
         freq_seconds = parse_frequency_to_seconds(freq_raw)
     except Exception as e:
         print(f"⚠️ Frecuencia inválida '{freq_raw}': {e}. Uso 60s por defecto.")
         freq_seconds = 60
+    
+    #Convertir segundos a cron
+    schedule_line = ""
+    if not one_shot:
+        cron = seconds_to_cron(freq_seconds)
+        schedule_line = f'\n            schedule => "{cron}"'
 
     conf = logstashTemplate
+    conf = conf.replace('{{ id }}', job_id)
     conf = conf.replace('{{ query }}', escape_for_ls_double_quotes(query_str))
     conf = conf.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
     conf = conf.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
     conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(MongoCollection))
     conf = conf.replace('{{ es_host }}', escape_for_ls_double_quotes(ElasticURL))
-    conf = conf.replace('{{ cron }}', str(freq_seconds))  # cada minuto
+    conf = conf.replace('{{ SCHEDULE_LINE }}', schedule_line)
     return conf
 
 #Armar config de DA
@@ -215,6 +299,10 @@ def main():
                 out_conf_path = KB_DIR / f"{ls_name}.conf"
                 out_conf_path.write_text(ls_conf, encoding="utf-8")
                 print(f"✅ Generado configuración de Logstash: {out_conf_path}")
+
+                #Actualizando pipeline.yml
+                update_pipelines_yml(out_conf_path)
+                print(f"✅ Actualizando pipeline.yml: {out_conf_path}")
 
             # ===== MOTOR DA (.da.json) =====
             da_conf_str = build_da_conf_str(data)
