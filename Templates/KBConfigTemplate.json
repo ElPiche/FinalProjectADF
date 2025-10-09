@@ -11,6 +11,7 @@
         "to": "2025-09-30T23:59:59Z"
       },
       "Detection": {
+        "one_shot": true,
         "frequency": "5m",
         "start": "2025-10-01T00:00:00Z"
       }
@@ -20,21 +21,7 @@
         "Algorithm": "ZScore",
         "Parameters": {
           "threshold": 3.0,
-          "window_size": 100
-        }
-      },
-      {
-        "Algorithm": "ARMA",
-        "Parameters": {
-          "n_estimators": 200,
-          "contamination": 0.05
-        }
-      },
-	  {
-        "Algorithm": "K-means",
-        "Parameters": {
-          "n_estimators": 200,
-          "contamination": 0.05
+          "observed_value":"status_code_200_counter"
         }
       }
     ]
