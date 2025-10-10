@@ -1,17 +1,16 @@
-version: "3.9"
-
+version: '3.9'
 services:
   elasticsearch-dataset:
     image: elasticsearch:8.19.4
     container_name: elasticsearch-dataset
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
+    - discovery.type=single-node
+    - xpack.security.enabled=false
+    - ES_JAVA_OPTS=-Xms512m -Xmx1g
     ports:
-      - "9200:9200"
+    - 9200:9200
     volumes:
-      - elastic_data:/usr/share/elasticsearch-dataset/data
+    - elastic_data:/usr/share/elasticsearch-dataset/data
     deploy:
       resources:
         limits:
@@ -19,25 +18,27 @@ services:
         reservations:
           memory: 512m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9200
       interval: 10s
       timeout: 5s
       retries: 10
-
   elasticsearch-anomalies:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.4
     container_name: elasticsearch-anomalies
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms256m -Xmx256m"
-      # - action.destructive_requires_name=true
-      - cluster.name=anomalies-cluster
-      - node.name=anomalies-node
+    - discovery.type=single-node
+    - xpack.security.enabled=false
+    - ES_JAVA_OPTS=-Xms256m -Xmx256m
+    - cluster.name=anomalies-cluster
+    - node.name=anomalies-node
     ports:
-      - "9201:9200"          # host:container (corregido)
+    - 9201:9200
     volumes:
-      - elastic_anomalies_data:/usr/share/elasticsearch/data   # ruta estándar
+    - elastic_anomalies_data:/usr/share/elasticsearch/data
     deploy:
       resources:
         limits:
@@ -45,81 +46,199 @@ services:
         reservations:
           memory: 512m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:9200
       interval: 10s
       timeout: 5s
       retries: 10
-
   kibana:
     image: docker.elastic.co/kibana/kibana:8.19.3
     container_name: kibana
-    restart: "no"          # No reiniciar; se detendrá tras cargar datos
+    restart: 'no'
     depends_on:
-      - elasticsearch-dataset
+    - elasticsearch-dataset
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
-      - XPACK_SAMPLE_DATA_ENABLED=true
+    - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
+    - XPACK_SAMPLE_DATA_ENABLED=true
     ports:
-      - "5601:5601"
+    - 5601:5601
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:5601/api/status
       interval: 10s
       timeout: 50s
       retries: 100
-
   kibana-anomalies:
     image: docker.elastic.co/kibana/kibana:8.19.3
     container_name: kibana-anomalies
     depends_on:
-      - elasticsearch-anomalies
+    - elasticsearch-anomalies
     environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch-anomalies:9200
+    - ELASTICSEARCH_HOSTS=http://elasticsearch-anomalies:9200
     ports:
-      - "5602:5601"
+    - 5602:5601
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:5601/api/status
       interval: 10s
       timeout: 5s
       retries: 10
-
   kibana-init:
-    image: docker:27-cli           # Imagen con cliente docker
+    image: docker:27-cli
     container_name: kibana-init
     depends_on:
       kibana:
         condition: service_healthy
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    entrypoint: >
-      sh -c "
-        echo 'Esperando a Kibana...';
-        apk add --no-cache curl >/dev/null;
-        until curl -sf http://kibana:5601/api/status >/dev/null; do sleep 2; done;
-        echo 'Instalando sample data (logs)...';
-        curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
-        echo 'Sample data instalado. Deteniendo Kibana...';
-        docker stop kibana;
-        echo 'Kibana detenido.';
-      "
-
+    - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint: "sh -c \"\n  echo 'Esperando a Kibana...';\n  apk add --no-cache curl\
+      \ >/dev/null;\n  until curl -sf http://kibana:5601/api/status >/dev/null; do\
+      \ sleep 2; done;\n  echo 'Instalando sample data (logs)...';\n  curl -s -XPOST\
+      \ http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type:\
+      \ application/json';\n  echo 'Sample data instalado. Deteniendo Kibana...';\n\
+      \  docker stop kibana;\n  echo 'Kibana detenido.';\n\"\n"
   mongodb:
     image: mongo:8.0
     container_name: mongodb
     restart: unless-stopped
     environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
+    - MONGO_INITDB_ROOT_USERNAME=admin
+    - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
     ports:
-      - "27017:27017"
+    - 27017:27017
     volumes:
-      - mongo_data:/data/db
+    - mongo_data:/data/db
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--username", "admin", "--password", "1q2w3E*", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping')"]
+      test:
+      - CMD
+      - mongosh
+      - --quiet
+      - --username
+      - admin
+      - --password
+      - 1q2w3E*
+      - --authenticationDatabase
+      - admin
+      - --eval
+      - db.adminCommand('ping')
       interval: 10s
       timeout: 5s
       retries: 10
-
+  kb-logstash-6458a01e-19fb-428d-a1ca-3031210226fc:
+    image: adf-stack-logstash-lightweight
+    container_name: kb-logstash-6458a01e-19fb-428d-a1ca-3031210226fc
+    environment:
+      ELASTICSEARCH_HOSTS: elasticsearch-dataset:9200
+      MONGO_URL: mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
+    volumes:
+    - ./pipeline/6458a01e-19fb-428d-a1ca-3031210226fc.conf:/usr/share/logstash/pipeline/config.conf:ro
+    depends_on:
+    - elasticsearch-dataset
+    - mongodb
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    labels:
+    - kb_id=6458a01e-19fb-428d-a1ca-3031210226fc
+    - type=anomaly-series
+  kb-logstash-88c9d6b6-b053-4b48-a404-7fd93d6e8d96:
+    image: adf-stack-logstash-lightweight
+    container_name: kb-logstash-88c9d6b6-b053-4b48-a404-7fd93d6e8d96
+    environment:
+      ELASTICSEARCH_HOSTS: elasticsearch-dataset:9200
+      MONGO_URL: mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
+    volumes:
+    - ./pipeline/88c9d6b6-b053-4b48-a404-7fd93d6e8d96.conf:/usr/share/logstash/pipeline/config.conf:ro
+    depends_on:
+    - elasticsearch-dataset
+    - mongodb
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    labels:
+    - kb_id=88c9d6b6-b053-4b48-a404-7fd93d6e8d96
+    - type=anomaly-series
+  kb-logstash-8fbb07a4-f8f0-46ed-9eae-b8d4789c570c:
+    image: adf-stack-logstash-lightweight
+    container_name: kb-logstash-8fbb07a4-f8f0-46ed-9eae-b8d4789c570c
+    environment:
+      ELASTICSEARCH_HOSTS: elasticsearch-dataset:9200
+      MONGO_URL: mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
+    volumes:
+    - ./pipeline/8fbb07a4-f8f0-46ed-9eae-b8d4789c570c.conf:/usr/share/logstash/pipeline/config.conf:ro
+    depends_on:
+    - elasticsearch-dataset
+    - mongodb
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    labels:
+    - kb_id=8fbb07a4-f8f0-46ed-9eae-b8d4789c570c
+    - type=anomaly-series
+  kb-logstash-bdf71f0f-8fe4-46ed-82fa-5cad7578ab82:
+    image: adf-stack-logstash-lightweight
+    container_name: kb-logstash-bdf71f0f-8fe4-46ed-82fa-5cad7578ab82
+    environment:
+      ELASTICSEARCH_HOSTS: elasticsearch-dataset:9200
+      MONGO_URL: mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
+    volumes:
+    - ./pipeline/bdf71f0f-8fe4-46ed-82fa-5cad7578ab82.conf:/usr/share/logstash/pipeline/config.conf:ro
+    depends_on:
+    - elasticsearch-dataset
+    - mongodb
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    labels:
+    - kb_id=bdf71f0f-8fe4-46ed-82fa-5cad7578ab82
+    - type=anomaly-series
+  kb-logstash-fec117c9-457a-49f4-841e-0f0a4dcd83be:
+    image: adf-stack-logstash-lightweight
+    container_name: kb-logstash-fec117c9-457a-49f4-841e-0f0a4dcd83be
+    environment:
+      ELASTICSEARCH_HOSTS: elasticsearch-dataset:9200
+      MONGO_URL: mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
+    volumes:
+    - ./pipeline/fec117c9-457a-49f4-841e-0f0a4dcd83be.conf:/usr/share/logstash/pipeline/config.conf:ro
+    depends_on:
+    - elasticsearch-dataset
+    - mongodb
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    labels:
+    - kb_id=fec117c9-457a-49f4-841e-0f0a4dcd83be
+    - type=anomaly-series
 volumes:
-  mongo_data:
-  elastic_data:
-  elastic_anomalies_data:
+  mongo_data: null
+  elastic_data: null
+  elastic_anomalies_data: null

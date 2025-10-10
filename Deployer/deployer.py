@@ -189,18 +189,40 @@ def seconds_to_cron(total_seconds: int) -> str:
 
 ####
 
-# Docker container management functions
+# Docker Compose management functions
+def load_docker_compose_config():
+    """Load the main docker-compose.yml config"""
+    compose_file = PROJECT_ROOT / "docker-compose.yml"
+    with open(compose_file, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+def save_docker_compose_config(config):
+    """Save the docker-compose.yml config"""
+    compose_file = PROJECT_ROOT / "docker-compose.yml"
+    with open(compose_file, 'w', encoding='utf-8') as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
 def get_existing_containers():
-    """Get all KB-related containers"""
+    """Get all KB-related containers using docker-compose"""
     try:
-        containers = docker_client.containers.list(all=True, filters={'label': 'type=anomaly-series'})
-        return {c.labels.get('kb_id'): c for c in containers if c.labels.get('kb_id')}
+        import subprocess
+        result = subprocess.run(
+            ["docker", "compose", "ps", "--services", "--filter", "status=running"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            services = result.stdout.strip().split('\n')
+            kb_services = [s for s in services if s.startswith('kb-logstash-')]
+            return {s.replace('kb-logstash-', ''): s for s in kb_services}
+        return {}
     except Exception as e:
         print(f"Error getting containers: {e}")
         return {}
 
 def launch_container(kb_id: str, config_str: str):
-    """Launch container with config"""
+    """Launch container by adding service to docker-compose.yml and running it"""
     try:
         # Create config file path
         config_dir = PROJECT_ROOT / "pipeline"
@@ -210,38 +232,94 @@ def launch_container(kb_id: str, config_str: str):
         # Write config to file
         config_file.write_text(config_str, encoding="utf-8")
 
-        container = docker_client.containers.run(
-            CONTAINER_IMAGE,
-            name=f'logstash-kb-{kb_id}',
-            network=NETWORK_NAME,
-            environment={
+        # Load current docker-compose config
+        config = load_docker_compose_config()
+
+        # Add KB service to config
+        if 'services' not in config:
+            config['services'] = {}
+
+        config['services'][f'kb-logstash-{kb_id}'] = {
+            'image': 'adf-stack-logstash-lightweight',
+            'container_name': f'kb-logstash-{kb_id}',
+            'environment': {
                 'ELASTICSEARCH_HOSTS': 'elasticsearch-dataset:9200',
                 'MONGO_URL': MongoUrl
             },
-            labels={
-                'kb_id': kb_id,
-                'type': 'anomaly-series'
+            'volumes': [
+                f'./pipeline/{kb_id}.conf:/usr/share/logstash/pipeline/config.conf:ro'
+            ],
+            'depends_on': [
+                'elasticsearch-dataset',
+                'mongodb'
+            ],
+            'restart': 'unless-stopped',
+            'deploy': {
+                'resources': {
+                    'limits': {
+                        'memory': '1g'
+                    },
+                    'reservations': {
+                        'memory': '256m'
+                    }
+                }
             },
-            volumes={
-                str(config_file): {'bind': '/usr/share/logstash/pipeline/config.conf', 'mode': 'ro'}
-            },
-            detach=True,
-            restart_policy={"Name": "unless-stopped"}
+            'labels': [
+                f'kb_id={kb_id}',
+                'type=anomaly-series'
+            ]
+        }
+
+        # Save updated config
+        save_docker_compose_config(config)
+
+        # Launch the specific service
+        import subprocess
+        result = subprocess.run(
+            ["docker", "compose", "up", "-d", f"kb-logstash-{kb_id}"],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True
         )
-        print(f"Launched container for KB {kb_id}: {container.id}")
-        return container
+
+        if result.returncode == 0:
+            print(f"Launched container for KB {kb_id}")
+            return True
+        else:
+            print(f"Error launching container for KB {kb_id}: {result.stderr}")
+            return False
+
     except Exception as e:
         print(f"Error launching container for KB {kb_id}: {e}")
         return None
 
-def stop_container(container):
-    """Gracefully stop and remove container"""
+def stop_container(service_name):
+    """Stop container using docker-compose and remove from config"""
     try:
-        container.stop(timeout=30)
-        container.remove()
-        print(f"Stopped and removed container: {container.name}")
+        kb_id = service_name.replace('kb-logstash-', '')
+
+        # Stop the service
+        import subprocess
+        result = subprocess.run(
+            ["docker", "compose", "down", service_name],
+            cwd=PROJECT_ROOT,
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode == 0:
+            # Remove service from docker-compose.yml
+            config = load_docker_compose_config()
+            if 'services' in config and service_name in config['services']:
+                del config['services'][service_name]
+                save_docker_compose_config(config)
+
+            print(f"Stopped and removed container: {service_name}")
+        else:
+            print(f"Error stopping container {service_name}: {result.stderr}")
+
     except Exception as e:
-        print(f"Error stopping container {container.name}: {e}")
+        print(f"Error stopping container {service_name}: {e}")
 
 def sync_containers_with_configs():
     """Synchronize containers with KB configs"""

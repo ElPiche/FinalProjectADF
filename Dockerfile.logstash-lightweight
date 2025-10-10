@@ -1,0 +1,20 @@
+# Lightweight Logstash with minimal plugins
+FROM docker.elastic.co/logstash/logstash:9.1.4
+
+# Remove unnecessary plugins and keep only what we need
+RUN rm -rf /usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/logstash-*/lib/logstash/outputs/* \
+    && rm -rf /usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/logstash-*/lib/logstash/inputs/* \
+    && rm -rf /usr/share/logstash/vendor/bundle/jruby/2.5.0/gems/logstash-*/lib/logstash/filters/*
+
+# Install only required plugins
+RUN logstash-plugin install logstash-input-elasticsearch \
+    && logstash-plugin install logstash-output-mongodb \
+    && logstash-plugin install logstash-output-stdout
+
+# Clean up plugin cache and unnecessary files
+RUN rm -rf /usr/share/logstash/vendor/bundle/jruby/2.5.0/cache/* \
+    && rm -rf /usr/share/logstash/logstash-core/lib/jars/*test*.jar \
+    && rm -rf /usr/share/logstash/logstash-core/lib/jars/*example*.jar
+
+# Optimize JVM settings for smaller memory footprint
+ENV LS_JAVA_OPTS="-Xms128m -Xmx256m -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
