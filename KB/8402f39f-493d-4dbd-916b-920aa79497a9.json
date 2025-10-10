@@ -1,0 +1,29 @@
+{
+  "KB_Config": {
+    "Id": "8402f39f-493d-4dbd-916b-920aa79497a9",
+    "Description": "One-shot analysis: Detecting unusual byte transfer volumes",
+    "Query_Elastic": {
+      "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= \"2023-10-01T00:00:00.000Z\" AND @timestamp < \"2023-11-01T00:00:00.000Z\" | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == \"200\", status_code_5xx_counter = COUNT(*) WHERE response >= \"500\" AND response < \"600\", avg_bytes = AVG(bytes) BY es_timestamp | SORT es_timestamp"
+    },
+    "Scheduling": {
+      "TrainingPeriod": {
+        "from": "2023-09-01T00:00:00Z",
+        "to": "2023-09-30T23:59:59Z"
+      },
+      "Detection": {
+        "frequency": "5m",
+        "start": "2023-10-01T00:00:00Z",
+        "one_shot": true
+      }
+    },
+    "DA_Alg_Parameters": [
+      {
+        "Algorithm": "ZScore",
+        "Parameters": {
+          "threshold": 4,
+          "observed_value": "avg_bytes"
+        }
+      }
+    ]
+  }
+}

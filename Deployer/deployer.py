@@ -6,10 +6,11 @@ from pathlib import Path
 #pip install pyyaml
 
 #Esta configuración puede venir desde la KB o algún env
-KB_DIR = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\pipeline")
-MotorDA_folder_path = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\MotorDA/MotorDAConfig")
-folder_path = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\KB")
-PIPELINES_FILE = Path(r"C:\Users\Usuario\Desktop\ProyectoFinalRepo\FinalProjectADF\pipelines.yml")
+PROJECT_ROOT = Path(__file__).parent.parent
+KB_DIR = PROJECT_ROOT / "pipeline"
+MotorDA_folder_path = PROJECT_ROOT / "MotorDA" / "MotorDAConfig"
+folder_path = PROJECT_ROOT / "KB"
+PIPELINES_FILE = PROJECT_ROOT / "pipelines.yml"
 
 ElasticURL = "http://elasticsearch-dataset:9200/"
 MongoUrl = "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin"
@@ -22,7 +23,8 @@ logstashTemplate=r'''
             id => "{{ id }}"
             hosts => [ "{{ es_host }}" ]
             query_type => "esql"
-            query => "{{ query }}"{{ SCHEDULE_LINE }}
+            query => '{{ query }}'{{ SCHEDULE_LINE }}
+            ecs_compatibility => disabled
         }
     }
 
@@ -90,12 +92,17 @@ def update_pipelines_yml(conf_path: Path):
 
     # Verificar si ya existe
     if any(p.get("pipeline.id") == pipeline_id for p in pipelines):
-        print(f"ℹ️ Pipeline '{pipeline_id}' ya existe en pipelines.yml, no se duplica.")
+        print(f"Nota: Pipeline '{pipeline_id}' ya existe en pipelines.yml, no se duplica.")
     else:
         pipelines.append(entry)
         with open(PIPELINES_FILE, "w", encoding="utf-8") as f:
             yaml.safe_dump(pipelines, f, sort_keys=False)
-        print(f"✅ Agregado pipeline '{pipeline_id}' al pipelines.yml")
+        print(f"Agregado pipeline '{pipeline_id}' al pipelines.yml")
+
+#Prepare query for logstash config
+def prepare_esql_query(s: str) -> str:
+    # Do not escape quotes
+    return s
 
 #Escapar comillas
 def escape_for_ls_double_quotes(s: str) -> str:
@@ -105,6 +112,10 @@ def escape_for_ls_double_quotes(s: str) -> str:
 def ensure_dirs():
     KB_DIR.mkdir(parents=True, exist_ok=True)
     MotorDA_folder_path.mkdir(parents=True, exist_ok=True)
+
+#Get collection name based on KB ID
+def get_collection_name(kb_id: str) -> str:
+    return kb_id
 
 #Parsear frecuencia
 def parse_frequency_to_seconds(freq: str) -> int:
@@ -198,22 +209,23 @@ def build_logstash_conf(data: dict) -> str | None:
     q = kb.get("Query_Elastic", {})
     query_str = q.get("query")
     if not query_str:
-        print("⚠️ No se encontró 'KB_Config.Query_Elastic.query'. Salteando Logstash para este archivo.")
+        print("Advertencia: No se encontró 'KB_Config.Query_Elastic.query'. Salteando Logstash para este archivo.")
         return None
 
     job_id = str(kb.get("Id") or "job_" + os.urandom(3).hex())
+    collection = get_collection_name(job_id)
 
     det = (kb.get("Scheduling", {}) or {}).get("Detection", {}) or {}
     one_shot = bool(det.get("one_shot", False))
-    
+
     freq_raw = det.get("frequency", "1m")
 
     try:
         freq_seconds = parse_frequency_to_seconds(freq_raw)
     except Exception as e:
-        print(f"⚠️ Frecuencia inválida '{freq_raw}': {e}. Uso 60s por defecto.")
+        print(f"Advertencia: Frecuencia inválida '{freq_raw}': {e}. Uso 60s por defecto.")
         freq_seconds = 60
-    
+
     #Convertir segundos a cron
     schedule_line = ""
     if not one_shot:
@@ -222,10 +234,10 @@ def build_logstash_conf(data: dict) -> str | None:
 
     conf = logstashTemplate
     conf = conf.replace('{{ id }}', job_id)
-    conf = conf.replace('{{ query }}', escape_for_ls_double_quotes(query_str))
+    conf = conf.replace('{{ query }}', prepare_esql_query(query_str))
     conf = conf.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
     conf = conf.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
-    conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(MongoCollection))
+    conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(collection))
     conf = conf.replace('{{ es_host }}', escape_for_ls_double_quotes(ElasticURL))
     conf = conf.replace('{{ SCHEDULE_LINE }}', schedule_line)
     return conf
@@ -248,7 +260,7 @@ def build_da_conf_str(data: dict) -> dict | None:
         missing.append("DA_Alg_Parameters")
 
     if missing:
-        print(f"⚠️ Faltan secciones para DA: {', '.join(missing)}. Salteando DA para este archivo.")
+        print(f"Advertencia: Faltan secciones para DA: {', '.join(missing)}. Salteando DA para este archivo.")
         return None
 
     freq_raw = detection.get("frequency", "1m")
@@ -258,11 +270,13 @@ def build_da_conf_str(data: dict) -> dict | None:
         print(f"⚠️ Frecuencia inválida '{freq_raw}': {e}. Uso 60s por defecto.")
         freq_seconds = 60
 
+    collection = get_collection_name(str(kb.get("Id", "")))
+
     # Reemplazos config DA
     conf = daconfigTemplate
     conf = conf.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
     conf = conf.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
-    conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(MongoCollection))
+    conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(collection))
     conf = conf.replace('{{ TrainingFrom }}', training.get("from", ""))
     conf = conf.replace('{{ TrainingTo }}', training.get("to", ""))
     conf = conf.replace('{{ DetectionStart }}', detection.get("start", ""))
@@ -279,14 +293,14 @@ def main():
     ensure_dirs()
 
     if not folder_path.exists():
-        print(f"❌ La carpeta de KB {folder_path} no existe.")
+        print(f"Error: La carpeta de KB {folder_path} no existe.")
         return
 
     for file in folder_path.iterdir():
         if file.suffix.lower() != ".json":
             continue
 
-        print(f"\n📄 Leyendo archivo: {file.name}")
+        print(f"\nLeyendo archivo: {file.name}")
         try:
             with open(file, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -298,11 +312,11 @@ def main():
                 ls_name = (kb_id or file.stem)
                 out_conf_path = KB_DIR / f"{ls_name}.conf"
                 out_conf_path.write_text(ls_conf, encoding="utf-8")
-                print(f"✅ Generado configuración de Logstash: {out_conf_path}")
+                print(f"Generado configuración de Logstash: {out_conf_path}")
 
                 #Actualizando pipeline.yml
                 update_pipelines_yml(out_conf_path)
-                print(f"✅ Actualizando pipeline.yml: {out_conf_path}")
+                print(f"Actualizando pipeline.yml: {out_conf_path}")
 
             # ===== MOTOR DA (.da.json) =====
             da_conf_str = build_da_conf_str(data)
@@ -311,10 +325,10 @@ def main():
                 da_name = (kb_id or file.stem)
                 out_da_path = MotorDA_folder_path / f"{da_name}_da.json"
                 out_da_path.write_text(da_conf_str, encoding="utf-8")
-                print(f"✅ Generado configuración de Motor DA: {out_da_path}")
+                print(f"Generado configuración de Motor DA: {out_da_path}")
 
         except Exception as e:
-            print(f"⚠️ Error al procesar {file.name}: {e}")
+            print(f"Error al procesar {file.name}: {e}")
 
 
 if __name__ == "__main__":

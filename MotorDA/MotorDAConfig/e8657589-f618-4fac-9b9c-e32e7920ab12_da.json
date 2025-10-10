@@ -1,0 +1,39 @@
+{
+    "Connection_Config": {
+        "Url": "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin",
+        "Database": "logsdb",
+        "Collection": "e8657589-f618-4fac-9b9c-e32e7920ab12"
+    },
+    "Scheduling": {
+        "TrainingPeriod": {
+            "from": "2025-09-28T00:00:00Z",
+            "to": "2025-10-20T23:59:59Z"
+        },
+        "Detection": {
+            "frequency": "600",
+            "start": "2025-10-21T00:00:00Z"
+        }
+    },
+    "DA_Config": {
+        "DA_Alg_Parameters": [
+    {
+        "Algorithm": "ZScore",
+        "Parameters": {
+            "threshold": 3,
+            "observed_value": "status_code_5xx_counter"
+        }
+    },
+    {
+        "Algorithm": "ARMA",
+        "Parameters": {
+            "n_estimators": 200,
+            "contamination": 0.05
+        }
+    }
+]
+    },
+    "Meta": {
+        "Id": "e8657589-f618-4fac-9b9c-e32e7920ab12",
+        "Description": "MODIFIED: Multi-algorithm test with updated parameters for better sensitivity"
+    }
+}

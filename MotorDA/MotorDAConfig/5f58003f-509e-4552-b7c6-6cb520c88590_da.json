@@ -1,0 +1,46 @@
+{
+    "Connection_Config": {
+        "Url": "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin",
+        "Database": "logsdb",
+        "Collection": "5f58003f-509e-4552-b7c6-6cb520c88590"
+    },
+    "Scheduling": {
+        "TrainingPeriod": {
+            "from": "2025-09-28T00:00:00Z",
+            "to": "2025-10-20T23:59:59Z"
+        },
+        "Detection": {
+            "frequency": "300",
+            "start": "2025-10-21T00:00:00Z"
+        }
+    },
+    "DA_Config": {
+        "DA_Alg_Parameters": [
+    {
+        "Algorithm": "ZScore",
+        "Parameters": {
+            "threshold": 3.0,
+            "observed_value": "observed value e.g: status_code_200_counter"
+        }
+    },
+    {
+        "Algorithm": "ARMA",
+        "Parameters": {
+            "n_estimators": 200,
+            "contamination": 0.05
+        }
+    },
+    {
+        "Algorithm": "K-means",
+        "Parameters": {
+            "n_estimators": 200,
+            "contamination": 0.05
+        }
+    }
+]
+    },
+    "Meta": {
+        "Id": "5f58003f-509e-4552-b7c6-6cb520c88590",
+        "Description": "Minimal config test with all default values"
+    }
+}

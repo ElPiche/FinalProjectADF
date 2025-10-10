@@ -5,7 +5,7 @@
                 "Algorithm": "ZScore",
                 "Parameters": {
                 "threshold": 3.0,
-                "window_size": 100
+                "observed_value":"observed value e.g: status_code_200_counter"
                 }
             },
             {

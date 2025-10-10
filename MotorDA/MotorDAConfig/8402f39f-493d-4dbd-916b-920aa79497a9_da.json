@@ -1,0 +1,32 @@
+{
+    "Connection_Config": {
+        "Url": "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin",
+        "Database": "logsdb",
+        "Collection": "8402f39f-493d-4dbd-916b-920aa79497a9"
+    },
+    "Scheduling": {
+        "TrainingPeriod": {
+            "from": "2023-09-01T00:00:00Z",
+            "to": "2023-09-30T23:59:59Z"
+        },
+        "Detection": {
+            "frequency": "300",
+            "start": "2023-10-01T00:00:00Z"
+        }
+    },
+    "DA_Config": {
+        "DA_Alg_Parameters": [
+    {
+        "Algorithm": "ZScore",
+        "Parameters": {
+            "threshold": 4,
+            "observed_value": "avg_bytes"
+        }
+    }
+]
+    },
+    "Meta": {
+        "Id": "8402f39f-493d-4dbd-916b-920aa79497a9",
+        "Description": "One-shot analysis: Detecting unusual byte transfer volumes"
+    }
+}

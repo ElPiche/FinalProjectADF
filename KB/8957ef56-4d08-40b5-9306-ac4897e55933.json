@@ -1,0 +1,28 @@
+{
+  "KB_Config": {
+    "Id": "8957ef56-4d08-40b5-9306-ac4897e55933",
+    "Description": "User behavior clustering analysis to identify suspicious access patterns and bot activity",
+    "Query_Elastic": {
+      "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= \"2025-10-21T00:00:00.000Z\" AND @timestamp < \"2025-11-28T00:00:00.000Z\" | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS request_count = COUNT(*), unique_ips = COUNT_DISTINCT(clientip), avg_bytes = AVG(bytes), status_404_count = COUNT(*) WHERE response == \"404\" BY es_timestamp | SORT es_timestamp"
+    },
+    "Scheduling": {
+      "TrainingPeriod": {
+        "from": "2025-09-28T00:00:00Z",
+        "to": "2025-10-20T23:59:59Z"
+      },
+      "Detection": {
+        "frequency": "1h",
+        "start": "2025-10-21T00:00:00Z"
+      }
+    },
+    "DA_Alg_Parameters": [
+      {
+        "Algorithm": "K-means",
+        "Parameters": {
+          "n_estimators": 180,
+          "contamination": 0.12
+        }
+      }
+    ]
+  }
+}

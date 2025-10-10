@@ -15,15 +15,10 @@
         "ES_URL": "http://host.docker.internal:9200"
       }
     },
-    "structured-output": {
-      "command": "docker",
+    "KB-MCP": {
+      "command": "python",
       "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-v",
-        "c:/Users/Elinzar/Documents/Tecnologo/Projecto2025/FinalProjectADF/KB-MCP:/app/config",
-        "mcp/structured-output"
+        "../KB-MCP/server.py"
       ],
       "env": {}
     }

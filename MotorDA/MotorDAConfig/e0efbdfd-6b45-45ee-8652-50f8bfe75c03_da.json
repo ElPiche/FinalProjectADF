@@ -1,0 +1,46 @@
+{
+    "Connection_Config": {
+        "Url": "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin",
+        "Database": "logsdb",
+        "Collection": "e0efbdfd-6b45-45ee-8652-50f8bfe75c03"
+    },
+    "Scheduling": {
+        "TrainingPeriod": {
+            "from": "2023-09-01T00:00:00Z",
+            "to": "2023-09-30T23:59:59Z"
+        },
+        "Detection": {
+            "frequency": "1800",
+            "start": "2023-10-01T00:00:00Z"
+        }
+    },
+    "DA_Config": {
+        "DA_Alg_Parameters": [
+    {
+        "Algorithm": "ZScore",
+        "Parameters": {
+            "threshold": 2.5,
+            "observed_value": "total_bandwidth"
+        }
+    },
+    {
+        "Algorithm": "K-means",
+        "Parameters": {
+            "n_estimators": 300,
+            "contamination": 0.1
+        }
+    },
+    {
+        "Algorithm": "ZScore",
+        "Parameters": {
+            "threshold": 3.5,
+            "observed_value": "china_requests"
+        }
+    }
+]
+    },
+    "Meta": {
+        "Id": "e0efbdfd-6b45-45ee-8652-50f8bfe75c03",
+        "Description": "Geographic traffic anomaly and bandwidth spike detection - monitors unusual patterns in international traffic, bandwidth usage, and regional request distributions"
+    }
+}

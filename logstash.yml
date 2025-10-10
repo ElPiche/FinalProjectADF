@@ -2,4 +2,5 @@
 api.http.host: "0.0.0.0"
 log.level: info
 config.reload.automatic: true
-config.reload.interval: 5s 
+config.reload.interval: 5s
+monitoring.enabled: false

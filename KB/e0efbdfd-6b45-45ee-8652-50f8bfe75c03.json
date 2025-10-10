@@ -1,0 +1,43 @@
+{
+  "KB_Config": {
+    "Id": "e0efbdfd-6b45-45ee-8652-50f8bfe75c03",
+    "Description": "Geographic traffic anomaly and bandwidth spike detection - monitors unusual patterns in international traffic, bandwidth usage, and regional request distributions",
+    "Query_Elastic": {
+      "query": "FROM .ds-kibana_sample_data_logs-* | EVAL es_timestamp = DATE_TRUNC(30 minutes, @timestamp) | STATS total_requests = COUNT(*), avg_bytes_transferred = AVG(bytes), total_bandwidth = SUM(bytes), unique_destinations = COUNT_DISTINCT(geo.dest), china_requests = COUNT(*) WHERE geo.dest == \"CN\", us_requests = COUNT(*) WHERE geo.dest == \"US\", error_rate = COUNT(*) WHERE response != \"200\" BY es_timestamp | SORT es_timestamp | LIMIT 10"
+    },
+    "Scheduling": {
+      "TrainingPeriod": {
+        "from": "2023-09-01T00:00:00Z",
+        "to": "2023-09-30T23:59:59Z"
+      },
+      "Detection": {
+        "frequency": "30m",
+        "start": "2023-10-01T00:00:00Z",
+        "one_shot": false
+      }
+    },
+    "DA_Alg_Parameters": [
+      {
+        "Algorithm": "ZScore",
+        "Parameters": {
+          "threshold": 2.5,
+          "observed_value": "total_bandwidth"
+        }
+      },
+      {
+        "Algorithm": "K-means",
+        "Parameters": {
+          "n_estimators": 300,
+          "contamination": 0.1
+        }
+      },
+      {
+        "Algorithm": "ZScore",
+        "Parameters": {
+          "threshold": 3.5,
+          "observed_value": "china_requests"
+        }
+      }
+    ]
+  }
+}
