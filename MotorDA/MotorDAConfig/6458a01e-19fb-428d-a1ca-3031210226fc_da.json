@@ -1,0 +1,32 @@
+{
+    "Connection_Config": {
+        "Url": "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin",
+        "Database": "logsdb",
+        "Collection": "6458a01e-19fb-428d-a1ca-3031210226fc"
+    },
+    "Scheduling": {
+        "TrainingPeriod": {
+            "from": "2025-10-01T00:00:00Z",
+            "to": "2025-10-09T23:59:59Z"
+        },
+        "Detection": {
+            "frequency": "300",
+            "start": "2025-10-10T00:00:00Z"
+        }
+    },
+    "DA_Config": {
+        "DA_Alg_Parameters": [
+    {
+        "Algorithm": "ZScore",
+        "Parameters": {
+            "threshold": 3,
+            "observed_value": "status_code_5xx_counter"
+        }
+    }
+]
+    },
+    "Meta": {
+        "Id": "6458a01e-19fb-428d-a1ca-3031210226fc",
+        "Description": "HTTP Status Code Anomaly Detection - Monitors 5xx error rates"
+    }
+}

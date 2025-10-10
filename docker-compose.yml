@@ -82,29 +82,6 @@ services:
       timeout: 5s
       retries: 10
 
-  logstash:
-    build:
-      context: .
-      dockerfile: Dockerfile.logstash
-    container_name: logstash
-    depends_on:
-      - elasticsearch-dataset
-      - mongodb
-      # (kibana ya no es requerido para ejecución)
-    restart: unless-stopped
-    volumes:
-      - ./pipeline:/usr/share/logstash/pipeline
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
-    ports:
-      - "5044:5044"
-      - "9600:9600"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9600"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
   kibana-init:
     image: docker:27-cli           # Imagen con cliente docker
     container_name: kibana-init

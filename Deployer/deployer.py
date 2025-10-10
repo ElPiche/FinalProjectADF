@@ -2,6 +2,7 @@ import json
 import os
 import yaml
 from pathlib import Path
+import docker
 
 #pip install pyyaml
 
@@ -10,12 +11,19 @@ PROJECT_ROOT = Path(__file__).parent.parent
 KB_DIR = PROJECT_ROOT / "pipeline"
 MotorDA_folder_path = PROJECT_ROOT / "MotorDA" / "MotorDAConfig"
 folder_path = PROJECT_ROOT / "KB"
-PIPELINES_FILE = PROJECT_ROOT / "pipelines.yml"
 
 ElasticURL = "http://elasticsearch-dataset:9200/"
 MongoUrl = "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin"
 MongoDatabase = "logsdb"
 MongoCollection = "grouped_response_code_v2"
+
+# Docker configuration
+CONTAINER_IMAGE = 'adf-stack-logstash'
+NETWORK_NAME = 'adf-stack_default'
+docker_client = docker.from_env()
+
+# Update ElasticURL for container networking
+ElasticURL = "http://elasticsearch-dataset:9200/"
 
 logstashTemplate=r'''
     input {
@@ -25,6 +33,12 @@ logstashTemplate=r'''
             query_type => "esql"
             query => '{{ query }}'{{ SCHEDULE_LINE }}
             ecs_compatibility => disabled
+        }
+    }
+
+    filter {
+        mutate {
+            add_field => { "kb_id" => "{{ id }}" }
         }
     }
 
@@ -67,42 +81,11 @@ daconfigTemplate = r'''{
 
 #Helpers###
 
-#Actualizar pipelines.yml
-def update_pipelines_yml(conf_path: Path):
-    """
-    Agrega una entrada al pipelines.yml si no existe.
-    """
-    pipeline_id = conf_path.stem  # ej: query_001
-    entry = {
-        "pipeline.id": pipeline_id,
-        "path.config": str(conf_path).replace("\\", "/"),  # usa / para compatibilidad
-        "pipeline.workers": 1,
-        "queue.type": "memory"
-    }
-
-    # Cargar YAML actual
-    if PIPELINES_FILE.exists():
-        with open(PIPELINES_FILE, "r", encoding="utf-8") as f:
-            try:
-                pipelines = yaml.safe_load(f) or []
-            except Exception:
-                pipelines = []
-    else:
-        pipelines = []
-
-    # Verificar si ya existe
-    if any(p.get("pipeline.id") == pipeline_id for p in pipelines):
-        print(f"Nota: Pipeline '{pipeline_id}' ya existe en pipelines.yml, no se duplica.")
-    else:
-        pipelines.append(entry)
-        with open(PIPELINES_FILE, "w", encoding="utf-8") as f:
-            yaml.safe_dump(pipelines, f, sort_keys=False)
-        print(f"Agregado pipeline '{pipeline_id}' al pipelines.yml")
 
 #Prepare query for logstash config
 def prepare_esql_query(s: str) -> str:
-    # Do not escape quotes
-    return s
+    # Convert ES|QL single quotes to double quotes (ES|QL uses double quotes for strings)
+    return s.replace("'", '"')
 
 #Escapar comillas
 def escape_for_ls_double_quotes(s: str) -> str:
@@ -112,6 +95,9 @@ def escape_for_ls_double_quotes(s: str) -> str:
 def ensure_dirs():
     KB_DIR.mkdir(parents=True, exist_ok=True)
     MotorDA_folder_path.mkdir(parents=True, exist_ok=True)
+    # Create pipeline configs directory
+    pipeline_dir = PROJECT_ROOT / "pipeline"
+    pipeline_dir.mkdir(parents=True, exist_ok=True)
 
 #Get collection name based on KB ID
 def get_collection_name(kb_id: str) -> str:
@@ -203,13 +189,105 @@ def seconds_to_cron(total_seconds: int) -> str:
 
 ####
 
+# Docker container management functions
+def get_existing_containers():
+    """Get all KB-related containers"""
+    try:
+        containers = docker_client.containers.list(all=True, filters={'label': 'type=anomaly-series'})
+        return {c.labels.get('kb_id'): c for c in containers if c.labels.get('kb_id')}
+    except Exception as e:
+        print(f"Error getting containers: {e}")
+        return {}
+
+def launch_container(kb_id: str, config_str: str):
+    """Launch container with config"""
+    try:
+        # Create config file path
+        config_dir = PROJECT_ROOT / "pipeline"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / f"{kb_id}.conf"
+
+        # Write config to file
+        config_file.write_text(config_str, encoding="utf-8")
+
+        container = docker_client.containers.run(
+            CONTAINER_IMAGE,
+            name=f'logstash-kb-{kb_id}',
+            network=NETWORK_NAME,
+            environment={
+                'ELASTICSEARCH_HOSTS': 'elasticsearch-dataset:9200',
+                'MONGO_URL': MongoUrl
+            },
+            labels={
+                'kb_id': kb_id,
+                'type': 'anomaly-series'
+            },
+            volumes={
+                str(config_file): {'bind': '/usr/share/logstash/pipeline/config.conf', 'mode': 'ro'}
+            },
+            detach=True,
+            restart_policy={"Name": "unless-stopped"}
+        )
+        print(f"Launched container for KB {kb_id}: {container.id}")
+        return container
+    except Exception as e:
+        print(f"Error launching container for KB {kb_id}: {e}")
+        return None
+
+def stop_container(container):
+    """Gracefully stop and remove container"""
+    try:
+        container.stop(timeout=30)
+        container.remove()
+        print(f"Stopped and removed container: {container.name}")
+    except Exception as e:
+        print(f"Error stopping container {container.name}: {e}")
+
+def sync_containers_with_configs():
+    """Synchronize containers with KB configs"""
+    print("Loading KB configurations...")
+    kb_configs = {}
+    if folder_path.exists():
+        for file in folder_path.iterdir():
+            if file.suffix.lower() == ".json":
+                try:
+                    with open(file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    kb_id = data.get("KB_Config", {}).get("Id")
+                    if kb_id:
+                        kb_configs[kb_id] = data
+                except Exception as e:
+                    print(f"Error loading KB config {file.name}: {e}")
+
+    print(f"Found {len(kb_configs)} KB configurations")
+
+    print("Getting existing containers...")
+    existing_containers = get_existing_containers()
+    print(f"Found {len(existing_containers)} existing containers")
+
+    # Launch new containers
+    for kb_id, config in kb_configs.items():
+        if kb_id not in existing_containers:
+            print(f"Launching container for KB {kb_id}")
+            ls_config = build_logstash_conf(config)
+            if ls_config:
+                launch_container(kb_id, ls_config)
+        else:
+            print(f"Container for KB {kb_id} already exists")
+
+    # Remove obsolete containers
+    for kb_id, container in existing_containers.items():
+        if kb_id not in kb_configs:
+            print(f"Removing obsolete container for KB {kb_id}")
+            stop_container(container)
+
 #Armar config de logstash
 def build_logstash_conf(data: dict) -> str | None:
     kb = data.get("KB_Config", {})
     q = kb.get("Query_Elastic", {})
     query_str = q.get("query")
     if not query_str:
-        print("Advertencia: No se encontró 'KB_Config.Query_Elastic.query'. Salteando Logstash para este archivo.")
+        print("Warning: 'KB_Config.Query_Elastic.query' not found. Skipping Logstash for this file.")
         return None
 
     job_id = str(kb.get("Id") or "job_" + os.urandom(3).hex())
@@ -260,21 +338,24 @@ def build_da_conf_str(data: dict) -> dict | None:
         missing.append("DA_Alg_Parameters")
 
     if missing:
-        print(f"Advertencia: Faltan secciones para DA: {', '.join(missing)}. Salteando DA para este archivo.")
+        print(f"Warning: Missing sections for DA: {', '.join(missing)}. Skipping DA for this file.")
         return None
 
     freq_raw = detection.get("frequency", "1m")
     try:
         freq_seconds = parse_frequency_to_seconds(freq_raw)
     except Exception as e:
-        print(f"⚠️ Frecuencia inválida '{freq_raw}': {e}. Uso 60s por defecto.")
+        print(f"Warning: Invalid frequency '{freq_raw}': {e}. Using 60s by default.")
         freq_seconds = 60
 
     collection = get_collection_name(str(kb.get("Id", "")))
 
+    # Use localhost for DA configs since MotorDA runs on host machine
+    da_mongo_url = "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin"
+
     # Reemplazos config DA
     conf = daconfigTemplate
-    conf = conf.replace('{{ Url }}', escape_for_ls_double_quotes(MongoUrl))
+    conf = conf.replace('{{ Url }}', escape_for_ls_double_quotes(da_mongo_url))
     conf = conf.replace('{{ Database }}', escape_for_ls_double_quotes(MongoDatabase))
     conf = conf.replace('{{ Collection }}', escape_for_ls_double_quotes(collection))
     conf = conf.replace('{{ TrainingFrom }}', training.get("from", ""))
@@ -296,6 +377,11 @@ def main():
         print(f"Error: La carpeta de KB {folder_path} no existe.")
         return
 
+    # ===== CONTAINER SYNCHRONIZATION =====
+    print("Synchronizing containers with KB configurations...")
+    sync_containers_with_configs()
+
+    # ===== CONFIG FILE GENERATION =====
     for file in folder_path.iterdir():
         if file.suffix.lower() != ".json":
             continue
@@ -304,19 +390,6 @@ def main():
         try:
             with open(file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-
-            # ===== LOGSTASH (.conf) =====
-            ls_conf = build_logstash_conf(data)
-            if ls_conf:
-                kb_id = (data.get("KB_Config", {}) or {}).get("Id")
-                ls_name = (kb_id or file.stem)
-                out_conf_path = KB_DIR / f"{ls_name}.conf"
-                out_conf_path.write_text(ls_conf, encoding="utf-8")
-                print(f"Generado configuración de Logstash: {out_conf_path}")
-
-                #Actualizando pipeline.yml
-                update_pipelines_yml(out_conf_path)
-                print(f"Actualizando pipeline.yml: {out_conf_path}")
 
             # ===== MOTOR DA (.da.json) =====
             da_conf_str = build_da_conf_str(data)
@@ -329,6 +402,8 @@ def main():
 
         except Exception as e:
             print(f"Error al procesar {file.name}: {e}")
+
+    print("Deployer execution completed.")
 
 
 if __name__ == "__main__":

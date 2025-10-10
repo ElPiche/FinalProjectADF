@@ -1,0 +1,32 @@
+{
+    "Connection_Config": {
+        "Url": "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin",
+        "Database": "logsdb",
+        "Collection": "88c9d6b6-b053-4b48-a404-7fd93d6e8d96"
+    },
+    "Scheduling": {
+        "TrainingPeriod": {
+            "from": "2025-10-01T00:00:00Z",
+            "to": "2025-10-09T23:59:59Z"
+        },
+        "Detection": {
+            "frequency": "300",
+            "start": "2025-10-10T00:00:00Z"
+        }
+    },
+    "DA_Config": {
+        "DA_Alg_Parameters": [
+    {
+        "Algorithm": "ZScore",
+        "Parameters": {
+            "threshold": 3,
+            "observed_value": "avg_memory_mb"
+        }
+    }
+]
+    },
+    "Meta": {
+        "Id": "88c9d6b6-b053-4b48-a404-7fd93d6e8d96",
+        "Description": "System Memory Usage Monitoring - Detects unusual memory consumption patterns"
+    }
+}
