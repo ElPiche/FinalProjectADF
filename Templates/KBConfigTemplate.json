@@ -1,27 +1,27 @@
 {
   "KB_Config": {
-	"Id": "UUID",
-	"Description": "Nombre de la configuracion",
+    "Id": "8fbb07a4-f8f0-46ed-9eae-b8d4789c570c",
+    "Description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
     "Query_Elastic": {
-      "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= '2025-10-01T00:00:00.000Z' AND @timestamp < '2025-11-01T00:00:00.000Z' | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == '200', status_code_5xx_counter = COUNT(*) WHERE response >= '500' AND response < '600' BY es_timestamp | SORT es_timestamp"
+      "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS cn_traffic = COUNT(*) WHERE geo.src == 'CN' BY es_timestamp | SORT es_timestamp"
     },
     "Scheduling": {
-      "TrainingPeriod": {
-        "from": "2025-09-01T00:00:00Z",
-        "to": "2025-09-30T23:59:59Z"
+      "training_config": {
+        "from": "2025-10-01T00:00:00Z",
+        "to": "2025-10-09T23:59:59Z"
       },
-      "Detection": {
-        "one_shot": true,
-        "frequency": "* * * * *",
-        "start": "2025-10-01T00:00:00Z"
+      "detection_config": {
+        "frequency": "*/5 * * * *",
+        "window": "*/15 * * * *",
+        "start": "2025-10-10T00:00:00Z"
       }
     },
     "DA_Alg_Parameters": [
       {
         "Algorithm": "ZScore",
         "Parameters": {
-          "threshold": 3.0,
-          "observed_value":"observed value e.g: status_code_200_counter"
+          "threshold": 3,
+          "observed_value": "cn_traffic"
         }
       }
     ]
