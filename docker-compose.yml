@@ -133,27 +133,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-  kb-logstash-6458a01e-19fb-428d-a1ca-3031210226fc:
-    image: adf-stack-logstash-lightweight
-    container_name: kb-logstash-6458a01e-19fb-428d-a1ca-3031210226fc
-    environment:
-      ELASTICSEARCH_HOSTS: elasticsearch-dataset:9200
-      MONGO_URL: mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
-    volumes:
-    - ./pipeline/6458a01e-19fb-428d-a1ca-3031210226fc.conf:/usr/share/logstash/pipeline/config.conf:ro
-    depends_on:
-    - elasticsearch-dataset
-    - mongodb
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-        reservations:
-          memory: 256m
-    labels:
-    - kb_id=6458a01e-19fb-428d-a1ca-3031210226fc
-    - type=anomaly-series
   kb-logstash-88c9d6b6-b053-4b48-a404-7fd93d6e8d96:
     image: adf-stack-logstash-lightweight
     container_name: kb-logstash-88c9d6b6-b053-4b48-a404-7fd93d6e8d96
@@ -237,6 +216,27 @@ services:
           memory: 256m
     labels:
     - kb_id=fec117c9-457a-49f4-841e-0f0a4dcd83be
+    - type=anomaly-series
+  kb-logstash-6458a01e-19fb-428d-a1ca-3031210226fc:
+    image: adf-stack-logstash-lightweight
+    container_name: kb-logstash-6458a01e-19fb-428d-a1ca-3031210226fc
+    environment:
+      ELASTICSEARCH_HOSTS: elasticsearch-dataset:9200
+      MONGO_URL: mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
+    volumes:
+    - ./pipeline/6458a01e-19fb-428d-a1ca-3031210226fc.conf:/usr/share/logstash/pipeline/config.conf:ro
+    depends_on:
+    - elasticsearch-dataset
+    - mongodb
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    labels:
+    - kb_id=6458a01e-19fb-428d-a1ca-3031210226fc
     - type=anomaly-series
 volumes:
   mongo_data: null

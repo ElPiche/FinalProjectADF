@@ -203,20 +203,12 @@ def save_docker_compose_config(config):
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 def get_existing_containers():
-    """Get all KB-related containers using docker-compose"""
+    """Get all KB-related services defined in docker-compose.yml"""
     try:
-        import subprocess
-        result = subprocess.run(
-            ["docker", "compose", "ps", "--services", "--filter", "status=running"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True
-        )
-        if result.returncode == 0:
-            services = result.stdout.strip().split('\n')
-            kb_services = [s for s in services if s.startswith('kb-logstash-')]
-            return {s.replace('kb-logstash-', ''): s for s in kb_services}
-        return {}
+        config = load_docker_compose_config()
+        services = config.get('services', {})
+        kb_services = {name.replace('kb-logstash-', ''): name for name in services.keys() if name.startswith('kb-logstash-')}
+        return kb_services
     except Exception as e:
         print(f"Error getting containers: {e}")
         return {}
