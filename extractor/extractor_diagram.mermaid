@@ -1,0 +1,62 @@
+graph TB
+    subgraph "Data Sources"
+        ConfigDB[(MongoDB<br/>Config DB)]
+        ES[(Elasticsearch<br/>Log Data)]
+    end
+
+    subgraph "ETL Engine - Spring Boot Java"
+        ConfigReader[Config Reader<br/>- mode<br/>- query_elastic<br/>- time_window<br/>- frequency<br/>- target_collection]
+        
+        Scheduler[Scheduler<br/>@Scheduled<br/>Streaming Mode]
+        
+        Extractor[Extractor<br/>- Connect to ES<br/>- Execute query<br/>- Retrieve logs/aggregations]
+        
+        Transformer[Transformer<br/>- Grouping<br/>- Filtering<br/>- Field normalization<br/>- Clean JSON output]
+        
+        Loader[Loader<br/>- Insert/Update data<br/>- Log metadata<br/>timestamp, jobId, duration]
+    end
+
+    subgraph "Target Storage"
+        TargetDB[(MongoDB<br/>Target DB)]
+    end
+
+    subgraph "Monitoring"
+        Logs[Logs/Console<br/>Monitoring Output]
+    end
+
+    subgraph "Execution Modes"
+        Batch[Batch Mode<br/>- Execute once on startup<br/>- Reads batch config from MongoDB<br/>- Defined time window<br/>Example: last month errors]
+        
+        Streaming[Streaming Mode<br/>- Continuous execution<br/>- Reads streaming config from MongoDB<br/>- Periodic frequency<br/>Example: every 30 min]
+    end
+
+    %% Main Flow
+    ConfigDB -->|Read configs on startup| ConfigReader
+    ConfigReader -->|Batch config| Extractor
+    ConfigReader -->|Streaming config + frequency| Scheduler
+    ConfigReader -.->|Determines mode| Batch
+    ConfigReader -.->|Determines mode| Streaming
+    
+    Scheduler -->|Trigger periodic| Extractor
+    
+    ES -->|Log data| Extractor
+    Extractor -->|Raw data| Transformer
+    Transformer -->|Processed data| Loader
+    Loader -->|Store results| TargetDB
+    
+    Loader -.->|Log events| Logs
+    Scheduler -.->|Log events| Logs
+    
+    Batch -.->|One-time on startup| Extractor
+    Streaming -.->|Periodic execution| Scheduler
+
+    style ConfigDB fill:#e1f5ff
+    style ES fill:#fff4e1
+    style TargetDB fill:#e1ffe1
+    style Scheduler fill:#f5e1ff
+    style ConfigReader fill:#fff9e1
+    style Extractor fill:#e1fff9
+    style Transformer fill:#ffe1e1
+    style Loader fill:#f9ffe1
+    style Batch fill:#ffd4d4
+    style Streaming fill:#d4e8ff
