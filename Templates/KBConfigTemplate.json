@@ -8,12 +8,14 @@
     "Scheduling": {
       "training_config": {
         "from": "2025-10-01T00:00:00Z",
-        "to": "2025-10-09T23:59:59Z"
+        "to": "2025-10-09T23:59:59Z",
+        "mode": "batch"
       },
       "detection_config": {
-        "frequency": "*/5 * * * *",
-        "window": "*/15 * * * *",
-        "start": "2025-10-10T00:00:00Z"
+        "frequency": "*/15 * * * *",
+        "window": "* 1 * * *", //hourly
+        "start": "2025-10-10T00:00:00Z",
+        "mode": "streaming"
       }
     },
     "DA_Alg_Parameters": [
