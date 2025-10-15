@@ -7,7 +7,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class ExtractorApplication {
 
     public static void main(String[] args) {
+
         SpringApplication.run(ExtractorApplication.class, args);
+
+        IO.println("Extractor Service Started...");
     }
 
 }
