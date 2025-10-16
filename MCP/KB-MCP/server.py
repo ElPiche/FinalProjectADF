@@ -26,6 +26,8 @@ def modify_kb_config(
     """
     Modify an existing KB configuration by ID.
 
+    **CRITICAL REQUIREMENT: Before using this tool, you MUST first use the ElasticSearch MCP to explore the data and obtain accurate Elastic queries. This is a hard requirement for proper functionality of the stack.**
+
     This tool allows updating specific fields of an existing KB configuration.
     Only the provided parameters will be updated; others remain unchanged.
     The configuration must exist and algorithms (if provided) must be valid.
@@ -33,7 +35,7 @@ def modify_kb_config(
     Args:
         config_id (str): UUID of the configuration to modify (required)
         description (str): New description (optional)
-        query (str): New Elasticsearch query (optional)
+        query (str): New Elasticsearch query (optional) - **MUST be obtained from ElasticSearch MCP data exploration**
         training_from (str): New training start date (ISO format, optional)
         training_to (str): New training end date (ISO format, optional)
         detection_frequency (str): New detection frequency (optional)
@@ -105,6 +107,8 @@ def modify_kb_config(
 def list_kb_configurations() -> str:
     """
     List all KB configurations stored in the KB directory.
+
+    **NOTE: Ensure that all configurations were created with accurate Elastic queries obtained from ElasticSearch MCP exploration.**
 
     This tool scans the KB folder for configuration files, parses each valid
     JSON configuration, and returns a summary of all defined KB series including
@@ -185,6 +189,8 @@ def describe_mcp_server() -> str:
     description = """
     # KB-MCP Server Overview
 
+    **CRITICAL REQUIREMENT: Before using ANY tools in this MCP server, you MUST first use the ElasticSearch MCP to explore the data and obtain accurate Elastic queries. This is a hard requirement for proper functionality of the stack. Failure to do so will result in invalid configurations and system failures.**
+
     The KB-MCP (Knowledge Base Model Context Protocol) server provides tools for creating and managing Data Analytics (DA) algorithm configurations for the Knowledge Base system.
 
     ## Purpose
@@ -197,18 +203,21 @@ def describe_mcp_server() -> str:
     1. **describe_mcp_server**: Get this overview and usage guide
     2. **list_available_algorithms**: List all supported DA algorithms with their default parameters
     3. **create_da_config**: Create a new DA configuration with specified parameters
+    4. **modify_kb_config**: Modify existing KB configurations
+    5. **list_kb_configurations**: List all existing KB configurations
 
     ## How to Use
-    1. First, call `list_available_algorithms` to see what DA algorithms are supported
-    2. Then, call `create_da_config` with your desired parameters
-    3. The configuration will be saved as a UUID-named JSON file in the KB directory
-    4. Only algorithms from the template are accepted - invalid algorithms will be rejected
+    1. **FIRST AND FOREMOST: Use ElasticSearch MCP to explore data and get accurate queries**
+    2. Call `list_available_algorithms` to see what DA algorithms are supported
+    3. Then, call `create_da_config` with your desired parameters (using queries from ElasticSearch MCP)
+    4. The configuration will be saved as a UUID-named JSON file in the KB directory
+    5. Only algorithms from the template are accepted - invalid algorithms will be rejected
 
     ## Configuration Structure
     Configurations include:
     - Auto-generated UUID as ID
     - Description
-    - Elastic query for data retrieval
+    - Elastic query for data retrieval (MUST come from ElasticSearch MCP exploration)
     - Training and detection scheduling periods
     - Array of DA algorithms with their parameters
 
@@ -217,6 +226,7 @@ def describe_mcp_server() -> str:
     ```
     create_da_config(
         description="HTTP monitoring config",
+        query="FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= '2025-10-01T00:00:00.000Z' AND @timestamp < '2025-11-01T00:00:00.000Z' | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == '200', status_code_5xx_counter = COUNT(*) WHERE response >= '500' AND response < '600' BY es_timestamp | SORT es_timestamp",  # Query obtained from ElasticSearch MCP
         algorithms=[{"Algorithm": "ZScore", "Parameters": {"threshold": 3.0, "observed_value": "status_code_200_counter"}}]
     )
     ```
@@ -227,6 +237,8 @@ def describe_mcp_server() -> str:
 def list_available_algorithms() -> str:
     """
     List all available DA algorithms from the configuration template.
+
+    **NOTE: Before creating configurations with these algorithms, ensure you have accurate Elastic queries from ElasticSearch MCP exploration.**
 
     This tool reads the DaConfigTemplate.json file and returns a list of
     available algorithms with their default parameters.
@@ -257,13 +269,15 @@ def create_da_config(
     """
     Create a Data Analytics (DA) algorithm configuration for the Knowledge Base system.
 
+    **CRITICAL REQUIREMENT: Before using this tool, you MUST first use the ElasticSearch MCP to explore the data and obtain accurate Elastic queries. This is a hard requirement for proper functionality of the stack. The LLM MUST provide accurate Elastic queries based on data exploration using the ElasticSearch MCP tool.**
+
     This tool generates a complete KB_Config JSON structure with auto-generated UUID,
     saves it as a UUID-named file in the KB directory, and returns the configuration details.
 
     ## What it creates:
     - Unique configuration ID (UUID)
     - Structured JSON with KB_Config wrapper
-    - Elastic query for data retrieval
+    - Elastic query for data retrieval (MUST be obtained from ElasticSearch MCP exploration)
     - Training and detection scheduling periods
     - Array of validated DA algorithms with parameters
 
@@ -275,11 +289,12 @@ def create_da_config(
     ## Usage Examples:
 
     **Basic usage (loads all available algorithms):**
-    create_da_config()
+    create_da_config(description="Default configuration")
 
     **Custom description and algorithms:**
     create_da_config(
         description="HTTP monitoring configuration",
+        query="FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= '2025-10-01T00:00:00.000Z' AND @timestamp < '2025-11-01T00:00:00.000Z' | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == '200', status_code_5xx_counter = COUNT(*) WHERE response >= '500' AND response < '600' BY es_timestamp | SORT es_timestamp",  # MUST be from ElasticSearch MCP
         algorithms=[
             {"Algorithm": "ZScore", "Parameters": {"threshold": 3.0, "observed_value": "status_code_200_counter"}},
             {"Algorithm": "ARMA", "Parameters": {"n_estimators": 200, "contamination": 0.05}}
@@ -288,6 +303,7 @@ def create_da_config(
 
     **Custom scheduling:**
     create_da_config(
+        description="Custom scheduling configuration",
         training_from="2025-09-01T00:00:00Z",
         training_to="2025-09-30T23:59:59Z",
         detection_frequency="10m",
@@ -301,7 +317,7 @@ def create_da_config(
 
     Args:
         description (str): Human-readable description (REQUIRED)
-        query (str): Elasticsearch query string for data retrieval
+        query (str): Elasticsearch query string for data retrieval - **MUST be obtained from ElasticSearch MCP data exploration**
         training_from (str): Training period start date (ISO 8601 format)
         training_to (str): Training period end date (ISO 8601 format)
         detection_frequency (str): Detection check frequency (e.g., "5m", "1h")
