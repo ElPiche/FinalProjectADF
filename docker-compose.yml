@@ -169,3 +169,26 @@ volumes:
   mongo_data: null
   elastic_data: null
   elastic_anomalies_data: null
+
+#  logstash:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.logstash
+#    container_name: logstash
+#    depends_on:
+#      - elasticsearch-dataset
+#      - mongodb
+#      # (kibana ya no es requerido para ejecución)
+#    restart: unless-stopped
+#    volumes:
+#      - ./pipeline:/usr/share/logstash/pipeline
+#    environment:
+#      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
+#    ports:
+#       - "5044:5044"
+#       - "9600:9600"
+#    healthcheck:
+#     test: ["CMD", "curl", "-f", "http://localhost:9600"]
+#     interval: 10s
+#     timeout: 5s
+#     retries: 10
