@@ -1,7 +1,7 @@
 import pymongo
 from typing import Any, Dict, List, Optional
 
-class MongoDispatcher:
+class MongoKBConnection:
 
     def __init__(self, mongo_uri, db_name, collection_name):
 
@@ -22,27 +22,23 @@ class MongoDispatcher:
     def extract_data(self, query=None):
 
         if query is None:
-
             query = {}
-
         try:
-
             data = list(self.collection.find(query))
-
             return data
         
         except Exception as e:
-
             print(f"❌ Error al extraer datos: {e}")
             return []
 
     def get_record_by_id(self, record_id):
+
         try:
-            
-            record = self.collection.find_one({"KB_Config.Id": record_id})
-           
+
+            record = self.collection.find_one({"kbConfig.id": record_id})
             return record
 
         except Exception as e:
+
             print(f"❌ Error al obtener el registro: {e}")
             return None
