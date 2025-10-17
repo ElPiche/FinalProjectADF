@@ -19,10 +19,22 @@
       }
     },
     "DA_Alg_Parameters": {
-      "ZScore": { "threshold": 3, "observed_value": "cn_traffic" },
-      "ARMA":   { "p": 2, "d": 1, "q": 2, "observed_value": "cn_traffic" },
-      "KMEANS": { "n_clusters": 3, "observed_value": "cn_traffic" },
-      "IFOREST":{ "n_estimators": 100, "contamination": 0.05, "random_state": 42, "observed_value": "cn_traffic" }
+      "ZScore": [
+        { "threshold": 3, "observed_value": "cn_traffic" },
+        { "threshold": 4, "observed_value": "avg_bytes" }
+      ],
+      "ARMA":  [
+        { "p": 2, "d": 1, "q": 2, "observed_value": "cn_traffic" },
+        { "p": 3, "d": 1, "q": 3, "observed_value": "avg_bytes" }
+      ],
+      "KMEANS": [
+        { "n_clusters": 3, "observed_value": "cn_traffic" },
+        { "n_clusters": 4, "observed_value": "avg_bytes" }
+      ],
+      "IFOREST": [
+        { "n_estimators": 100, "contamination": 0.05, "random_state": 42, "observed_value": "cn_traffic" },
+        { "n_estimators": 150, "contamination": 0.1, "random_state": 42, "observed_value": "avg_bytes" }
+      ]
     }
   }
 }
