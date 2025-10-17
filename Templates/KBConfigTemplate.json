@@ -1,39 +1,39 @@
 {
-  "KB_Config": {
-    "Id": "8fbb07a4-favf-46ed-9eae-b8d1289c570c",
-    "Description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
-    "Query_Elastic": {
+  "kbConfig": {
+    "id": "8fbb07a4-favf-46ed-9eae-b8d1289c570c",
+    "description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
+    "queryElastic": {
       "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS cn_traffic = COUNT(*) WHERE geo.src == 'CN' BY es_timestamp | SORT es_timestamp"
     },
-    "Scheduling": {
-      "training_config": {
+    "scheduling": {
+      "trainingConfig": {
         "from": "2025-10-01T00:00:00Z",
         "to": "2025-10-09T23:59:59Z",
         "mode": "batch"
       },
-      "detection_config": {
+      "detectionConfig": {
         "frequency": "*/15 * * * *",
         "window": "* 1 * * *",
         "start": "2025-10-10T00:00:00Z",
         "mode": "streaming"
       }
     },
-    "DA_Alg_Parameters": {
-      "ZScore": [
-        { "threshold": 3, "observed_value": "cn_traffic" },
-        { "threshold": 4, "observed_value": "avg_bytes" }
+    "daAlgParameters": {
+      "zscore": [
+        { "threshold": 3, "observedValue": "cnTraffic" },
+        { "threshold": 4, "observedValue": "avgBytes" }
       ],
-      "ARMA":  [
-        { "p": 2, "d": 1, "q": 2, "observed_value": "cn_traffic" },
-        { "p": 3, "d": 1, "q": 3, "observed_value": "avg_bytes" }
+      "arma": [
+        { "p": 2, "d": 1, "q": 2, "observedValue": "cnTraffic" },
+        { "p": 3, "d": 1, "q": 3, "observedValue": "avgBytes" }
       ],
-      "KMEANS": [
-        { "n_clusters": 3, "observed_value": "cn_traffic" },
-        { "n_clusters": 4, "observed_value": "avg_bytes" }
+      "kmeans": [
+        { "nClusters": 3, "observedValue": "cnTraffic" },
+        { "nClusters": 4, "observedValue": "avgBytes" }
       ],
-      "IFOREST": [
-        { "n_estimators": 100, "contamination": 0.05, "random_state": 42, "observed_value": "cn_traffic" },
-        { "n_estimators": 150, "contamination": 0.1, "random_state": 42, "observed_value": "avg_bytes" }
+      "iforest": [
+        { "nEstimators": 100, "contamination": 0.05, "randomState": 42, "observedValue": "cnTraffic" },
+        { "nEstimators": 150, "contamination": 0.1, "randomState": 42, "observedValue": "avgBytes" }
       ]
     }
   }
