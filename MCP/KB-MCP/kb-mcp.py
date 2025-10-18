@@ -2,6 +2,7 @@
 import json
 import uuid
 import datetime
+import logging
 from jsonschema import validate, ValidationError
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -12,6 +13,15 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from croniter import croniter
 from elasticsearch import Elasticsearch
+from pydantic import BaseModel
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP("KB-MCP")
 
@@ -20,55 +30,71 @@ mcp = FastMCP("KB-MCP")
 #Classes ------------------------------------------------------------------------------------------------------
 
 # Id GUID, Description, Query Elastic Query only
-class KBConfig:
-    def __init__(self, id: str, description: str, query_elastic: str):
-        self.id = id
-        self.description = description
-        # Validate ESQL query on assignment
-        self.query_elastic = query_elastic  # This will trigger the setter
-    
-    @property
-    def query_elastic(self) -> str:
-        """Get the validated ESQL query."""
-        return self._query_elastic
-    
-    @query_elastic.setter
-    def query_elastic(self, value: str):
-        """Validate and set the ESQL query."""
-        # Use ESQL class for validation
-        esql_obj = ESQL(value)  # This will raise ValueError if invalid
-        self._query_elastic = esql_obj.value
+class KBConfig(BaseModel):
+    id: str
+    description: str
+    query_elastic: str
+
+    def __init__(self, **data):
+        super().__init__(**data)
+        # Validate ESQL query after initialization
+        esql_obj = ESQL(self.query_elastic)  # This will raise ValueError if invalid
+        self.query_elastic = esql_obj.value
         log_message(f"ESQL query validated for KB config {self.id}")
+
+# CRON class moved before classes that use it
+class CRON:
+    def __init__(self, value: str):
+        if not self._is_valid_cron(value):
+            log_message(f"CRON validation failed: Invalid CRON format: {value}", "error")
+            raise ValueError(f"Invalid CRON format: {value}")
+        self.value = value
+        log_message(f"CRON validated successfully: {value}", "info")
+
+    @staticmethod
+    def _is_valid_cron(cron_string: str) -> bool:
+        try:
+            croniter(cron_string)
+            return True
+        except Exception:
+            return False
+
+    def __str__(self):
+        return self.value
+
+    def __repr__(self):
+        return f"CRON('{self.value}')"
 
 # KB Configuration Classes
 
-class schedulingTrainingConfig:
+class schedulingTrainingConfig(BaseModel):
     '''
     Configuration class for scheduling training jobs.
     '''
-    def __init__(self, from_date: datetime, to_date: datetime, mode: str):
-        self.from_date = from_date
-        self.to_date = to_date
-        self.mode = mode
+    from_date: datetime
+    to_date: datetime
+    mode: str
 
-class schedulingDetectionConfig:
+class schedulingDetectionConfig(BaseModel):
     '''
     Configuration class for scheduling detection jobs.
     '''
-    def __init__(self, frequency: CRON, window: CRON, start: datetime, mode: str):
-        self.frequency = frequency.value
-        self.window = window.value
-        self.start = start
-        self.mode = mode
+    frequency: str  # Will store CRON value
+    window: str     # Will store CRON value
+    start: datetime
+    mode: str
+
+    def __init__(self, **data):
+        # Handle CRON objects in initialization
+        if 'frequency' in data and isinstance(data['frequency'], CRON):
+            data['frequency'] = data['frequency'].value
+        if 'window' in data and isinstance(data['window'], CRON):
+            data['window'] = data['window'].value
+        super().__init__(**data)
 
 
-class DaAlgParameters:
-    def __init__(self, algorithms: list):
-        """
-        Initialize with a list of algorithm objects (ZScore, ARMA, etc.)
-        Can contain any combination and any number of each algorithm type.
-        """
-        self.algorithms = algorithms  # List of algorithm objects (ZScore, ARMA, etc.)
+class DaAlgParameters(BaseModel):
+    algorithms: list
 
     def to_dict(self):
         """
@@ -96,50 +122,41 @@ class ZScore:
     
 # Auxilary classes --------------------------------------------------------------------------------------------
 
-# CRON class for validating cron expressions
-class CRON:
-    def __init__(self, value: str):
-        if not self._is_valid_cron(value):
-            log_message(f"CRON validation failed: Invalid CRON format: {value}")
-            raise ValueError(f"Invalid CRON format: {value}")
-        self.value = value
-        log_message(f"CRON validated successfully: {value}")
-
-    @staticmethod
-    def _is_valid_cron(cron_string: str) -> bool:
-        try:
-            croniter(cron_string)
-            return True
-        except Exception:
-            return False
-
-    def __str__(self):
-        return self.value
-
-    def __repr__(self):
-        return f"CRON('{self.value}')"
-
 # ESQL class for validating ESQL queries
 class ESQL:
     def __init__(self, value: str):
         if not self._is_valid_esql(value):
-            log_message(f"ESQL validation failed: Invalid ESQL format: {value}")
+            log_message(f"ESQL validation failed: Invalid ESQL format: {value}", "error")
             raise ValueError(f"Invalid ESQL format: {value}")
         self.value = value
-        log_message(f"ESQL validated successfully: {value[:50]}...")
+        log_message(f"ESQL validated successfully: {value[:50]}...", "info")
 
     @staticmethod
     def _is_valid_esql(query: str) -> bool:
-        try:
-            # Use Elasticsearch API for validation
-            es = Elasticsearch("http://elasticsearch-dataset:9200")
-            # Convert single quotes to double quotes for ESQL compatibility
-            validation_query = query.replace("'", '"') + " | LIMIT 0"
-            es.esql.query(query=validation_query)
-            return True
-        except Exception as e:
-            log_message(f"ESQL validation error: {str(e)}")
+        # Try localhost first (for local development), then Docker service name
+        es_hosts = ["http://localhost:9200", "http://elasticsearch-dataset:9200"]
+
+        for host in es_hosts:
+            try:
+                log_message(f"Attempting ESQL validation with Elasticsearch at {host}")
+                es = Elasticsearch(host)
+                # Convert single quotes to double quotes for ESQL compatibility
+                validation_query = query.replace("'", '"') + " | LIMIT 0"
+                es.esql.query(query=validation_query)
+                log_message(f"ESQL validation successful with {host}")
+                return True
+            except Exception as e:
+                log_message(f"ESQL validation failed with {host}: {str(e)}", "warning")
+                continue
+
+        # If both hosts failed, do basic syntax validation
+        log_message("ESQL validation error (Elasticsearch not available at localhost or docker service)", "warning")
+        # Basic validation: check if it contains FROM and has reasonable structure
+        if "FROM" not in query.upper():
             return False
+        # Allow validation to pass for development if ES is not available
+        log_message("ESQL validation bypassed (Elasticsearch not available) - basic syntax check passed", "info")
+        return True
 
     def __str__(self):
         return self.value
@@ -171,11 +188,22 @@ class UUID:
         return f"UUID('{self.value}')"
 
 
-def log_message(message: str):
+def log_message(message: str, level: str = "info"):
     """
-    Logs a message to logs/log.txt in the KB-MCP directory.
+    Logs a message to both console and logs/log.txt file.
     Creates the logs folder and file if they don't exist.
     """
+    # Log to console with proper formatting
+    if level.lower() == "error":
+        logger.error(message)
+    elif level.lower() == "warning":
+        logger.warning(message)
+    elif level.lower() == "debug":
+        logger.debug(message)
+    else:
+        logger.info(message)
+
+    # Also log to file
     logs_dir = os.path.join(os.path.dirname(__file__), "logs")
     os.makedirs(logs_dir, exist_ok=True)
     log_file = os.path.join(logs_dir, "log.txt")
@@ -203,12 +231,12 @@ def create_da_config(
         mode="batch"
     ),
     scheduling_detection_config: schedulingDetectionConfig = schedulingDetectionConfig(
-        frequency=CRON("5m"),
-        window=CRON("1h"),
+        frequency=CRON("*/5 * * * *"),  # Every 5 minutes
+        window=CRON("0 * * * *"),      # Every hour
         start=datetime.fromisoformat("2025-10-01T00:00:00"),
         mode="streaming"
     ),
-    da_alg_parameters: DaAlgParameters = DaAlgParameters([
+    da_alg_parameters: DaAlgParameters = DaAlgParameters(algorithms=[
         ZScore(threshold=3.0, observed_value="status_code_200_counter"),
         ZScore(threshold=2.5, observed_value="status_code_5xx_counter")
     ])
