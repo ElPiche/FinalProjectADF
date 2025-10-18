@@ -13,7 +13,7 @@ from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from croniter import croniter
 from elasticsearch import Elasticsearch
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 # Configure logging
 logging.basicConfig(
@@ -96,23 +96,64 @@ class schedulingDetectionConfig(BaseModel):
 class DaAlgParameters(BaseModel):
     algorithms: list
 
+    @field_validator('algorithms', mode='before')
+    @classmethod
+    def convert_dict_algorithms(cls, v):
+        if not isinstance(v, list):
+            return v
+        # Convert dict algorithms to proper objects
+        converted_algorithms = []
+        for alg in v:
+            if isinstance(alg, dict):
+                # Convert dict to appropriate algorithm object
+                if 'threshold' in alg and 'observed_value' in alg:
+                    converted_algorithms.append(ZScore(**alg))
+                else:
+                    # Unknown algorithm type, keep as dict but this will fail validation
+                    converted_algorithms.append(alg)
+            else:
+                # Already a proper object
+                converted_algorithms.append(alg)
+        return converted_algorithms
+
     def to_dict(self):
         """
-        Convert all algorithms to dictionary format.
-        Each algorithm object should have a to_dict() method.
+        Convert all algorithms to dictionary format grouped by algorithm type.
+        Matches the expected KB config template structure.
         """
-        return {
-            "algorithms": [alg.to_dict() for alg in self.algorithms]
+        # Group algorithms by type
+        grouped = {
+            "zscore": [],
+            # "arma": [],
+            # "kmeans": [],
         }
+
+        for alg in self.algorithms:
+            alg_dict = alg.to_dict()
+            # Convert observed_value to observedValue for consistency with template
+            if "observed_value" in alg_dict:
+                alg_dict["observedValue"] = alg_dict.pop("observed_value")
+
+            # Determine algorithm type and add to appropriate group
+            if isinstance(alg, ZScore):
+                grouped["zscore"].append(alg_dict)
+            # Future: Add other algorithm types here
+            # elif isinstance(alg, ARMA):
+            #     grouped["arma"].append(alg_dict)
+            # elif isinstance(alg, KMeans):
+            #     grouped["kmeans"].append(alg_dict)
+            # elif isinstance(alg, IForest):
+            #     grouped["iforest"].append(alg_dict)
+
+        return grouped
 
 
 #list of Anomaly Detection Algorithms --------------------------------------------------------------------------
 
 # Zscore, used for anomaly detection based on statistical deviations
-class ZScore:
-    def __init__(self, threshold: float, observed_value: str):
-        self.threshold = threshold
-        self.observed_value = observed_value
+class ZScore(BaseModel):
+    threshold: float
+    observed_value: str
 
     def to_dict(self):
         return {
@@ -210,6 +251,41 @@ def log_message(message: str, level: str = "info"):
     timestamp = datetime.now().isoformat()
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(f"[{timestamp}] {message}\n")
+
+
+def connect_mongodb():
+    """
+    Connect to MongoDB KB instance with proper error handling and logging.
+
+    Returns:
+        MongoClient: Connected MongoDB client, or None if connection fails
+    """
+    # Use percent-encoded password for host connections
+    mongo_uri = "mongodb://admin:1q2w3E%2A@localhost:27018/?authSource=admin"
+    db_name = "kb_configs"  # Database name for KB configurations
+
+    try:
+        log_message(f"Attempting to connect to MongoDB at {mongo_uri.replace('1q2w3E%2A', '***')}")
+        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
+
+        # Test the connection
+        client.admin.command('ping')
+        log_message("MongoDB connection successful")
+
+        # Verify database access
+        db = client[db_name]
+        log_message(f"MongoDB database '{db_name}' accessible")
+        return client
+
+    except ConnectionFailure as e:
+        log_message(f"MongoDB connection failed: {str(e)}", "error")
+        return None
+    except OperationFailure as e:
+        log_message(f"MongoDB authentication/authorization failed: {str(e)}", "error")
+        return None
+    except Exception as e:
+        log_message(f"Unexpected MongoDB connection error: {str(e)}", "error")
+        return None
     
 # Extractor modes enum
 class ExtractorModes(str):
@@ -220,26 +296,10 @@ class ExtractorModes(str):
 
 @mcp.tool()
 def create_da_config(
-    kb_config: KBConfig = KBConfig(
-        id=str(uuid.uuid4()),
-        description="Default HTTP monitoring configuration",
-        query_elastic="FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= '2025-10-01T00:00:00.000Z' AND @timestamp < '2025-11-01T00:00:00.000Z' | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == '200', status_code_5xx_counter = COUNT(*) WHERE response >= '500' AND response < '600' BY es_timestamp | SORT es_timestamp"
-    ),
-    scheduling_training_config: schedulingTrainingConfig = schedulingTrainingConfig(
-        from_date=datetime.fromisoformat("2025-09-01T00:00:00"),
-        to_date=datetime.fromisoformat("2025-09-30T23:59:59"),
-        mode="batch"
-    ),
-    scheduling_detection_config: schedulingDetectionConfig = schedulingDetectionConfig(
-        frequency=CRON("*/5 * * * *"),  # Every 5 minutes
-        window=CRON("0 * * * *"),      # Every hour
-        start=datetime.fromisoformat("2025-10-01T00:00:00"),
-        mode="streaming"
-    ),
-    da_alg_parameters: DaAlgParameters = DaAlgParameters(algorithms=[
-        ZScore(threshold=3.0, observed_value="status_code_200_counter"),
-        ZScore(threshold=2.5, observed_value="status_code_5xx_counter")
-    ])
+    kb_config: Optional[KBConfig] = None,
+    scheduling_training_config: Optional[schedulingTrainingConfig] = None,
+    scheduling_detection_config: Optional[schedulingDetectionConfig] = None,
+    da_alg_parameters: Optional[DaAlgParameters] = None
 ) -> str:
     """
     Create a Data Analytics (DA) algorithm configuration for the Knowledge Base system.
@@ -259,7 +319,33 @@ def create_da_config(
     Raises:
         ValueError: If any validation fails with specific error details
     """
-    
+
+    # Set defaults if None
+    if kb_config is None:
+        kb_config = KBConfig(
+            id=str(uuid.uuid4()),
+            description="Default HTTP monitoring configuration",
+            query_elastic="FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= '2025-10-01T00:00:00.000Z' AND @timestamp < '2025-11-01T00:00:00.000Z' | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == '200', status_code_5xx_counter = COUNT(*) WHERE response >= '500' AND response < '600' BY es_timestamp | SORT es_timestamp"
+        )
+    if scheduling_training_config is None:
+        scheduling_training_config = schedulingTrainingConfig(
+            from_date=datetime.fromisoformat("2025-09-01T00:00:00"),
+            to_date=datetime.fromisoformat("2025-09-30T23:59:59"),
+            mode="batch"
+        )
+    if scheduling_detection_config is None:
+        scheduling_detection_config = schedulingDetectionConfig(
+            frequency=CRON("*/5 * * * *"),  # Every 5 minutes
+            window=CRON("0 * * * *"),      # Every hour
+            start=datetime.fromisoformat("2025-10-01T00:00:00"),
+            mode="streaming"
+        )
+    if da_alg_parameters is None:
+        da_alg_parameters = DaAlgParameters(algorithms=[
+            ZScore(threshold=3.0, observed_value="status_code_200_counter"),
+            ZScore(threshold=2.5, observed_value="status_code_5xx_counter")
+        ])
+
     validation_errors = []
     
     # Validate KB Config
@@ -329,39 +415,53 @@ def create_da_config(
     }
     
     log_message(f"Configuration validation successful for ID: {kb_config.id}")
-    return f"✅ Configuration validation successful!\n\nPreview:\n{json.dumps(config_preview, indent=2)}\n\nNext step: Implement MongoDB saving logic."
-    
-    # # Validate against JSON schema
-    # schema_path = os.path.join(os.path.dirname(__file__), "kb_config_schema.json")
-    # try:
-    #     with open(schema_path, "r") as f:
-    #         schema = json.load(f)
-    #     validate(instance=config_data, schema=schema)
-    #     log_message("Configuration validated successfully against schema")
-    # except (FileNotFoundError, ValidationError) as e:
-    #     error_msg = f"Schema validation failed: {str(e)}"
-    #     log_message(error_msg)
-    #     return error_msg
-    
-    # # Connect to MongoDB and save
-    # try:
-    #     client = MongoClient("mongodb://localhost:27017/")
-    #     db = client["kb-mongodb"]
-    #     collection = db["kb_configs"]
-        
-    #     result = collection.insert_one(config_data)
-    #     log_message(f"Configuration saved to MongoDB with ID: {kb_config.id}")
-        
-    #     return f"Configuration saved successfully with ID: {kb_config.id}\n\n{json.dumps(config_data, indent=2)}"
-        
-    # except (ConnectionFailure, OperationFailure) as e:
-    #     error_msg = f"Database operation failed: {str(e)}"
-    #     log_message(error_msg)
-    #     return error_msg
-    # finally:
-    #     if 'client' in locals():
-    #         client.close()
+    log_message(f"Configuration preview: {json.dumps(config_preview, indent=2)}")
+
+    # Connect to MongoDB and save the configuration
+    client = connect_mongodb()
+    if client is None:
+        error_msg = "Failed to connect to MongoDB - configuration not saved"
+        log_message(error_msg, "error")
+        return f"ERROR: {error_msg}"
+
+    try:
+        db = client["kb_configs"]
+        collection = db["configurations"]
+
+        # Insert the configuration
+        result = collection.insert_one(config_preview)
+        log_message(f"Configuration saved to MongoDB with document ID: {str(result.inserted_id)}")
+
+        # Verify the save by counting documents
+        doc_count = collection.count_documents({"KB_Config.Id": kb_config.id})
+        log_message(f"Verification: {doc_count} document(s) found with ID {kb_config.id}")
+
+        success_msg = f"SUCCESS: Configuration saved to MongoDB!\n\nID: {kb_config.id}\n\nConfiguration saved successfully."
+        log_message("Configuration creation and saving completed successfully")
+        return success_msg
+
+    except OperationFailure as e:
+        error_msg = f"MongoDB operation failed: {str(e)}"
+        log_message(error_msg, "error")
+        return f"ERROR: {error_msg}"
+    except Exception as e:
+        error_msg = "Unexpected error during MongoDB save"
+        log_message(f"{error_msg}: {type(e).__name__}: {str(e)}", "error")
+        return f"ERROR: {error_msg}"
+    finally:
+        try:
+            client.close()
+        except Exception as e:
+            log_message(f"Error closing MongoDB client: {str(e)}", "warning")
 
 
 if __name__ == "__main__":
+    # Test the create_da_config function to demonstrate config_preview logging
+    print("Testing create_da_config function...")
+    result = create_da_config()
+    print("Function result:")
+    print(result)
+    print("\nTest completed.")
+
+    # Now start the MCP server
     mcp.run()

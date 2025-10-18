@@ -143,7 +143,7 @@ services:
     ports:
     - 27018:27017
     volumes:
-    - mongo_data:/data/db
+    - mongo_kb_data:/data/db
     healthcheck:
       test:
       - CMD
@@ -194,6 +194,7 @@ services:
 
 volumes:
   mongo_data: null
+  mongo_kb_data: null
   elastic_data: null
   elastic_anomalies_data: null
 
