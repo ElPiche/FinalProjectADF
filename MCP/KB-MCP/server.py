@@ -1,3 +1,11 @@
+### DEPRECATED FILE. USE MCP/KB-MCP/kb-mcp.py INSTEAD. ###
+### DEPRECATED FILE. USE MCP/KB-MCP/kb-mcp.py INSTEAD. ###
+### DEPRECATED FILE. USE MCP/KB-MCP/kb-mcp.py INSTEAD. ###
+### DEPRECATED FILE. USE MCP/KB-MCP/kb-mcp.py INSTEAD. ###
+### DEPRECATED FILE. USE MCP/KB-MCP/kb-mcp.py INSTEAD. ###
+### DEPRECATED FILE. USE MCP/KB-MCP/kb-mcp.py INSTEAD. ###
+
+
 #!/usr/bin/env python3
 import json
 import os
