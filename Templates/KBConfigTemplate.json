@@ -1,10 +1,8 @@
 {
   "kbConfig": {
-    "id": "8fbb07a4-favf-46ed-9eae-b8d1289c570c",
+    "id": "1fbb07a4-favf-46ed-9eae-b8d1289c570c",
     "description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
-    "queryElastic": {
-      "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS cn_traffic = COUNT(*) WHERE geo.src == 'CN' BY es_timestamp | SORT es_timestamp"
-    },
+    "queryElastic": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == \"200\", status_code_5xx_counter = COUNT(*) WHERE response >= \"500\" AND response < \"600\" BY es_timestamp | SORT es_timestamp",
     "scheduling": {
       "trainingConfig": {
         "from": "2025-10-01T00:00:00Z",
@@ -20,20 +18,20 @@
     },
     "daAlgParameters": {
       "zscore": [
-        { "threshold": 3, "observedValue": "cnTraffic" },
-        { "threshold": 4, "observedValue": "avgBytes" }
+        { "threshold": 3, "observedValue": "status_code_200_counter" },
+        { "threshold": 4, "observedValue": "status_code_5xx_counter" }
       ],
       "arma": [
-        { "p": 2, "d": 1, "q": 2, "observedValue": "cnTraffic" },
-        { "p": 3, "d": 1, "q": 3, "observedValue": "avgBytes" }
+        { "p": 2, "d": 1, "q": 2, "observedValue": "status_code_200_counter" },
+        { "p": 3, "d": 1, "q": 3, "observedValue": "status_code_5xx_counter" }
       ],
       "kmeans": [
-        { "nClusters": 3, "observedValue": "cnTraffic" },
-        { "nClusters": 4, "observedValue": "avgBytes" }
+        { "nClusters": 3, "observedValue": "status_code_200_counter" },
+        { "nClusters": 4, "observedValue": "status_code_5xx_counter" }
       ],
       "iforest": [
-        { "nEstimators": 100, "contamination": 0.05, "randomState": 42, "observedValue": "cnTraffic" },
-        { "nEstimators": 150, "contamination": 0.1, "randomState": 42, "observedValue": "avgBytes" }
+        { "nEstimators": 100, "contamination": 0.05, "randomState": 42, "observedValue": "status_code_200_counter" },
+        { "nEstimators": 150, "contamination": 0.1, "randomState": 42, "observedValue": "status_code_5xx_counter" }
       ]
     }
   }
