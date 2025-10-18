@@ -1,31 +1,40 @@
 {
-  "KB_Config": {
-    "Id": "8fbb07a4-f8f0-46ed-9eae-b8d4789c570c",
-    "Description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
-    "Query_Elastic": {
+  "kbConfig": {
+    "id": "8fbb07a4-favf-46ed-9eae-b8d1289c570c",
+    "description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
+    "queryElastic": {
       "query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS cn_traffic = COUNT(*) WHERE geo.src == 'CN' BY es_timestamp | SORT es_timestamp"
     },
-    "Scheduling": {
-      "training_config": {
+    "scheduling": {
+      "trainingConfig": {
         "from": "2025-10-01T00:00:00Z",
         "to": "2025-10-09T23:59:59Z",
         "mode": "batch"
       },
-      "detection_config": {
+      "detectionConfig": {
         "frequency": "*/15 * * * *",
-        "window": "* 1 * * *", //hourly
+        "window": "* 1 * * *",
         "start": "2025-10-10T00:00:00Z",
         "mode": "streaming"
       }
     },
-    "DA_Alg_Parameters": [
-      {
-        "Algorithm": "ZScore",
-        "Parameters": {
-          "threshold": 3,
-          "observed_value": "cn_traffic"
-        }
-      }
-    ]
+    "daAlgParameters": {
+      "zscore": [
+        { "threshold": 3, "observedValue": "cnTraffic" },
+        { "threshold": 4, "observedValue": "avgBytes" }
+      ],
+      "arma": [
+        { "p": 2, "d": 1, "q": 2, "observedValue": "cnTraffic" },
+        { "p": 3, "d": 1, "q": 3, "observedValue": "avgBytes" }
+      ],
+      "kmeans": [
+        { "nClusters": 3, "observedValue": "cnTraffic" },
+        { "nClusters": 4, "observedValue": "avgBytes" }
+      ],
+      "iforest": [
+        { "nEstimators": 100, "contamination": 0.05, "randomState": 42, "observedValue": "cnTraffic" },
+        { "nEstimators": 150, "contamination": 0.1, "randomState": 42, "observedValue": "avgBytes" }
+      ]
+    }
   }
 }
