@@ -148,6 +148,7 @@ services:
 
 volumes:
   mongo_data: null
+  mongo_kb_data: null
   elastic_data: null
   elastic_anomalies_data: null
 

@@ -207,3 +207,7 @@ pip-selfcheck.json
 # End of https://www.toptal.com/developers/gitignore/api/python,venv,visualstudiocode
 .ARMAEnvironment
 MotorDA/MongoConnection.py
+.github/
+.kilocode/
+.kilocode/mcp.json
+MCP/KB-MCP/logs/log.txt
