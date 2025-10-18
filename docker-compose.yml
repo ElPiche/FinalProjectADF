@@ -146,6 +146,65 @@ services:
       timeout: 5s
       retries: 10
 
+  mongodb_kb:
+    image: mongo:8.0
+    container_name: kb-mongodb
+    restart: unless-stopped
+    environment:
+    - MONGO_INITDB_ROOT_USERNAME=admin
+    - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
+    ports:
+    - 27018:27017
+    volumes:
+    - mongo_kb_data:/data/db
+    healthcheck:
+      test:
+      - CMD
+      - mongosh
+      - --quiet
+      - --username
+      - admin
+      - --password
+      - 1q2w3E*
+      - --authenticationDatabase
+      - admin
+      - --eval
+      - db.adminCommand('ping')
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  extractor:
+    build:
+      context: ./extractor
+      dockerfile: Dockerfile
+    container_name: extractor-app
+    # restart: unless-stopped
+    environment:
+    - SPRING_DATA_MONGODB_URI=mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
+    - SPRING_DATA_MONGODB_DATABASE=extractor
+    - JAVA_OPTS=-Xmx512m -Xms256m
+    ports:
+    - 8080:8080
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8080/actuator/health
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
 volumes:
   mongo_data: null
   mongo_kb_data: null
