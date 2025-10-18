@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.util.Map;
 
@@ -22,12 +23,18 @@ public class ElasticService {
     @Autowired
     JsonpMapper jsonpMapper;
 
+    /// Obtiene información del clúster de Elasticsearch
     public String getClusterInfo() throws Exception {
 
         return client.info().toString();
     }
 
-    public void executeQuery(String query) throws Exception {
+    /// Ejecuta una consulta ESQL y devuelve los resultados como un Map
+    /// @param query La consulta ESQL a ejecutar
+    /// @return Un Map que contiene los resultados de la consulta
+    /// @throws IllegalArgumentException Si la respuesta contiene un error
+    /// @throws IOException Si ocurre un error al ejecutar la consulta
+    public Map executeQuery(String query) throws IllegalArgumentException, IOException {
 
         IO.println("Executing ESQL Query: " + query);
         ElasticsearchEsqlClient esqlClient = client.esql();
@@ -36,14 +43,15 @@ public class ElasticService {
 
         InputStream binaryResponseStream = binaryResponse.content();
 
-
-        String result = new String(binaryResponseStream.readAllBytes());
-
         ObjectMapper objectMapper = new ObjectMapper();
-        Map resultMap = objectMapper.readValue(binaryResponseStream, Map.class);
 
-        resultMap.forEach((key, value) ->
-                IO.println("Key: " + key + ", Value: " + value)
-        );
+        // Convertir el InputStream a un Map
+        Map resultMap = objectMapper.readValue(new String(binaryResponseStream.readAllBytes()), Map.class);
+
+        if(resultMap.containsKey("error")){
+            throw new IllegalArgumentException("Error while executing query: " + resultMap.get("error"));
+        }
+
+        return resultMap;
     }
 }
