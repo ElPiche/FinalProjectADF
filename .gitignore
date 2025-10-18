@@ -210,3 +210,4 @@ MotorDA/MongoConnection.py
 .github/
 .kilocode/
 .kilocode/mcp.json
+MCP/KB-MCP/logs/log.txt
