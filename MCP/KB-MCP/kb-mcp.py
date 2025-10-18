@@ -417,6 +417,11 @@ def create_da_config(
     log_message(f"Configuration validation successful for ID: {kb_config.id}")
     log_message(f"Configuration preview: {json.dumps(config_preview, indent=2)}")
 
+    # Print configuration preview to console in correct format
+    print("\nConfiguration Preview:")
+    print(json.dumps(config_preview, indent=2))
+    print()
+
     # Connect to MongoDB and save the configuration
     client = connect_mongodb()
     if client is None:
