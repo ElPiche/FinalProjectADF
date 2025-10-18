@@ -34,7 +34,7 @@ public class ElasticService {
     /// @return Un Map que contiene los resultados de la consulta
     /// @throws IllegalArgumentException Si la respuesta contiene un error
     /// @throws IOException Si ocurre un error al ejecutar la consulta
-    public Map executeQuery(String query) throws IllegalArgumentException, IOException {
+    public Map<String, Object> executeQuery(String query) throws IllegalArgumentException, IOException {
 
         IO.println("Executing ESQL Query: " + query);
         ElasticsearchEsqlClient esqlClient = client.esql();
@@ -46,7 +46,7 @@ public class ElasticService {
         ObjectMapper objectMapper = new ObjectMapper();
 
         // Convertir el InputStream a un Map
-        Map resultMap = objectMapper.readValue(new String(binaryResponseStream.readAllBytes()), Map.class);
+        Map<String, Object> resultMap = objectMapper.readValue(new String(binaryResponseStream.readAllBytes()), Map.class);
 
         if(resultMap.containsKey("error")){
             throw new IllegalArgumentException("Error while executing query: " + resultMap.get("error"));

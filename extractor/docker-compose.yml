@@ -7,9 +7,10 @@ services:
     container_name: extractor-app
     # restart: unless-stopped
     environment:
-    - SPRING_DATA_MONGODB_URI=mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
     - SPRING_DATA_MONGODB_DATABASE=extractor
+    - SPRING_ELASTICSEARCH_URIS=http://elasticsearch-dataset:9200
     - JAVA_OPTS=-Xmx512m -Xms256m
+    - SPRING_PROFILES_ACTIVE=docker
     ports:
     - 8080:8080
     networks:
