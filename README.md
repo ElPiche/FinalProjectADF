@@ -7,6 +7,13 @@ Proyecto final tecnólogo en informática Framework de detección de anomalías
 [Jira](https://braian-granero.atlassian.net/jira/software/projects/KAN/boards/1)
 
 
-### Setup 
+## Setup 
 
-Para levantar proyecto: `docker compose up -d`
+### Infraestructura principal
+docker-compose up -d
+
+### Servicio extractor
+docker-compose -f extractor/docker-compose.yml up -d
+
+### Toda le infraestructura junta __(no funciona por el momento)__
+~~docker-compose -f docker-compose.yml -f extractor/docker-compose.yml up -d~~

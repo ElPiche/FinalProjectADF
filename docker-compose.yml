@@ -9,6 +9,8 @@ services:
     - ES_JAVA_OPTS=-Xms512m -Xmx1g
     ports:
     - 9200:9200
+    networks:
+    - adf-network
     volumes:
     - elastic_data:/usr/share/elasticsearch-dataset/data
     deploy:
@@ -37,6 +39,8 @@ services:
     - node.name=anomalies-node
     ports:
     - 9201:9200
+    networks:
+    - adf-network
     volumes:
     - elastic_anomalies_data:/usr/share/elasticsearch/data
     deploy:
@@ -65,6 +69,8 @@ services:
     - XPACK_SAMPLE_DATA_ENABLED=true
     ports:
     - 5601:5601
+    networks:
+    - adf-network
     healthcheck:
       test:
       - CMD
@@ -83,6 +89,8 @@ services:
     - ELASTICSEARCH_HOSTS=http://elasticsearch-anomalies:9200
     ports:
     - 5602:5601
+    networks:
+    - adf-network
     healthcheck:
       test:
       - CMD
@@ -100,6 +108,8 @@ services:
         condition: service_healthy
     volumes:
     - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+    - adf-network
     entrypoint: "sh -c \"\n  echo 'Esperando a Kibana...';\n  apk add --no-cache curl\
       \ >/dev/null;\n  until curl -sf http://kibana:5601/api/status >/dev/null; do\
       \ sleep 2; done;\n  echo 'Instalando sample data (logs)...';\n  curl -s -XPOST\
@@ -115,6 +125,8 @@ services:
     - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
     ports:
     - 27017:27017
+    networks:
+    - adf-network
     volumes:
     - mongo_data:/data/db
     healthcheck:
@@ -133,39 +145,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-  extractor:
-    build:
-      context: ./extractor
-      dockerfile: Dockerfile
-    container_name: extractor-app
-    # restart: unless-stopped
-    environment:
-    - SPRING_DATA_MONGODB_URI=mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin
-    - SPRING_DATA_MONGODB_DATABASE=extractor
-    - JAVA_OPTS=-Xmx512m -Xms256m
-    ports:
-    - 8080:8080
-    depends_on:
-      mongodb:
-        condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-        reservations:
-          memory: 256m
-    healthcheck:
-      test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:8080/actuator/health
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
 
 volumes:
   mongo_data: null
   elastic_data: null
   elastic_anomalies_data: null
+
+networks:
+  adf-network:
+    name: adf-network
+    driver: bridge
