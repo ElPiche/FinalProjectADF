@@ -3,6 +3,7 @@ import json
 import uuid
 import datetime
 import logging
+import re
 from jsonschema import validate, ValidationError
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -161,7 +162,264 @@ class ZScore(BaseModel):
             "observedValue": self.observed_value
         }
     
-# Auxilary classes --------------------------------------------------------------------------------------------
+# Auxiliary classes --------------------------------------------------------------------------------------------
+
+def extract_all_output_field_names(esql_query: str) -> list[str]:
+    """
+    Extract all output field names from ESQL query, including both EVAL and STATS clauses.
+
+    This function comprehensively parses ESQL queries to identify all field names that
+    could be available as output, including fields created by EVAL and fields from STATS.
+
+    Args:
+        esql_query (str): The complete ESQL query string
+
+    Returns:
+        list[str]: List of all field names that could be output from the query
+
+    Raises:
+        ValueError: If query parsing fails due to malformed syntax
+
+    Examples:
+        >>> extract_all_output_field_names("FROM table | EVAL new_field = old_field * 2 | STATS count = COUNT(*) BY group")
+        ['new_field', 'count']
+    """
+    field_names = set()
+
+    # Extract fields from EVAL clauses
+    eval_fields = _extract_eval_field_names(esql_query)
+    field_names.update(eval_fields)
+
+    # Extract fields from STATS clauses
+    stats_fields = extract_stats_field_names(esql_query)
+    field_names.update(stats_fields)
+
+    return sorted(list(field_names))
+
+
+def extract_stats_field_names(esql_query: str) -> list[str]:
+    """
+    Extract output field names from STATS clauses in an ESQL query.
+
+    This function parses ESQL queries to identify field names defined in STATS clauses,
+    handling complex expressions, aggregations, WHERE conditions, and multiple fields.
+
+    Args:
+        esql_query (str): The complete ESQL query string
+
+    Returns:
+        list[str]: List of field names extracted from STATS clauses
+
+    Raises:
+        ValueError: If STATS clause parsing fails due to malformed syntax
+
+    Examples:
+        >>> extract_stats_field_names("FROM table | STATS count = COUNT(*), avg_val = AVG(field) BY group")
+        ['count', 'avg_val']
+
+        >>> extract_stats_field_names("FROM table | STATS field1 = COUNT(*) WHERE condition == 'value' BY time")
+        ['field1']
+    """
+    import re
+
+    # Find STATS clause in the query
+    stats_match = re.search(r'\bSTATS\s+(.+?)(?:\s+BY\s+|\s*$)', esql_query, re.IGNORECASE | re.DOTALL)
+    if not stats_match:
+        return []
+
+    stats_content = stats_match.group(1).strip()
+
+    # Split by commas, but be careful with commas inside functions or WHERE clauses
+    field_definitions = _split_stats_fields(stats_content)
+
+    field_names = []
+    for field_def in field_definitions:
+        field_name = _extract_field_name_from_definition(field_def.strip())
+        if field_name:
+            field_names.append(field_name)
+
+    return field_names
+
+
+def _extract_eval_field_names(esql_query: str) -> list[str]:
+    """
+    Extract field names created by EVAL clauses in an ESQL query.
+
+    Args:
+        esql_query (str): The complete ESQL query string
+
+    Returns:
+        list[str]: List of field names created by EVAL clauses
+    """
+    import re
+
+    field_names = []
+
+    # Find all EVAL clauses in the query
+    eval_matches = re.findall(r'\bEVAL\s+(.+?)(?:\s*\|\s*|\s*$)', esql_query, re.IGNORECASE | re.DOTALL)
+
+    for eval_content in eval_matches:
+        # Split by commas to handle multiple assignments in one EVAL
+        assignments = _split_eval_assignments(eval_content.strip())
+
+        for assignment in assignments:
+            field_name = _extract_field_name_from_eval_assignment(assignment.strip())
+            if field_name:
+                field_names.append(field_name)
+
+    return field_names
+
+
+def _split_eval_assignments(eval_content: str) -> list[str]:
+    """
+    Split EVAL content by commas, handling nested functions and complex expressions.
+
+    Args:
+        eval_content (str): The content between EVAL and next pipe
+
+    Returns:
+        list[str]: Individual assignment expressions
+    """
+    assignments = []
+    current_assignment = ""
+    paren_depth = 0
+    in_quotes = False
+    quote_char = None
+
+    i = 0
+    while i < len(eval_content):
+        char = eval_content[i]
+
+        # Handle quotes
+        if char in ('"', "'") and (i == 0 or eval_content[i-1] != '\\'):
+            if not in_quotes:
+                in_quotes = True
+                quote_char = char
+            elif char == quote_char:
+                in_quotes = False
+                quote_char = None
+
+        # Handle parentheses
+        elif not in_quotes:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+
+        # Handle commas (only at top level)
+        if char == ',' and paren_depth == 0 and not in_quotes:
+            assignments.append(current_assignment.strip())
+            current_assignment = ""
+        else:
+            current_assignment += char
+
+        i += 1
+
+    # Add the last assignment
+    if current_assignment.strip():
+        assignments.append(current_assignment.strip())
+
+    return assignments
+
+
+def _extract_field_name_from_eval_assignment(assignment: str) -> str:
+    """
+    Extract the field name from an EVAL assignment expression.
+
+    Handles patterns like:
+    - field_name = expression
+    - field_name=expression (no spaces)
+
+    Args:
+        assignment (str): A single assignment from EVAL clause
+
+    Returns:
+        str: The field name, or empty string if parsing fails
+    """
+    # Look for field_name = expression pattern
+    match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*=', assignment.strip())
+    if match:
+        return match.group(1).strip()
+
+    return ""
+
+
+def _split_stats_fields(stats_content: str) -> list[str]:
+    """
+    Split STATS content by commas, handling nested functions and WHERE clauses.
+
+    Args:
+        stats_content (str): The content between STATS and BY keywords
+
+    Returns:
+        list[str]: Individual field definitions
+    """
+    fields = []
+    current_field = ""
+    paren_depth = 0
+    in_quotes = False
+    quote_char = None
+
+    i = 0
+    while i < len(stats_content):
+        char = stats_content[i]
+
+        # Handle quotes
+        if char in ('"', "'") and (i == 0 or stats_content[i-1] != '\\'):
+            if not in_quotes:
+                in_quotes = True
+                quote_char = char
+            elif char == quote_char:
+                in_quotes = False
+                quote_char = None
+
+        # Handle parentheses
+        elif not in_quotes:
+            if char == '(':
+                paren_depth += 1
+            elif char == ')':
+                paren_depth -= 1
+
+        # Handle commas (only at top level)
+        if char == ',' and paren_depth == 0 and not in_quotes:
+            fields.append(current_field.strip())
+            current_field = ""
+        else:
+            current_field += char
+
+        i += 1
+
+    # Add the last field
+    if current_field.strip():
+        fields.append(current_field.strip())
+
+    return fields
+
+
+def _extract_field_name_from_definition(field_definition: str) -> str:
+    """
+    Extract the field name from a single STATS field definition.
+
+    Handles patterns like:
+    - field_name = expression
+    - field_name = AGG_FUNCTION(...) WHERE condition
+
+    Args:
+        field_definition (str): A single field definition from STATS clause
+
+    Returns:
+        str: The field name, or empty string if parsing fails
+    """
+    # Remove WHERE clause if present (everything after WHERE)
+    field_def = re.split(r'\s+WHERE\s+', field_definition, flags=re.IGNORECASE)[0].strip()
+
+    # Look for field_name = expression pattern
+    match = re.match(r'^([a-zA-Z_][a-zA-Z0-9_]*)\s*=', field_def.strip())
+    if match:
+        return match.group(1).strip()
+
+    return ""
+
 
 # ESQL class for validating ESQL queries
 class ESQL:
@@ -198,6 +456,30 @@ class ESQL:
         # Allow validation to pass for development if ES is not available
         log_message("ESQL validation bypassed (Elasticsearch not available) - basic syntax check passed", "info")
         return True
+
+    def extract_output_fields(self) -> list[str]:
+        """
+        Extract all output field names from the ESQL query, including EVAL and STATS fields.
+
+        Returns:
+            list[str]: List of all field names that could be output from the query
+
+        Raises:
+            ValueError: If query parsing fails
+        """
+        return extract_all_output_field_names(self.value)
+
+    def extract_stats_fields(self) -> list[str]:
+        """
+        Extract output field names from STATS clauses in the ESQL query.
+
+        Returns:
+            list[str]: List of field names defined in STATS clauses
+
+        Raises:
+            ValueError: If STATS clause parsing fails
+        """
+        return extract_stats_field_names(self.value)
 
     def __str__(self):
         return self.value
@@ -382,6 +664,59 @@ def create_da_config(
         for i, alg in enumerate(da_alg_parameters.algorithms):
             if not hasattr(alg, 'to_dict'):
                 validation_errors.append(f"Algorithm {i} must have a to_dict() method")
+
+        # Cross-validate: Check that observed_value fields match ESQL output fields
+        if kb_config:
+            try:
+                esql_obj = ESQL(kb_config.query_elastic)
+                output_fields = esql_obj.extract_output_fields()
+                stats_fields = esql_obj.extract_stats_fields()
+
+                if not output_fields:
+                    validation_errors.append(
+                        "ESQL query validation failed: No output fields found. "
+                        "The query must contain either EVAL or STATS clauses that produce named fields."
+                    )
+                elif not stats_fields:
+                    validation_errors.append(
+                        "ESQL query validation failed: No STATS clause found. "
+                        "The query must contain a STATS clause to aggregate data for anomaly detection."
+                    )
+                else:
+                    # Check each algorithm's observed_value against all available output fields
+                    missing_fields = []
+                    invalid_algorithms = []
+
+                    for i, alg in enumerate(da_alg_parameters.algorithms):
+                        if hasattr(alg, 'observed_value'):
+                            if alg.observed_value not in output_fields:
+                                missing_fields.append(f"'{alg.observed_value}' (Algorithm {i})")
+                            elif alg.observed_value not in stats_fields:
+                                # Field exists but is not from STATS - this might be valid if it's an EVAL field
+                                # but for anomaly detection, we typically want aggregated STATS fields
+                                validation_errors.append(
+                                    f"Algorithm {i} observed_value '{alg.observed_value}' is an EVAL field, "
+                                    f"not a STATS aggregation field. For anomaly detection, use STATS output fields. "
+                                    f"Available STATS fields: {stats_fields}"
+                                )
+                        else:
+                            invalid_algorithms.append(f"Algorithm {i} (missing observed_value field)")
+
+                    if missing_fields:
+                        validation_errors.append(
+                            f"Observed value fields not found in ESQL output: {', '.join(missing_fields)}. "
+                            f"Available ESQL output fields: {output_fields}"
+                        )
+
+                    if invalid_algorithms:
+                        validation_errors.append(
+                            f"Invalid algorithms: {', '.join(invalid_algorithms)}. "
+                            "All algorithms must have an observed_value field."
+                        )
+
+            except ValueError as e:
+                validation_errors.append(f"ESQL query validation failed: {str(e)}")
+
     except AttributeError:
         validation_errors.append("Invalid da_alg_parameters object")
     
