@@ -18,7 +18,7 @@
     "KB-MCP": {
       "command": "python",
       "args": [
-        "../KB-MCP/server.py"
+        "../KB-MCP/kb-mcp.py" //use your relative path to kb-mcp.py in claude_desktop_config.json
       ],
       "env": {}
     }
