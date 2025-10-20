@@ -8,6 +8,9 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import java.util.List;
+import java.util.Map;
+
 //@AllArgsConstructor
 @Getter
 @Setter
@@ -27,7 +30,6 @@ public class KbMongo {
         @Field("id")
         private String kbId;
         private String description;
-        private String queryElastic;
         private Scheduling scheduling;
     }
 
@@ -48,8 +50,9 @@ public class KbMongo {
         private String from; //O datetime
         private String to;
         private String window;
-        private String mode;
+        private String mode; //TODO: eliminarlo
         private Boolean isActive;
+        private String queryElastic;
     }
 
     @Getter
@@ -58,33 +61,34 @@ public class KbMongo {
     @AllArgsConstructor
     public static class DetectionConfig{
         private String frequency;
-        private String window;
+        private int window;
         private String start;
-        private String mode;
+        private String mode; //TODO: eliminarlo
         private Boolean isActive;
+        private String queryElastic;
     }
 
     @Getter
     @Setter
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class daAlgParameters{
-        private Zscore zscore;
-        private Arma arma;
+    public static class ADAlgParameters{
+        Map<String, List<Object>> algorithmParameters;
+//        private Zscore zscore;
+//        private Arma arma;
     }
+//    No hacen falta porque los parametros son dinamicos
+//    public static class Zscore{
+//        private List<String> observedValues;
+//    }
 
-    public static class Zscore{
-        private String observedValue;
-        private double threshold;
-    }
-
-    public static class Arma{
-
-        private String observedValue;
-        private double p;
-        private double d;
-        private double q;
-    }
+//    public static class Arma{
+//
+//        private String observedValue;
+//        private double p;
+//        private double d;
+//        private double q;
+//    }
 
 }
 

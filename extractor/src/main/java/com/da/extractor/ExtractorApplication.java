@@ -4,7 +4,7 @@ import com.da.extractor.entity.KbMongo;
 import com.da.extractor.service.ElasticService;
 import com.da.extractor.service.KbConfigReaderService;
 import com.da.extractor.repository.SeriesRepository;
-import com.da.extractor.service.FilterService;
+import com.da.extractor.service.pipeline.FilterService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ApplicationContext;
@@ -64,44 +64,44 @@ public class ExtractorApplication{
                 IO.println("Descripción: " + config.getDescription());
                 IO.println("Kb id: " + config.getKbId());
 
-                if (config.getQueryElastic() == null) {
-                    System.out.println("Sin query elastic skipeo iteración");
-                    continue;
-                }
-
-                if (config.getScheduling() == null || config.getScheduling().getTrainingConfig() == null) {
-                    System.out.println("Sin scheduling/trainingConfig; salto.");
-                    continue;
-                }
-
-                var tr = config.getScheduling().getTrainingConfig();
-
-                if (tr.getFrom() == null || tr.getTo() == null) {
-                    System.out.println("TrainingConfig sin from/to; salto.");
-                    continue;
-                }
-
-                String q = config.getQueryElastic()
-                        .replace("$from", "\"" + tr.getFrom() + "\"")
-                        .replace("$to",   "\"" + tr.getTo()   + "\"");
-
-                System.out.println("ESQL => " + q);
-
-                try {
-                    result = elasticService.executeQuery(q);
-
-                    //elasticService.printEsqlResult(result);
-
-                    if (result != null) {
-                        seriesRepository.save(filterService.applyFilter(result, config.getKbId(), config.getDescription()));
-                        IO.println("Resultados guardados exitosamente en MongoDB.");
-                    } else {
-                        IO.println("No hay resultados para guardar en MongoDB.");
-                    }
-
-                } catch (Exception ex) {
-                    System.err.println("Error ejecutando ESQL para KB " + config.getKbId() + ": " + ex.getMessage());
-                }
+//                if (config.getQueryElastic() == null) {
+//                    System.out.println("Sin query elastic skipeo iteración");
+//                    continue;
+//                }
+//
+//                if (config.getScheduling() == null || config.getScheduling().getTrainingConfig() == null) {
+//                    System.out.println("Sin scheduling/trainingConfig; salto.");
+//                    continue;
+//                }
+//
+//                var tr = config.getScheduling().getTrainingConfig();
+//
+//                if (tr.getFrom() == null || tr.getTo() == null) {
+//                    System.out.println("TrainingConfig sin from/to; salto.");
+//                    continue;
+//                }
+//
+//                String q = config.getQueryElastic()
+//                        .replace("$from", "\"" + tr.getFrom() + "\"")
+//                        .replace("$to",   "\"" + tr.getTo()   + "\"");
+//
+//                System.out.println("ESQL => " + q);
+//
+//                try {
+//                    result = elasticService.executeQuery(q);
+//
+//                    //elasticService.printEsqlResult(result);
+//
+//                    if (result != null) {
+//                        seriesRepository.save(filterService.applyFilter(result, config.getKbId(), config.getDescription()));
+//                        IO.println("Resultados guardados exitosamente en MongoDB.");
+//                    } else {
+//                        IO.println("No hay resultados para guardar en MongoDB.");
+//                    }
+//
+//                } catch (Exception ex) {
+//                    System.err.println("Error ejecutando ESQL para KB " + config.getKbId() + ": " + ex.getMessage());
+//                }
 
 
             }

@@ -1,6 +1,7 @@
-package com.da.extractor.service;
+package com.da.extractor.service.pipeline;
 
 import com.da.extractor.entity.Serie;
+import com.da.extractor.model.PipelineConfig;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -14,7 +15,7 @@ public class FilterService {
     /// Recibe un Map que representa la respusta de una consulta Elasticsearch y lo trasforma a una Serie filtrada
     /// @param data El Map con los datos de la consulta Elasticsearch
     /// @return Un objeto Serie con los datos filtrados
-    public Serie applyFilter(Map<String, Object> data, String kbId, String description) {
+    public Serie applyFilter(Map<String, Object> data, PipelineConfig config) {
 
         if(data.containsKey("error")){
             throw new IllegalArgumentException(
@@ -42,7 +43,7 @@ public class FilterService {
         }
 
 
-        return new Serie(null, kbId, description, unifiedData);
+        return new Serie(null, config.getKbId(), config.getDescription(), unifiedData);
     }
 
 }

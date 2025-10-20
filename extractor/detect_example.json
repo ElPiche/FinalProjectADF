@@ -3,6 +3,7 @@
     "$oid": "68f3e1e1a856aa9308751164"
   },
   "kb_id": "3af5b1d2-5d4e-4c3b-9f7e-123456789abc",
+  "created_at": "2025-11-01T12:00:00.000Z",
   "mode": "detect",
   "algorithm": {
     "name": "ZScore",
