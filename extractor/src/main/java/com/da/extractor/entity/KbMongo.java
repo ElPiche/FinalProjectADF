@@ -47,7 +47,9 @@ public class KbMongo {
     public static class TrainingConfig{
         private String from; //O datetime
         private String to;
+        private String window;
         private String mode;
+        private Boolean isActive;
     }
 
     @Getter
@@ -59,6 +61,7 @@ public class KbMongo {
         private String window;
         private String start;
         private String mode;
+        private Boolean isActive;
     }
 
     @Getter
@@ -70,7 +73,6 @@ public class KbMongo {
         private Arma arma;
     }
 
-    //TODO: Verificar que esten bién los parametros de estos algoritmos.
     public static class Zscore{
         private String observedValue;
         private double threshold;
