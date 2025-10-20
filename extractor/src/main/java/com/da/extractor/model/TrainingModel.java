@@ -14,7 +14,7 @@ import java.util.Map;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class TrainingEntity {
+public class TrainingModel {
 
     @Id
     private String id;
@@ -52,8 +52,6 @@ public class TrainingEntity {
         private Integer trainWindow;
         private String from;
         private String to;
-
-
     }
 
     @Getter
