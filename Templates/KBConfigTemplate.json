@@ -7,13 +7,16 @@
       "trainingConfig": {
         "from": "2025-10-01T00:00:00Z",
         "to": "2025-10-09T23:59:59Z",
-        "mode": "batch"
+        "mode": "training",
+        "window": 60, //60
+        "isActive": true
       },
       "detectionConfig": {
+        "from": "2025-10-10T00:00:00Z",
         "frequency": "*/15 * * * *",
-        "window": "* 1 * * *",
-        "start": "2025-10-10T00:00:00Z",
-        "mode": "streaming"
+        "window": 60,  //60
+        "mode": "detection",
+        "isActive": false
       }
     },
     "daAlgParameters": {

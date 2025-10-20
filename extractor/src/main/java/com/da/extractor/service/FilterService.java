@@ -14,7 +14,7 @@ public class FilterService {
     /// Recibe un Map que representa la respusta de una consulta Elasticsearch y lo trasforma a una Serie filtrada
     /// @param data El Map con los datos de la consulta Elasticsearch
     /// @return Un objeto Serie con los datos filtrados
-    public Serie applyFilter(Map<String, Object> data) {
+    public Serie applyFilter(Map<String, Object> data, String kbId, String description) {
 
         if(data.containsKey("error")){
             throw new IllegalArgumentException(
@@ -41,7 +41,8 @@ public class FilterService {
             unifiedData.add(rowMap);
         }
 
-        return new Serie(null, "WIP", "WIP", unifiedData);
+
+        return new Serie(null, kbId, description, unifiedData);
     }
 
 }
