@@ -1,4 +1,5 @@
 import json
+from bson import json_util
 from pymongo import MongoClient
 import pandas as pd
 # from MongoClass import MongoKBConnection
@@ -24,7 +25,7 @@ KB_COLLECTION_NAME = "testLogsKB"
 
 # conexión a MongoDB MotorDA pendiente
 DB_NAME_MOTOR_DA = "logsdb"
-DA_COLLECTION_NAME = "grouped_response_code_v2"
+DA_COLLECTION_NAME = "testingConfig"
 
 
 # conexión a elasticSearch
@@ -54,8 +55,18 @@ def CreateConnectionToDA() -> MongoClient:
     return mongo_da_client
 
 
-def ExtractConfiguration(client: MongoClient):
-    return None
+def ExtractLatestConfiguration(client: MongoClient):
+    result = client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].find_one({})
+    # print(result)
+
+    # we parse with BSON cuz mongo brings some binary data inside, and we want to serialize it into JSON
+    with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
+        f.write(json_util.dumps(result, indent=2))
+        """
+        latest_document = collection.find().sort('created_at', -1).limit(1).next()print(latest_document)
+        """
+
+    return result
 
 # Lector de json
 
@@ -186,20 +197,82 @@ ALGORITHM_HANDLERS = {
 }
 
 
+class TrainingAlgorithm:
+    def __init__(self, train_from: str, train_to: str, mode: str):
+        self.train_from = train_from
+        self.train_to = train_to
+        self.mode = mode
+
+    def __repr__(self):
+        return f"TrainingAlgorithm(from={self.train_from}, to={self.train_to}, mode={self.mode})"
+
+
+class ZScore:
+    def __init__(self, train_window: int, threshold: float, observed_values: Dict[str, int]):
+        self.train_window = train_window  # in minutes
+        self.threshold = threshold
+        self.observed_values = observed_values
+
+    def __repr__(self):
+        return f"ZScore(window={self.train_window}min, threshold={self.threshold}, metrics={list(self.observed_values.keys())})"
+
+
+def parse_json_to_classes(json_data: dict) -> tuple[TrainingAlgorithm, ZScore]:
+    """
+    Parse JSON data into TrainingAlgorithm and ZScore classes.
+
+    Args:
+        json_data: Dictionary containing training_data and trained_data
+
+    Returns:
+        Tuple of (TrainingAlgorithm, ZScore) instances
+    """
+
+    # Extract training_data
+    training_data = json_data.get("training_data", {})
+    algorithm_config = training_data.get("algorithm", {})
+    parameters = algorithm_config.get("parameters", {})
+
+    # Create TrainingAlgorithm instance
+    training_algo = TrainingAlgorithm(
+        train_from=parameters.get("from"),
+        train_to=parameters.get("to"),
+        mode=training_data.get("mode")
+    )
+
+    # Extract trained_data for ZScore metrics
+    trained_data = json_data.get("trained_data", {})
+    trained_list = trained_data.get("trained_list", [])
+
+    # Get the first ZScore entry (or adjust logic if you need a specific one)
+    z_score_entry = next(
+        (item for item in trained_list if item.get("algorithm") == "ZScore"), {})
+
+    # Build observed_values dictionary
+    # This maps metric names to their latest values from training_data
+    observed_values = {}
+    observed_values_data = training_data.get("observed_values", {})
+
+    for metric_name, data_points in observed_values_data.items():
+        if data_points:  # If there are data points
+            # Get the latest value
+            latest_value = data_points[-1].get("value", 0)
+            observed_values[metric_name] = latest_value
+
+    # Create ZScore instance
+    z_score = ZScore(
+        train_window=z_score_entry.get("train_window", 60),
+        threshold=z_score_entry.get("threshold", 3),
+        observed_values=observed_values
+    )
+
+    return training_algo, z_score
+
+
 def main():
 
     # Esto arma la conexión a MongoDB
     kb_client = CreateConnectionToKB()
-
-    # de aquí extraemos los datos de las operativas que vayamos a llamar
-    # nos debería devolver algo como esto:
-    # TRAIN_FROM = "2025-10-01T00:00:00Z"
-    # TRAIN_TO = "2025-10-09T23:59:59Z"
-    # DETECT_FROM = "2025-10-10T00:00:00Z"
-    # DETECT_TO = "2025-10-31T23:59:59Z"
-    # OBSERVED_FIELD = "status_code_5xx_counter"
-    # RANGE_IN_MINUTES = 60
-    ExtractConfiguration(kb_client)
 
     # aquí llamariamos a nuestra lógica para checkear la metadata para corroborar si ya hemos hechos
     # esta operativa antes
@@ -210,8 +283,23 @@ def main():
     # nos conectamos a la DB donde está la data que nos interesa
     da_client = CreateConnectionToDA()
 
+    # de aquí extraemos los datos de las operativas que vayamos a llamar
+    latest_series_config = ExtractLatestConfiguration(kb_client)
+
+    # latest_series_config_json = json.loads(latest_series_config)
+
+    training_algo, z_score = parse_json_to_classes(latest_series_config)
+
+    print("I am printing the training algo data:")
+    print(training_algo)
+
+    print("--------------------------------------------------------------------")
+
+    print("I am printing the z score data:")
+    print(z_score.observed_values)
+
     # por ahora dejaremos el change para despues
-    da_client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].watch()
+    # da_client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].watch()
 
     # CENTRARSE EN PARSEAR CONFIG -> ENTRENAR -> DETECTAR
 
@@ -221,8 +309,9 @@ def main():
     baseline = train_baseline(df_train, OBSERVED_FIELD)
     """
     observed_fields = ["status_code_5xx"]
-    df = run_zscore_batch("2025-10-01T00:00:00Z",
-                          "2025-10-09T23:59:59Z", observed_fields, da_client)
+
+    # df = run_zscore_batch("2025-10-01T00:00:00Z",
+    #                      "2025-10-09T23:59:59Z", observed_fields, da_client)
 
 # doc = dispatcher.get_record_by_id("8fbb07a4-f8f0-46ed-9eae-b8d4789c570c")
 
