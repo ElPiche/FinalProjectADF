@@ -48,6 +48,7 @@ KB_COLLECTION_NAME = "testLogsKB"
 DB_NAME_MOTOR_DA = "logsdb"
 DA_COLLECTION_NAME = "testingConfig"
 
+DA_RESULT_COLLECTION_NAME = "seriesResult"
 
 # conexión a elasticSearch
 ES_HOST = "http://localhost:9200"
@@ -77,8 +78,10 @@ def CreateConnectionToDA() -> MongoClient:
 
 
 def ExtractLatestConfiguration(client: MongoClient):
+
+    # as of right now, we get only one document, the idea would be to get the latest one when mongo change stream
+    # calls us
     result = client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].find_one({})
-    # print(result)
 
     # we parse with BSON cuz mongo brings some binary data inside, and we want to serialize it into JSON
     with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
@@ -150,38 +153,13 @@ def run_zscore(config_block: Dict[str, Any]):
     # acá va tu implementación real...
 
 
-def run_zscore_batch_training(zScore: ZScore, data_to_train: TrainingAlgorithm):
-    """
-    df_detect = fetch_logs_from_mongo(
-        CONNECTION, DEFAULT_DATABASE, COLLECTION, DETECT_FROM, DETECT_TO, [OBSERVED_FIELD])
+def run_zscore_batch_training(zScore: ZScore, data_to_train: TrainingAlgorithm, da_client: MongoClient):
 
-
-    # Fetch data from MongoDB within the given ISO date range and fields.
-    # start_dt = pd.to_datetime(start_iso, utc=True)
-    # end_dt = pd.to_datetime(end_iso, utc=True)
-
-    # picks up all the values from the observed_fields and assigns them to 0 if the field value is not found
-    projection = {"_id": 0, "timestamp": "$es_timestamp"}
-    for field in zScore.observed_values:
-        projection[field] = {"$ifNull": [f"${field}", 0]}
-
-    pipeline = [
-        {"$match": {"es_timestamp": {
-            "$gte": data_to_train.train_from.to_pydatetime(), "$lt": data_to_train.train_to.to_pydatetime()}}},
-        {"$project": projection},
-        {"$sort": {"timestamp": 1}},
-    ]
-
-    docs = list(da_client[KB_DB_NAME][DA_COLLECTION_NAME].aggregate(pipeline))
-
-    if not docs:
-        return pd.DataFrame(columns=["timestamp"] + observed_fields)
-
-    df = pd.DataFrame(docs)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    for field in observed_fields:
-        df[field] = pd.to_numeric(df[field], errors="coerce").fillna(0)
-    """
+    # iterating both key and values
+    for key, value in zScore.observed_values.items():
+        print(key)
+        results = train_baseline(value, "value")
+        da_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].insert_one(results)
 
     return train_baseline(zScore.observed_values["5xx_status_codes"], "value")
 
@@ -281,9 +259,6 @@ def main():
     # aquí llamariamos a nuestra lógica para checkear la metadata para corroborar si ya hemos hechos
     # esta operativa antes
 
-    # corroborar que los datos sacados del KB
-    print("Documento por id:")
-
     # nos conectamos a la DB donde está la data que nos interesa
     da_client = CreateConnectionToDA()
 
@@ -307,17 +282,14 @@ def main():
     print("I am printing the z score data:")
     print(z_score)
 
-    result = run_zscore_batch_training(z_score, training_algo)
+    result = run_zscore_batch_training(z_score, training_algo, da_client)
 
     anomalies = detectar_anomalias_df(
         z_score.observed_values["5xx_status_codes"], result, z_score.train_window)
 
-    # print(anomalies)
-
     save_anomalies_json(anomalies, result, 'Anomalies_Detected_ZScore.json')
 
     # por ahora dejaremos el change para despues
-    # da_client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].watch()
 
     # CENTRARSE EN PARSEAR CONFIG -> ENTRENAR -> DETECTAR
 
