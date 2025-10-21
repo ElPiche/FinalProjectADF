@@ -9,6 +9,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ApplicationContext;
 
+import java.io.IOException;
 import java.util.Map;
 
 
@@ -16,7 +17,7 @@ import java.util.Map;
 @SpringBootApplication
 public class ExtractorApplication{
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
         ApplicationContext context = SpringApplication.run(ExtractorApplication.class, args);
 
         ElasticService elasticService = context.getBean(ElasticService.class);
@@ -24,6 +25,9 @@ public class ExtractorApplication{
         FilterService filterService = context.getBean(FilterService.class);
 
         KbConfigReaderService kbConfigReaderService = context.getBean(KbConfigReaderService.class);
+
+        //Esto ejecuta el kbconfig, haciendo entrar a ejecución el flujo entero.
+        kbConfigReaderService.getAllConfigs();
 
         System.out.println("Extractor Service Started...");
 

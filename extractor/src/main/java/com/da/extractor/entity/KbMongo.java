@@ -31,6 +31,7 @@ public class KbMongo {
         private String kbId;
         private String description;
         private Scheduling scheduling;
+        private ADAlgParameters adAlgParameters;
     }
 
     @Getter
@@ -49,7 +50,7 @@ public class KbMongo {
     public static class TrainingConfig{
         private String from; //O datetime
         private String to;
-        private String window;
+        private Integer window;
         private String mode; //TODO: eliminarlo
         private Boolean isActive;
         private String queryElastic;
@@ -61,7 +62,7 @@ public class KbMongo {
     @AllArgsConstructor
     public static class DetectionConfig{
         private String frequency;
-        private int window;
+        private Integer window;
         private String start;
         private String mode; //TODO: eliminarlo
         private Boolean isActive;
