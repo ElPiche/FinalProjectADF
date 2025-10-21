@@ -68,12 +68,14 @@ def detectar_anomalias_df(df: pd.DataFrame, baseline: dict, ventana_minutos: int
     threshold = baseline["threshold"]
 
     # all this sorting thingamabober is just so we can eliminate duplicates and put the timestamp in order
-    print("I am inside standalone z score, and I am printing df: ")
-    print(df)
+    # print("I am inside standalone z score, and I am printing df: ")
+    # print(df)
+
     df = df.sort_values("timestamp").set_index("timestamp")
     df_resample = df.resample(f"{ventana_minutos}min").sum()
-    print("I am inside standalone z score, and I am printing RESAMPLED df: ")
-    print(df_resample)
+
+    #  print("I am inside standalone z score, and I am printing RESAMPLED df: ")
+    #  print(df_resample)
 
     anomalies = []
     for ts, fila in df_resample.iterrows():
