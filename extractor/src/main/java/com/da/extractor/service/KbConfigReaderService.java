@@ -1,5 +1,6 @@
 package com.da.extractor.service;
 
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.json.JsonpMapper;
 
 import com.da.extractor.entity.KbMongo;
@@ -19,6 +20,12 @@ public class KbConfigReaderService {
     @Autowired
     JsonpMapper jsonpMapper;
 
+    @Autowired
+    StreamingModeService streamingModeService;
+
+    @Autowired
+    BatchModeService batchModeService;
+
     public List<KbMongo> listAll() throws IllegalArgumentException, IOException
     {
         return kbConfigRepository.findAll();
@@ -27,6 +34,20 @@ public class KbConfigReaderService {
     public KbMongo getByKbId(String kbId) {
         return kbConfigRepository.findByKbConfig_KbId(kbId)
                 .orElseThrow(() -> new IllegalArgumentException("KB Config no encontrada: " + kbId));
+    }
+
+    public void getAllConfigs() throws Exception {
+
+        List<KbMongo> kbMongoList = listAll();
+
+        for (KbMongo kbMongo : kbMongoList) {
+
+            streamingModeService.executeConfiguration(kbMongo);
+
+            batchModeService.executeConfiguration(kbMongo);
+
+        }
+
     }
 
 }

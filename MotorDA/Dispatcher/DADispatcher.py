@@ -13,6 +13,27 @@ from ..ZScore.standalone_da_algorithm_z_score import (
 )
 
 
+class TrainingAlgorithm:
+    def __init__(self,  mode: str):
+
+        self.mode = mode
+
+    def __repr__(self):
+        return f"TrainingAlgorithm(mode={self.mode})"
+
+
+class ZScore:
+    def __init__(self, train_window: int, train_from: str, train_to: str, threshold: float, observed_values: Dict[str, pd.DataFrame]):
+        self.train_window = train_window  # in minutes
+        self.threshold = threshold
+        self.train_from = train_from
+        self.train_to = train_to
+        self.observed_values = observed_values
+
+    def __repr__(self):
+        return f"ZScore(window={self.train_window}min, threshold={self.threshold}, metrics={list(self.observed_values.keys())})"
+
+
 # Dispatcher: Tiene como objetivo recibir el documento de configuración desde MongoDB y despachar la ejecución del algoritmo correspondiente.
 # Tiene que en base al documento de configuración, identificar qué algoritmo se debe ejecutar y llamar a la función correspondiente,
 # pasándole los parámetros necesarios. Y guardar los resultados en ElasticSearch.
@@ -27,6 +48,7 @@ KB_COLLECTION_NAME = "testLogsKB"
 DB_NAME_MOTOR_DA = "logsdb"
 DA_COLLECTION_NAME = "testingConfig"
 
+DA_RESULT_COLLECTION_NAME = "seriesResult"
 
 # conexión a elasticSearch
 ES_HOST = "http://localhost:9200"
@@ -56,8 +78,10 @@ def CreateConnectionToDA() -> MongoClient:
 
 
 def ExtractLatestConfiguration(client: MongoClient):
+
+    # as of right now, we get only one document, the idea would be to get the latest one when mongo change stream
+    # calls us
     result = client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].find_one({})
-    # print(result)
 
     # we parse with BSON cuz mongo brings some binary data inside, and we want to serialize it into JSON
     with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
@@ -129,39 +153,15 @@ def run_zscore(config_block: Dict[str, Any]):
     # acá va tu implementación real...
 
 
-def run_zscore_batch(start_iso, end_iso, observed_fields, da_client: MongoClient):
-    """
-    df_detect = fetch_logs_from_mongo(
-        CONNECTION, DEFAULT_DATABASE, COLLECTION, DETECT_FROM, DETECT_TO, [OBSERVED_FIELD])
-    """
+def run_zscore_batch_training(zScore: ZScore, data_to_train: TrainingAlgorithm, da_client: MongoClient):
 
-    # Fetch data from MongoDB within the given ISO date range and fields.
-    start_dt = pd.to_datetime(start_iso, utc=True)
-    end_dt = pd.to_datetime(end_iso, utc=True)
+    # iterating both key and values
+    for key, value in zScore.observed_values.items():
+        print(key)
+        results = train_baseline(value, "value")
+        da_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].insert_one(results)
 
-    # picks up all the values from the observed_fields and assigns them to 0 if the field value is not found
-    projection = {"_id": 0, "timestamp": "$es_timestamp"}
-    for field in observed_fields:
-        projection[field] = {"$ifNull": [f"${field}", 0]}
-
-    pipeline = [
-        {"$match": {"es_timestamp": {
-            "$gte": start_dt.to_pydatetime(), "$lt": end_dt.to_pydatetime()}}},
-        {"$project": projection},
-        {"$sort": {"timestamp": 1}},
-    ]
-
-    docs = list(da_client[KB_DB_NAME][DA_COLLECTION_NAME].aggregate(pipeline))
-
-    if not docs:
-        return pd.DataFrame(columns=["timestamp"] + observed_fields)
-
-    df = pd.DataFrame(docs)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    for field in observed_fields:
-        df[field] = pd.to_numeric(df[field], errors="coerce").fillna(0)
-
-    return df
+    return train_baseline(zScore.observed_values["5xx_status_codes"], "value")
 
 
 def run_arma(config_block: Dict[str, Any]):
@@ -197,26 +197,6 @@ ALGORITHM_HANDLERS = {
 }
 
 
-class TrainingAlgorithm:
-    def __init__(self, train_from: str, train_to: str, mode: str):
-        self.train_from = train_from
-        self.train_to = train_to
-        self.mode = mode
-
-    def __repr__(self):
-        return f"TrainingAlgorithm(from={self.train_from}, to={self.train_to}, mode={self.mode})"
-
-
-class ZScore:
-    def __init__(self, train_window: int, threshold: float, observed_values: Dict[str, int]):
-        self.train_window = train_window  # in minutes
-        self.threshold = threshold
-        self.observed_values = observed_values
-
-    def __repr__(self):
-        return f"ZScore(window={self.train_window}min, threshold={self.threshold}, metrics={list(self.observed_values.keys())})"
-
-
 def parse_json_to_classes(json_data: dict) -> tuple[TrainingAlgorithm, ZScore]:
     """
     Parse JSON data into TrainingAlgorithm and ZScore classes.
@@ -235,8 +215,8 @@ def parse_json_to_classes(json_data: dict) -> tuple[TrainingAlgorithm, ZScore]:
 
     # Create TrainingAlgorithm instance
     training_algo = TrainingAlgorithm(
-        train_from=parameters.get("from"),
-        train_to=parameters.get("to"),
+        #
+        #
         mode=training_data.get("mode")
     )
 
@@ -244,26 +224,28 @@ def parse_json_to_classes(json_data: dict) -> tuple[TrainingAlgorithm, ZScore]:
     trained_data = json_data.get("trained_data", {})
     trained_list = trained_data.get("trained_list", [])
 
-    # Get the first ZScore entry (or adjust logic if you need a specific one)
-    z_score_entry = next(
-        (item for item in trained_list if item.get("algorithm") == "ZScore"), {})
-
-    # Build observed_values dictionary
-    # This maps metric names to their latest values from training_data
+    # Build observed_values dictionary with DataFrames
+    # Each metric gets its own DataFrame with timestamp and value columns
     observed_values = {}
     observed_values_data = training_data.get("observed_values", {})
 
     for metric_name, data_points in observed_values_data.items():
         if data_points:  # If there are data points
-            # Get the latest value
-            latest_value = data_points[-1].get("value", 0)
-            observed_values[metric_name] = latest_value
+            # Create DataFrame from the list of dictionaries
+            df = pd.DataFrame(data_points)
+            # Convert timestamp to datetime if needed
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+            observed_values[metric_name] = df
 
     # Create ZScore instance
     z_score = ZScore(
-        train_window=z_score_entry.get("train_window", 60),
-        threshold=z_score_entry.get("threshold", 3),
-        observed_values=observed_values
+        train_window=training_data.get("algorithm").get(
+            "parameters").get("train_window"),
+        threshold=10,
+        observed_values=observed_values,
+        train_from=parameters.get("from"),
+        train_to=parameters.get("to"),
     )
 
     return training_algo, z_score
@@ -276,9 +258,6 @@ def main():
 
     # aquí llamariamos a nuestra lógica para checkear la metadata para corroborar si ya hemos hechos
     # esta operativa antes
-
-    # corroborar que los datos sacados del KB
-    print("Documento por id:")
 
     # nos conectamos a la DB donde está la data que nos interesa
     da_client = CreateConnectionToDA()
@@ -295,19 +274,25 @@ def main():
 
     print("--------------------------------------------------------------------")
 
+    print("I am printing the z score DATAFRAMIOS data:")
+    print(z_score.observed_values["2xx_status_codes"])
+
+    print("--------------------------------------------------------------------")
+
     print("I am printing the z score data:")
-    print(z_score.observed_values)
+    print(z_score)
+
+    result = run_zscore_batch_training(z_score, training_algo, da_client)
+
+    anomalies = detectar_anomalias_df(
+        z_score.observed_values["5xx_status_codes"], result, z_score.train_window)
+
+    save_anomalies_json(anomalies, result, 'Anomalies_Detected_ZScore.json')
 
     # por ahora dejaremos el change para despues
-    # da_client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].watch()
 
     # CENTRARSE EN PARSEAR CONFIG -> ENTRENAR -> DETECTAR
 
-    """
-    df_train = fetch_logs_from_mongo(
-        CONNECTION, DEFAULT_DATABASE, COLLECTION, TRAIN_FROM, TRAIN_TO, [OBSERVED_FIELD])
-    baseline = train_baseline(df_train, OBSERVED_FIELD)
-    """
     observed_fields = ["status_code_5xx"]
 
     # df = run_zscore_batch("2025-10-01T00:00:00Z",
