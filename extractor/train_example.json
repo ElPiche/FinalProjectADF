@@ -16,6 +16,7 @@
         "to": "2025-11-10T00:00:00.000Z"
       }
     },
+{"timestamp": "2025-10-01T00:00:00.000Z", "dim": "5xx", "value": 10}
     "observed_values": [
       {
         "5xx_status_codes": [
