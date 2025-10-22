@@ -1,6 +1,4 @@
 {
-  "training_data": {
-    // Example of training data for ZScore algorithm with 5xx status code counter
     "_id": {
       "$oid": "68f3e1e1a856aa9308751164"
     },
@@ -16,49 +14,18 @@
         "to": "2025-11-10T00:00:00.000Z"
       }
     },
-{"timestamp": "2025-10-01T00:00:00.000Z", "dim": "5xx", "value": 10}
-    "observed_values": [
-      {
-        "5xx_status_codes": [
-          {"timestamp": "2025-10-01T00:00:00.000Z", "value": 10},
-          {"timestamp": "2025-10-01T01:00:00.000Z", "value": 12},
-          {"timestamp": "2025-10-01T02:00:00.000Z", "value": 9},
-          // ... more hourly data points ...
-          {"timestamp": "2025-11-09T23:00:00.000Z", "value": 15}
-        ]
-      },
-      {"4xx_status_codes": [
-        {"timestamp": "2025-10-01T00:00:00.000Z", "value": 20},
-        {"timestamp": "2025-10-01T01:00:00.000Z", "value": 22},
-        {"timestamp": "2025-10-01T02:00:00.000Z", "value": 19},
-        // ... more hourly data points ...
-        {"timestamp": "2025-11-09T23:00:00.000Z", "value": 25}
-        ]
-      }
+    "data": [
+      {"timestamp": "2025-10-01T00:00:00.000Z", "dim": "5xx", "value": 10},
+      {"timestamp": "2025-10-01T01:00:00.000Z", "dim": "5xx", "value": 12},
+      {"timestamp": "2025-10-01T02:00:00.000Z", "dim": "5xx", "value": 11},
+      {"timestamp": "2025-10-01T03:00:00.000Z", "dim": "5xx", "value": 13},
+      {"timestamp": "2025-10-01T04:00:00.000Z", "dim": "5xx", "value": 14},
+      {"timestamp": "2025-10-01T05:00:00.000Z", "dim": "5xx", "value": 15},
+      {"timestamp": "2025-10-01T06:00:00.000Z", "dim": "5xx", "value": 16},
+      {"timestamp": "2025-10-01T07:00:00.000Z", "dim": "5xx", "value": 14},
+      {"timestamp": "2025-10-01T08:00:00.000Z", "dim": "5xx", "value": 13},
+      {"timestamp": "2025-10-01T09:00:00.000Z", "dim": "5xx", "value": 12},
+      {"timestamp": "2025-10-01T10:00:00.000Z", "dim": "5xx", "value": 11},
+      {"timestamp": "2025-10-01T11:00:00.000Z", "dim": "5xx", "value": 10}
     ]
-  },
-
-  "trained_data": {
-    "kb_id": "3af5b1d2-5d4e-4c3b-9f7e-123456789abc",
-    "trained_list": [
-      {
-        "algorithm": "ZScore",
-        "counting": "5xx_status_codes",
-        "mean": 12.5,
-        "std_dev": 2.3,
-        "train_window": 60,
-        "threshold": 3,
-        "trained_at": "2025-11-10T00:00:00.000Z"
-      },
-      {
-        "algorithm": "ZScore",
-        "counting": "4xx_status_codes",
-        "mean": 22.0,
-        "std_dev": 3.1,
-        "train_window": 60,
-        "threshold": 3,
-        "trained_at": "2025-11-10T00:00:00.000Z"
-      }
-    ]
-  }
 }

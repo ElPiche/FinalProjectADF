@@ -13,7 +13,18 @@
       "to": "2025-11-10T02:00:00.000Z"
     }
   },
-  "observed_values": [
-    25
+  "data": [
+    {"value": 25},
+    {"value": 30},
+    {"value": 28},
+    {"value": 35},
+    {"value": 40},
+    {"value": 38},
+    {"value": 45},
+    {"value": 50},
+    {"value": 48},
+    {"value": 55},
+    {"value": 60},
+    {"value": 58}
   ]
 }
