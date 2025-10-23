@@ -5,6 +5,7 @@ import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch.esql.ElasticsearchEsqlClient;
 import co.elastic.clients.elasticsearch.esql.QueryRequest;
 import co.elastic.clients.elasticsearch.esql.query.EsqlFormat;
+import co.elastic.clients.elasticsearch.sql.ElasticsearchSqlClient;
 import co.elastic.clients.json.JsonpMapper;
 import co.elastic.clients.transport.endpoints.BinaryResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -67,6 +68,8 @@ public class ElasticService {
 
         IO.println("Executing ESQL Query: " + query);
         ElasticsearchEsqlClient esqlClient = client.esql();
+        ElasticsearchSqlClient sqlClient = client.sql();
+
 
         BinaryResponse binaryResponse = esqlClient.query(QueryRequest.of(builder ->  builder.query(query).format(EsqlFormat.Json)));
 

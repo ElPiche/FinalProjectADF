@@ -1,14 +1,14 @@
-package com.da.extractor.entity;
+package com.da.extractor.entity.serie;
 
+import co.elastic.clients.util.DateTime;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
+import org.springframework.data.mongodb.core.query.Meta;
 
-import java.util.List;
-import java.util.Map;
 
 @Data
 @NoArgsConstructor
@@ -19,12 +19,13 @@ public class Serie {
     @Id
     private String id;
 
-    @Field("kb_id")
-    private String kbId;
+    @Field("value")
+    private int value;
 
-    @Field("kb_description")
-    private String kbDescription;
+    @Field("timestamp")
+    private DateTime timestamp;
 
-    @Field("serie")
-    private List<Map<String, Object>> serie;
+    @Field("metadata")
+    private Metadata metadata;
+
 }

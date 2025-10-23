@@ -1,6 +1,6 @@
 package com.da.extractor.service.pipeline;
 
-import com.da.extractor.entity.Serie;
+import com.da.extractor.entity.serie.Serie;
 import com.da.extractor.model.PipelineConfig;
 import org.springframework.stereotype.Service;
 

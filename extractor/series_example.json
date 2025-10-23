@@ -2,6 +2,8 @@
   "timestamp": "2025-10-01T00:00:00.000Z",
   "value": 10,
   "metadata": {
-    "dim": "5xx", "kb_id":  "3af5b1d2-5d4e-4c3b-9f7e-123456789abc"
+    "dim": "5xx",
+    "kb_id":  "3af5b1d2-5d4e-4c3b-9f7e-123456789abc",
+    "mode": 0 // 0 for train, 1 for detect
   }
 }

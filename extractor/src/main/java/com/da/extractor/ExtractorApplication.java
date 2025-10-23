@@ -26,6 +26,7 @@ public class ExtractorApplication{
 
         KbConfigReaderService kbConfigReaderService = context.getBean(KbConfigReaderService.class);
 
+
         //Esto ejecuta el kbconfig, haciendo entrar a ejecución el flujo entero.
         kbConfigReaderService.getAllConfigs();
 
