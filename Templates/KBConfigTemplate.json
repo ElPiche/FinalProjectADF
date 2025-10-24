@@ -1,7 +1,8 @@
 {
   "kbConfig": {
     "id": "1fbb07a4-favf-46ed-9eae-b8d1289c570c",
-    "description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
+    "name": "Geographic Traffic Pattern Analysis",
+    "description": "Analyze traffic patterns based on geographic data to identify anomalies in specific regions. This configuration focuses on monitoring traffic volume and speed across different geographic locations using Elasticsearch SQL queries.",
     "changeFlag": 0, // es solo una flag para reflejar un cambio en la kb y que se dispare el Change Stream, se podria pasar a booleano
     "scheduling": {
       "trainingConfig": {
