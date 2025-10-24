@@ -2,29 +2,43 @@ package com.da.extractor.service;
 
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch.esql.ElasticsearchEsqlClient;
-import co.elastic.clients.elasticsearch.esql.QueryRequest;
-import co.elastic.clients.elasticsearch.esql.query.EsqlFormat;
-import co.elastic.clients.elasticsearch.sql.ElasticsearchSqlClient;
+import co.elastic.clients.elasticsearch.sql.*;
+import co.elastic.clients.elasticsearch.sql.query.SqlFormat;
+import co.elastic.clients.elasticsearch.xpack.usage.Sql;
+import co.elastic.clients.json.JsonData;
 import co.elastic.clients.json.JsonpMapper;
 import co.elastic.clients.transport.endpoints.BinaryResponse;
+import com.da.extractor.model.ElasticResponse;
+import com.da.extractor.utils.Utils;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.validation.constraints.Null;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class ElasticService {
 
-    @Autowired
-    ElasticsearchClient client;
+    final ElasticsearchClient client;
 
-    @Autowired
-    JsonpMapper jsonpMapper;
+    final JsonpMapper jsonpMapper;
+
+    final ElasticsearchSqlClient sqlClient;
+
+    final int FETCH_SIZE = 1000;
+
+    public ElasticService(ElasticsearchClient client, JsonpMapper jsonpMapper) {
+        this.client = client;
+        this.jsonpMapper = jsonpMapper;
+        this.sqlClient = client.sql();
+    }
 
     /// Obtiene información del clúster de Elasticsearch
     public String getClusterInfo() throws Exception {
@@ -64,46 +78,49 @@ public class ElasticService {
     /// @return Un Map que contiene los resultados de la consulta
     /// @throws IllegalArgumentException Si la respuesta contiene un error
     /// @throws IOException Si ocurre un error al ejecutar la consulta
-    public Map<String, Object> executeQuery(String query) throws IllegalArgumentException, IOException {
+    public QueryResponse executeQuery(String query, @Null String requestCursor)
+            throws IllegalArgumentException, IOException {
 
         IO.println("Executing ESQL Query: " + query);
-        ElasticsearchEsqlClient esqlClient = client.esql();
-        ElasticsearchSqlClient sqlClient = client.sql();
 
+        return sqlClient.query(QueryRequest.of(builder -> {
 
-        BinaryResponse binaryResponse = esqlClient.query(QueryRequest.of(builder ->  builder.query(query).format(EsqlFormat.Json)));
+            builder.query(query).allowPartialSearchResults(true).format(SqlFormat.Json).fetchSize(FETCH_SIZE);
 
-        try (InputStream is = binaryResponse.content()) {
-            byte[] bytes = is.readAllBytes();
-
-            // (Opcional) Loguear el JSON crudo para debug
-            String rawJson = new String(bytes);
-            IO.println("Raw ESQL JSON:\n" + rawJson);
-
-            // 3) Parsear a Map
-            ObjectMapper mapper = new ObjectMapper();
-            Map<String, Object> root = mapper.readValue(bytes, Map.class);
-
-            // 4) Manejo de error si el JSON trae "error"
-            if (root.containsKey("error")) {
-                throw new IllegalArgumentException("Error while executing query: " + root.get("error"));
+            if(requestCursor != null){
+                builder.cursor(requestCursor);
             }
 
-            return root;
+            return builder;
 
-        }
-        /*
-        InputStream binaryResponseStream = binaryResponse.content();
-        ObjectMapper objectMapper = new ObjectMapper();
+        }));
+//        ElasticsearchEsqlClient esqlClient = client.esql();
 
-        // Convertir el InputStream a un Map
-        Map resultMap = objectMapper.readValue(new String(binaryResponseStream.readAllBytes()), Map.class);
+//        BinaryResponse binaryResponse = esqlClient.query(QueryRequest.of(builder ->  builder.query(query).format(EsqlFormat.Json)));
 
-        if(resultMap.containsKey("error")){
-            throw new IllegalArgumentException("Error while executing query: " + resultMap.get("error"));
-        }
+//        try (InputStream is = binaryResponse.content()) {
+//            byte[] bytes = is.readAllBytes();
+//
+//            // (Opcional) Loguear el JSON crudo para debug
+//            String rawJson = new String(bytes);
+//            IO.println("Raw ESQL JSON:\n" + rawJson);
+//
+//            // 3) Parsear a Map
+//            ObjectMapper mapper = new ObjectMapper();
+//            Map<String, Object> root = mapper.readValue(bytes, Map.class);
+//
+//            // 4) Manejo de error si el JSON trae "error"
+//            if (root.containsKey("error")) {
+//                throw new IllegalArgumentException("Error while executing query: " + root.get("error"));
+//            }
+//
+//            return root;
+//
+//        }
+    }
 
-        return resultMap;*/
+    public void clearCursor(String cursor) throws IOException {
+        sqlClient.clearCursor(ClearCursorRequest.of(builder -> builder.cursor(cursor)));
     }
 
     @SuppressWarnings("unchecked")

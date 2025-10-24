@@ -36,7 +36,7 @@ public class StreamingModeService {
                     ADAlgParameters
             );
 
-            extractorService.extractData(pipelineConfig);
+//            extractorService.extractData(pipelineConfig);
 
 
         }
