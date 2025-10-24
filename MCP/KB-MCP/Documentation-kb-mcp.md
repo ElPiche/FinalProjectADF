@@ -424,9 +424,12 @@ The system provides detailed error messages for:
 #### System Requirements
 - **Operating System**: Windows 10/11, Linux (Ubuntu/Debian), or macOS
 - **Python Version**: Python 3.8+ (Python 3.11 recommended)
-- **External Services**:
-  - **Elasticsearch**: Version 8.x with SQL API enabled
-  - **MongoDB**: Version 4.0+ (5.0+ recommended)
+- **Memory**: Minimum 4GB RAM (8GB recommended for large datasets)
+- **Disk Space**: 2GB free space for dependencies and logs
+
+#### External Services
+- **Elasticsearch**: Version 8.x with SQL API enabled (default: `http://localhost:9200`)
+- **MongoDB**: Version 4.0+ (5.0+ recommended) with authentication (default: `mongodb://admin:1q2w3E*@localhost:27018`)
 
 #### Required Python Packages
 ```bash
@@ -434,11 +437,11 @@ pip install fastmcp pydantic pymongo jsonschema croniter elasticsearch==8.15.0
 ```
 
 **Package Details:**
-- `fastmcp`: MCP server framework
-- `pydantic`: Data validation and models
-- `pymongo`: MongoDB connectivity
-- `jsonschema`: JSON schema validation
-- `croniter`: CRON expression validation
+- `fastmcp`: MCP server framework for tool exposure
+- `pydantic`: Data validation and configuration models
+- `pymongo`: MongoDB connectivity for configuration storage
+- `jsonschema`: JSON schema validation for configurations
+- `croniter`: CRON expression validation for scheduling
 - `elasticsearch==8.15.0`: Elasticsearch client (specific version for compatibility)
 
 ### Installation Options
@@ -517,17 +520,21 @@ The server will start and listen for MCP protocol messages.
 
 ### External Services Setup
 
-#### Elasticsearch
-- **Version**: Compatible with Elasticsearch 8.x
-- **Connection**: `http://localhost:9200` or `http://elasticsearch-dataset:9200`
-- **Features Required**: SQL API enabled
-- **Sample Data**: Use Kibana sample data for testing
+#### Elasticsearch Configuration
+- **Version**: Elasticsearch 8.x (tested with 8.15.0)
+- **Connection URLs**: `http://localhost:9200` or `http://elasticsearch-dataset:9200`
+- **Required Features**: SQL API must be enabled
+- **Sample Data**: Use Kibana sample web logs for testing
+- **Index Pattern**: `.ds-kibana_sample_data_logs-*` (data stream pattern)
+- **Field Types**: `@timestamp` (date), `response` (keyword/text), other fields as appropriate
 
-#### MongoDB
-- **Version**: MongoDB 4.0+ (5.0+ recommended)
-- **Connection**: `mongodb://admin:1q2w3E*@localhost:27018/?authSource=admin`
-- **Database**: `kb_configs`
-- **Collection**: `configurations`
+#### MongoDB Configuration
+- **Version**: MongoDB 4.0+ (5.0+ recommended for production)
+- **Connection String**: `mongodb://admin:1q2w3E*@localhost:27018/?authSource=admin`
+- **Authentication**: Username: `admin`, Password: `1q2w3E*` (URL-encoded as `1q2w3E%2A`)
+- **Database**: `kb_configs` (auto-created)
+- **Collection**: `configurations` (auto-created)
+- **Indexes**: Automatic indexing on `kbConfig.id` field
 
 ### Running the Server
 

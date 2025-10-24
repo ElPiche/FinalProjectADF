@@ -1,14 +1,18 @@
 # KB-MCP Server
 
-The KB-MCP (Knowledge Base Model Context Protocol) server provides a set of tools for managing Data Analytics (DA) algorithm configurations in the Knowledge Base system.
+The KB-MCP (Knowledge Base Model Context Protocol) server provides a comprehensive set of tools for creating, managing, and validating Data Analytics (DA) algorithm configurations in the Knowledge Base system.
 
 ## Overview
 
+**⚠️ IMPORTANT UPDATE (October 2025)**: The KB-MCP server has been migrated from ES|QL to SQL queries to overcome ES|QL's 10,000 entry limitation. All configurations now use Elasticsearch SQL syntax with full pagination support.
+
 This MCP server enables AI assistants to:
-- Create new DA algorithm configurations
+- Create new DA algorithm configurations with SQL query validation
 - List available algorithms and existing configurations
-- Modify existing configurations
+- Modify existing configurations with real-time validation
 - Validate algorithm requests against supported options
+- Execute SQL queries directly against Elasticsearch
+- Manage configurations stored in MongoDB
 
 ## Installation & Setup
 
@@ -135,59 +139,86 @@ python MCP/KB-MCP/kb-mcp.py
 ## Available Tools
 
 ### 1. `describe_mcp_server`
-Provides a comprehensive overview of the KB-MCP server and usage guide.
+Provides a comprehensive overview of the KB-MCP server, including all available tools, configuration structures, and usage guidelines.
 
 **Usage:**
 ```python
 describe_mcp_server()
 ```
 
-**Returns:** Detailed documentation about the server and all available tools.
+**Returns:** Complete server documentation with examples, migration notes, and troubleshooting guides.
 
 ### 2. `list_available_algorithms`
-Lists all DA algorithms available in the system, loaded from `Templates/DaConfigTemplate.json`.
+Lists all DA algorithms available in the system with their current implementation status.
 
 **Usage:**
 ```python
 list_available_algorithms()
 ```
 
-**Returns:** JSON object containing available algorithms with their default parameters.
+**Returns:** JSON object containing:
+- `available_algorithms`: Currently implemented algorithms with parameters
+- `future_algorithms`: Framework-ready algorithms pending implementation
+- `usage_notes`: Important usage guidelines and status information
 
 ### 3. `create_da_config`
-Creates a new DA algorithm configuration and saves it as a UUID-named JSON file in the KB directory.
+Creates and validates new anomaly detection configurations with SQL queries, saving them to MongoDB.
 
 **Required Parameters:**
-- `description` (str): Human-readable description of the configuration
+- `kb_config` (KBConfig): Complete configuration object with id, name, description, changeFlag, scheduling, and daAlgParameters
 
 **Optional Parameters:**
-- `query` (str): Elasticsearch query string
-- `training_from` (str): Training period start date (ISO 8601)
-- `training_to` (str): Training period end date (ISO 8601)
-- `detection_frequency` (str): Detection check frequency (e.g., "5m", "1h")
-- `detection_start` (str): Detection period start date (ISO 8601)
-- `one_shot` (bool): Whether detection should run only once (default: False)
-- `algorithms` (list[dict]): List of algorithm configurations
+- `da_alg_parameters` (DaAlgParameters): Algorithm parameters (if not included in kb_config)
 
 **Usage:**
 ```python
-create_da_config(
-    description="HTTP monitoring configuration",
-    algorithms=[
-        {"Algorithm": "ZScore", "Parameters": {"threshold": 3.0, "observed_value": "status_code_200_counter"}}
-    ]
+from kb_mcp import KBConfig, DaAlgParameters, ZScore
+
+# Create configuration object
+kb_config = KBConfig(
+    id="http-monitoring-config",
+    name="HTTP Status Monitoring",
+    description="Monitor HTTP response codes and detect anomalies in web traffic patterns",
+    changeFlag=0,
+    scheduling={
+        "trainingConfig": {
+            "trainingQuery": "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+            "from": "2025-09-01T00:00:00Z",
+            "to": "2025-09-30T23:59:59Z",
+            "mode": "training",
+            "trainingWindow": 60,
+            "isActive": True
+        },
+        "detectionConfig": {
+            "detectionQuery": "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-10T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+            "from": "2025-10-10T00:00:00Z",
+            "frequency": "*/15 * * * *",
+            "mode": "detection",
+            "detectionWindow": 60,
+            "isActive": False
+        }
+    },
+    daAlgParameters={
+        "zscore": [
+            {"observedValue": "status_code_200_counter"}
+        ]
+    }
 )
+
+result = create_da_config(kb_config=kb_config)
 ```
 
-**Returns:** Success message with save path and full JSON configuration.
+**Returns:** Success message with configuration preview or detailed error messages.
 
 **Validation:**
-- Description is required
-- Algorithms must be from the approved list
-- Invalid algorithms return error with available options
+- SQL query syntax validation using elasticsearch-sql tool
+- Field extraction and cross-validation against algorithm observedValue fields
+- CRON expression validation for scheduling
+- Date range validation
+- MongoDB connectivity and save verification
 
 ### 4. `list_kb_configurations`
-Lists all KB configurations stored in the KB directory with their details.
+Lists all KB configurations stored in MongoDB with their current status and details.
 
 **Usage:**
 ```python
@@ -195,35 +226,42 @@ list_kb_configurations()
 ```
 
 **Returns:** Formatted summary of all configurations including:
-- Configuration ID and filename
-- Description
-- Algorithms used
-- Training and detection periods
+- Configuration ID and name
+- Description and change flag
+- Algorithms used with observed values
+- Training and detection scheduling details
+- Active status indicators
 
 ### 5. `modify_kb_config`
-Updates an existing KB configuration by ID.
+Updates an existing KB configuration in MongoDB by ID with full validation.
 
 **Required Parameters:**
 - `config_id` (str): UUID of the configuration to modify
 
 **Optional Parameters:**
-- `description` (str): New description
-- `query` (str): New Elasticsearch query
-- `training_from` (str): New training start date
-- `training_to` (str): New training end date
-- `detection_frequency` (str): New detection frequency
-- `detection_start` (str): New detection start date
-- `algorithms` (list[dict]): New algorithm configurations
+- `kb_config` (KBConfig): Complete updated configuration object
+- Individual fields: `name`, `description`, `changeFlag`, `scheduling`, `daAlgParameters`
 
 **Usage:**
 ```python
+# Update specific fields
 modify_kb_config(
     config_id="a1b2c3d4-...",
-    description="Updated configuration description"
+    description="Updated configuration description",
+    changeFlag=1
 )
+
+# Or update entire configuration
+kb_config = KBConfig(
+    id="a1b2c3d4-...",
+    name="Updated Name",
+    description="Updated description",
+    # ... other fields
+)
+modify_kb_config(config_id="a1b2c3d4-...", kb_config=kb_config)
 ```
 
-**Returns:** Success message with updated configuration details.
+**Returns:** Success message with updated configuration details and validation confirmation.
 
 ## Configuration Structure
 
@@ -306,10 +344,11 @@ To add new algorithms:
 
 ## File Locations
 
-- **Server**: `MCP/KB-MCP/server.py`
-- **Configurations**: `KB/*.json` (UUID-named files)
-- **Templates**: `Templates/DaConfigTemplate.json`
+- **Server**: `MCP/KB-MCP/kb-mcp.py` (main server file)
+- **Configurations**: MongoDB `kb_configs.configurations` collection
+- **Templates**: `Templates/DaConfigTemplate.json` (legacy, algorithms now dynamic)
 - **Claude Config**: `MCP/claude-config/claude_desktop_config.json`
+- **Logs**: `MCP/KB-MCP/logs/log.txt` (server operation logs)
 
 ## Error Handling
 
@@ -369,6 +408,24 @@ The server provides detailed error messages for:
 - **MongoDB**: Check `mongodb://admin:1q2w3E*@localhost:27018/?authSource=admin`
 - **Docker Services**: Run `docker-compose up -d` to start all services
 - **Network**: Use `--network host` for Docker containers or proper port mapping
+
+## Migration from ES|QL to SQL (October 2025)
+
+### Background
+The KB-MCP server was migrated from ES|QL to SQL queries to overcome ES|QL's hard limit of 10,000 entries per query result. This migration enables unlimited scalability while maintaining all core functionality.
+
+### Key Changes
+- **Query Language**: `FROM index | WHERE conditions | EVAL field = expression | STATS agg BY group` → `SELECT expression AS alias, agg FROM index WHERE conditions GROUP BY group ORDER BY field`
+- **Function Mapping**: `DATE_TRUNC(1 hour, @timestamp)` → `DATE_TRUNC('hour', "@timestamp")`
+- **Conditional Aggregations**: `COUNT(*) WHERE condition` → `COUNT(CASE WHEN condition THEN 1 END)`
+- **Configuration Structure**: Nested scheduling objects with separate training/detection configs
+- **Storage**: File-based → MongoDB with change flags for triggering change streams
+
+### Benefits
+- **Scalability**: Handle datasets larger than 10,000 entries
+- **Performance**: Faster query execution and result processing
+- **Reliability**: No artificial limits on data analysis
+- **Maintainability**: Standard SQL syntax and tools
 
 ## License
 

@@ -628,7 +628,7 @@ def create_da_config(
     # Set defaults if None
     if kb_config is None:
         kb_config = KBConfig(
-            id=str(uuid.uuid4()),
+            id=str(uuid.uuid4()),  # Always generate new UUID for new configs
             name="Default HTTP Monitoring",
             description="Default configuration for monitoring HTTP status codes and detecting anomalies in web traffic patterns using Elasticsearch SQL queries.",
             changeFlag=0,
@@ -657,6 +657,10 @@ def create_da_config(
                 ]
             }
         )
+    else:
+        # If kb_config is provided, ensure ID is always a new UUID (never allow user-provided IDs)
+        kb_config.id = str(uuid.uuid4())
+        kb_config.changeFlag = 0  # Reset change flag for new configs
     if da_alg_parameters is None:
         # Try to extract custom algorithms from KB config first
         # Handle both KBConfig objects and dict inputs from MCP
@@ -934,13 +938,13 @@ def modify_kb_config(
         updates = {}
 
         if description is not None:
-            updates["KB_Config.Description"] = description
+            updates["kbConfig.description"] = description
 
         if training_query is not None:
             # Validate SQL query
             try:
                 sql_obj = SQL(training_query)
-                updates["KB_Config.Scheduling.TrainingConfig.TrainingQuery"] = training_query
+                updates["kbConfig.scheduling.trainingConfig.trainingQuery"] = training_query
             except ValueError as e:
                 return f"ERROR: Invalid training query: {str(e)}"
 
@@ -948,26 +952,26 @@ def modify_kb_config(
             # Validate SQL query
             try:
                 sql_obj = SQL(detection_query)
-                updates["KB_Config.Scheduling.DetectionConfig.DetectionQuery"] = detection_query
+                updates["kbConfig.scheduling.detectionConfig.detectionQuery"] = detection_query
             except ValueError as e:
                 return f"ERROR: Invalid detection query: {str(e)}"
 
         if training_from is not None:
-            updates["KB_Config.Scheduling.TrainingConfig.From"] = training_from
+            updates["kbConfig.scheduling.trainingConfig.from"] = training_from
 
         if training_to is not None:
-            updates["KB_Config.Scheduling.TrainingConfig.To"] = training_to
+            updates["kbConfig.scheduling.trainingConfig.to"] = training_to
 
         if detection_frequency is not None:
             # Validate CRON
             try:
                 CRON(detection_frequency)
-                updates["KB_Config.Scheduling.DetectionConfig.Frequency"] = detection_frequency
+                updates["kbConfig.scheduling.detectionConfig.frequency"] = detection_frequency
             except ValueError as e:
                 return f"ERROR: Invalid detection frequency: {str(e)}"
 
         if detection_start is not None:
-            updates["KB_Config.Scheduling.DetectionConfig.From"] = detection_start
+            updates["kbConfig.scheduling.detectionConfig.from"] = detection_start
 
         if da_alg_parameters is not None:
             # Validate algorithm parameters
@@ -981,7 +985,7 @@ def modify_kb_config(
 
                 if zscore_algs:
                     da_params = DaAlgParameters(algorithms=zscore_algs)
-                    updates["KB_Config.DaAlgParameters"] = da_alg_parameters
+                    updates["kbConfig.daAlgParameters"] = da_alg_parameters
                 else:
                     return "ERROR: No valid ZScore algorithms found in da_alg_parameters"
             except Exception as e:
@@ -993,15 +997,29 @@ def modify_kb_config(
         # Apply updates
         result = collection.update_one(
             {"kbConfig.id": config_id},
-            {"$set": updates}
+            {"$set": updates, "$inc": {"kbConfig.changeFlag": 1}}  # Increment change flag
         )
 
         if result.modified_count == 0:
             return "WARNING: No changes were made to the configuration"
 
-        # Retrieve and return updated configuration
-        updated_doc = collection.find_one({"kbConfig.id": config_id})
-        return f"SUCCESS: Configuration '{config_id}' updated successfully.\n\nUpdated configuration:\n{json.dumps(updated_doc, indent=2)}"
+        # Retrieve and return updated configuration (exclude MongoDB ObjectId)
+        updated_doc = collection.find_one({"kbConfig.id": config_id}, {"_id": 0})
+        if updated_doc:
+            # Convert ObjectId to string if present in nested structures
+            def convert_objectid(obj):
+                if isinstance(obj, dict):
+                    return {k: convert_objectid(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [convert_objectid(item) for item in obj]
+                elif hasattr(obj, '__class__') and 'ObjectId' in str(obj.__class__):
+                    return str(obj)
+                else:
+                    return obj
+            updated_doc = convert_objectid(updated_doc)
+            return f"SUCCESS: Configuration '{config_id}' updated successfully."
+        else:
+            return f"SUCCESS: Configuration '{config_id}' updated successfully, but could not retrieve updated document."
 
     except Exception as e:
         log_message(f"Error modifying configuration {config_id}: {str(e)}", "error")
@@ -1049,21 +1067,21 @@ def list_kb_configurations() -> str:
             name = kb_config.get("name", "Unknown")
             description = kb_config.get("description", "No description")
 
-            # Extract algorithm info
-            da_params = kb_config.get("DaAlgParameters", {})
+            # Extract algorithm info (new lowercase structure)
+            da_params = kb_config.get("daAlgParameters", {})
             algorithms = []
             if "zscore" in da_params:
                 algorithms.extend([f"ZScore({alg.get('observedValue', 'unknown')})" for alg in da_params["zscore"]])
 
-            # Extract scheduling info
-            scheduling = kb_config.get("Scheduling", {})
-            training_config = scheduling.get("TrainingConfig", {})
-            detection_config = scheduling.get("DetectionConfig", {})
+            # Extract scheduling info (new lowercase structure)
+            scheduling = kb_config.get("scheduling", {})
+            training_config = scheduling.get("trainingConfig", {})
+            detection_config = scheduling.get("detectionConfig", {})
 
-            training_from = training_config.get("From", "Unknown")
-            training_to = training_config.get("To", "Unknown")
-            detection_freq = detection_config.get("Frequency", "Unknown")
-            detection_from = detection_config.get("From", "Unknown")
+            training_from = training_config.get("from", "Unknown")
+            training_to = training_config.get("to", "Unknown")
+            detection_freq = detection_config.get("frequency", "Unknown")
+            detection_from = detection_config.get("from", "Unknown")
 
             output += f"## Configuration: {config_id}\n"
             output += f"- **Name**: {name}\n"
@@ -1479,10 +1497,10 @@ if __name__ == "__main__":
             scheduling["detectionConfig"] = detection_config
 
             kb_config = KBConfig(
-                id=args.id or str(uuid.uuid4()),
+                id=str(uuid.uuid4()),  # Always generate new UUID, never use user-provided ID
                 name=args.name or "Test Configuration",
                 description=args.description or "Test configuration for anomaly detection",
-                changeFlag=args.change_flag,
+                changeFlag=0,  # Always start with 0 for new configs
                 scheduling=scheduling,
                 daAlgParameters={
                     "zscore": [
