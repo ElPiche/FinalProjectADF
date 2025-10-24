@@ -4,6 +4,7 @@ import uuid
 import datetime
 import logging
 import re
+import argparse
 from jsonschema import validate, ValidationError
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -30,18 +31,19 @@ mcp = FastMCP("KB-MCP")
 
 #Classes ------------------------------------------------------------------------------------------------------
 
-# Id GUID, Description, Query Elastic Query only
+# Id GUID, Description, ChangeFlag, Scheduling, DA Alg Parameters
 class KBConfig(BaseModel):
     id: str
     description: str
-    query_elastic: str
+    changeFlag: int
+    scheduling: dict
+    daAlgParameters: dict
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Validate ESQL query after initialization
-        esql_obj = ESQL(self.query_elastic)  # This will raise ValueError if invalid
-        self.query_elastic = esql_obj.value
-        log_message(f"ESQL query validated for KB config {self.id}")
+        # Store original queries without validation during initialization
+        # Validation will happen when tools are actually called
+        log_message(f"KB config {self.id} initialized without SQL validation")
 
 # CRON class moved before classes that use it
 class CRON:
@@ -95,6 +97,10 @@ class schedulingDetectionConfig(BaseModel):
 
 
 class DaAlgParameters(BaseModel):
+    # Future: Add other algorithm types here
+    # THIS MEANS THIS CLASS WILL REMAIN AS IS UNTIL THE USER ASKS FOR MORE ALGORITHMS
+    # THIS IS A CRITICAL COMMANDMENT
+
     algorithms: list
 
     @field_validator('algorithms', mode='before')
@@ -139,6 +145,9 @@ class DaAlgParameters(BaseModel):
             if isinstance(alg, ZScore):
                 grouped["zscore"].append(alg_dict)
             # Future: Add other algorithm types here
+            # THIS MEANS THIS CLASS WILL REMAIN AS IS UNTIL THE USER ASKS FOR MORE ALGORITHMS
+            # THIS IS A CRITICAL COMMANDMENT
+
             # elif isinstance(alg, ARMA):
             #     grouped["arma"].append(alg_dict)
             # elif isinstance(alg, KMeans):
@@ -153,26 +162,24 @@ class DaAlgParameters(BaseModel):
 
 # Zscore, used for anomaly detection based on statistical deviations
 class ZScore(BaseModel):
-    threshold: float
     observed_value: str
 
     def to_dict(self):
         return {
-            "threshold": self.threshold,
             "observedValue": self.observed_value
         }
     
 # Auxiliary classes --------------------------------------------------------------------------------------------
 
-def extract_all_output_field_names(esql_query: str) -> list[str]:
+def extract_sql_output_fields(sql_query: str) -> list[str]:
     """
-    Extract all output field names from ESQL query, including both EVAL and STATS clauses.
+    Extract all output field names from SQL query.
 
-    This function comprehensively parses ESQL queries to identify all field names that
-    could be available as output, including fields created by EVAL and fields from STATS.
+    This function parses SQL queries to identify all field names that
+    could be available as output from the SELECT clause.
 
     Args:
-        esql_query (str): The complete ESQL query string
+        sql_query (str): The complete SQL query string
 
     Returns:
         list[str]: List of all field names that could be output from the query
@@ -181,64 +188,81 @@ def extract_all_output_field_names(esql_query: str) -> list[str]:
         ValueError: If query parsing fails due to malformed syntax
 
     Examples:
-        >>> extract_all_output_field_names("FROM table | EVAL new_field = old_field * 2 | STATS count = COUNT(*) BY group")
-        ['new_field', 'count']
-    """
-    field_names = set()
-
-    # Extract fields from EVAL clauses
-    eval_fields = _extract_eval_field_names(esql_query)
-    field_names.update(eval_fields)
-
-    # Extract fields from STATS clauses
-    stats_fields = extract_stats_field_names(esql_query)
-    field_names.update(stats_fields)
-
-    return sorted(list(field_names))
-
-
-def extract_stats_field_names(esql_query: str) -> list[str]:
-    """
-    Extract output field names from STATS clauses in an ESQL query.
-
-    This function parses ESQL queries to identify field names defined in STATS clauses,
-    handling complex expressions, aggregations, WHERE conditions, and multiple fields.
-
-    Args:
-        esql_query (str): The complete ESQL query string
-
-    Returns:
-        list[str]: List of field names extracted from STATS clauses
-
-    Raises:
-        ValueError: If STATS clause parsing fails due to malformed syntax
-
-    Examples:
-        >>> extract_stats_field_names("FROM table | STATS count = COUNT(*), avg_val = AVG(field) BY group")
-        ['count', 'avg_val']
-
-        >>> extract_stats_field_names("FROM table | STATS field1 = COUNT(*) WHERE condition == 'value' BY time")
-        ['field1']
+        >>> extract_sql_output_fields("SELECT field1, field2 FROM table WHERE condition")
+        ['field1', 'field2']
     """
     import re
 
-    # Find STATS clause in the query
-    stats_match = re.search(r'\bSTATS\s+(.+?)(?:\s+BY\s+|\s*$)', esql_query, re.IGNORECASE | re.DOTALL)
-    if not stats_match:
+    # Find SELECT clause
+    select_match = re.search(r'\bSELECT\s+(.+?)\s+FROM', sql_query, re.IGNORECASE | re.DOTALL)
+    if not select_match:
         return []
 
-    stats_content = stats_match.group(1).strip()
+    select_content = select_match.group(1).strip()
 
-    # Split by commas, but be careful with commas inside functions or WHERE clauses
-    field_definitions = _split_stats_fields(stats_content)
-
+    # Split by commas, handling functions and aliases
     field_names = []
-    for field_def in field_definitions:
-        field_name = _extract_field_name_from_definition(field_def.strip())
-        if field_name:
-            field_names.append(field_name)
+    fields = re.split(r',', select_content)
+    for field in fields:
+        field = field.strip()
+        # Extract alias or field name
+        alias_match = re.search(r'\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)', field, re.IGNORECASE)
+        if alias_match:
+            field_names.append(alias_match.group(1))
+        else:
+            # Extract field name from expressions like COUNT(field) AS count
+            name_match = re.search(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*$', field)
+            if name_match:
+                field_names.append(name_match.group(1))
 
-    return field_names
+    return sorted(list(set(field_names)))
+
+
+def extract_sql_select_fields(sql_query: str) -> list[str]:
+    """
+    Extract output field names from SQL SELECT clauses.
+
+    This function parses SQL queries to identify field names defined in SELECT clauses,
+    handling aggregations and aliases.
+
+    Args:
+        sql_query (str): The complete SQL query string
+
+    Returns:
+        list[str]: List of field names extracted from SELECT clauses
+
+    Raises:
+        ValueError: If SELECT clause parsing fails due to malformed syntax
+
+    Examples:
+        >>> extract_sql_select_fields("SELECT COUNT(*) as count, AVG(field) as avg_val FROM table")
+        ['count', 'avg_val']
+    """
+    import re
+
+    # Find SELECT clause
+    select_match = re.search(r'\bSELECT\s+(.+?)\s+FROM', sql_query, re.IGNORECASE | re.DOTALL)
+    if not select_match:
+        return []
+
+    select_content = select_match.group(1).strip()
+
+    # Split by commas
+    fields = re.split(r',', select_content)
+    field_names = []
+    for field in fields:
+        field = field.strip()
+        # Extract alias
+        alias_match = re.search(r'\s+AS\s+([a-zA-Z_][a-zA-Z0-9_]*)', field, re.IGNORECASE)
+        if alias_match:
+            field_names.append(alias_match.group(1))
+        else:
+            # For simple fields or aggregations without alias
+            name_match = re.search(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*$', field)
+            if name_match:
+                field_names.append(name_match.group(1))
+
+    return sorted(list(set(field_names)))
 
 
 def _extract_eval_field_names(esql_query: str) -> list[str]:
@@ -421,45 +445,42 @@ def _extract_field_name_from_definition(field_definition: str) -> str:
     return ""
 
 
-# ESQL class for validating ESQL queries
-class ESQL:
+# SQL class for validating SQL queries
+class SQL:
     def __init__(self, value: str):
-        if not self._is_valid_esql(value):
-            log_message(f"ESQL validation failed: Invalid ESQL format: {value}", "error")
-            raise ValueError(f"Invalid ESQL format: {value}")
+        if not self._is_valid_sql(value):
+            log_message(f"SQL validation failed: Invalid SQL format: {value}", "error")
+            raise ValueError(f"Invalid SQL format: {value}")
         self.value = value
-        log_message(f"ESQL validated successfully: {value[:50]}...", "info")
+        log_message(f"SQL validated successfully: {value[:50]}...", "info")
 
     @staticmethod
-    def _is_valid_esql(query: str) -> bool:
-        # Try localhost first (for local development), then Docker service name
-        es_hosts = ["http://localhost:9200", "http://elasticsearch-dataset:9200"]
+    def _is_valid_sql(query: str) -> bool:
+        # Basic SQL syntax validation without using MCP tools during startup
+        try:
+            # Basic regex validation for SQL structure
+            if not re.search(r'\bSELECT\b', query, re.IGNORECASE):
+                return False
 
-        for host in es_hosts:
-            try:
-                log_message(f"Attempting ESQL validation with Elasticsearch at {host}")
-                es = Elasticsearch(host)
-                # Convert single quotes to double quotes for ESQL compatibility
-                validation_query = query.replace("'", '"') + " | LIMIT 0"
-                es.esql.query(query=validation_query)
-                log_message(f"ESQL validation successful with {host}")
-                return True
-            except Exception as e:
-                log_message(f"ESQL validation failed with {host}: {str(e)}", "warning")
-                continue
+            # Check for basic SQL structure
+            if not re.search(r'\bFROM\b', query, re.IGNORECASE):
+                return False
 
-        # If both hosts failed, do basic syntax validation
-        log_message("ESQL validation error (Elasticsearch not available at localhost or docker service)", "warning")
-        # Basic validation: check if it contains FROM and has reasonable structure
-        if "FROM" not in query.upper():
+            # Check for balanced quotes
+            single_quotes = query.count("'") - query.count("\\'")
+            double_quotes = query.count('"') - query.count('\\"')
+            if single_quotes % 2 != 0 or double_quotes % 2 != 0:
+                return False
+
+            log_message("SQL basic validation successful")
+            return True
+        except Exception as e:
+            log_message(f"SQL validation failed: {str(e)}", "warning")
             return False
-        # Allow validation to pass for development if ES is not available
-        log_message("ESQL validation bypassed (Elasticsearch not available) - basic syntax check passed", "info")
-        return True
 
     def extract_output_fields(self) -> list[str]:
         """
-        Extract all output field names from the ESQL query, including EVAL and STATS fields.
+        Extract all output field names from the SQL query.
 
         Returns:
             list[str]: List of all field names that could be output from the query
@@ -467,25 +488,25 @@ class ESQL:
         Raises:
             ValueError: If query parsing fails
         """
-        return extract_all_output_field_names(self.value)
+        return extract_sql_output_fields(self.value)
 
     def extract_stats_fields(self) -> list[str]:
         """
-        Extract output field names from STATS clauses in the ESQL query.
+        Extract output field names from SQL SELECT clauses.
 
         Returns:
-            list[str]: List of field names defined in STATS clauses
+            list[str]: List of field names defined in SELECT clauses
 
         Raises:
-            ValueError: If STATS clause parsing fails
+            ValueError: If SELECT clause parsing fails
         """
-        return extract_stats_field_names(self.value)
+        return extract_sql_select_fields(self.value)
 
     def __str__(self):
         return self.value
 
     def __repr__(self):
-        return f"ESQL('{self.value}')"
+        return f"SQL('{self.value}')"
 
 
 class UUID:
@@ -579,8 +600,6 @@ class ExtractorModes(str):
 @mcp.tool()
 def create_da_config(
     kb_config: Optional[KBConfig] = None,
-    scheduling_training_config: Optional[schedulingTrainingConfig] = None,
-    scheduling_detection_config: Optional[schedulingDetectionConfig] = None,
     da_alg_parameters: Optional[DaAlgParameters] = None
 ) -> str:
     """
@@ -590,9 +609,7 @@ def create_da_config(
     to help ensure correct configuration creation.
 
     Args:
-        kb_config (KBConfig): Configuration containing ID, description, and validated ESQL query
-        scheduling_training_config (schedulingTrainingConfig): Training period configuration
-        scheduling_detection_config (schedulingDetectionConfig): Detection scheduling configuration  
+        kb_config (KBConfig): Configuration containing ID, description, changeFlag, scheduling, and daAlgParameters
         da_alg_parameters (DaAlgParameters): Data analytics algorithm parameters
 
     Returns:
@@ -607,26 +624,66 @@ def create_da_config(
         kb_config = KBConfig(
             id=str(uuid.uuid4()),
             description="Default HTTP monitoring configuration",
-            query_elastic="FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= '2025-10-01T00:00:00.000Z' AND @timestamp < '2025-11-01T00:00:00.000Z' | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == '200', status_code_5xx_counter = COUNT(*) WHERE response >= '500' AND response < '600' BY es_timestamp | SORT es_timestamp"
-        )
-    if scheduling_training_config is None:
-        scheduling_training_config = schedulingTrainingConfig(
-            from_date=datetime.fromisoformat("2025-09-01T00:00:00"),
-            to_date=datetime.fromisoformat("2025-09-30T23:59:59"),
-            mode="batch"
-        )
-    if scheduling_detection_config is None:
-        scheduling_detection_config = schedulingDetectionConfig(
-            frequency=CRON("*/5 * * * *"),  # Every 5 minutes
-            window=CRON("0 * * * *"),      # Every hour
-            start=datetime.fromisoformat("2025-10-01T00:00:00"),
-            mode="streaming"
+            changeFlag=0,
+            scheduling={
+                "trainingConfig": {
+                    "trainingQuery": "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+                    "from": "2025-09-01T00:00:00Z",
+                    "to": "2025-09-30T23:59:59Z",
+                    "mode": "training",
+                    "trainingWindow": 60,
+                    "isActive": True
+                },
+                "detectionConfig": {
+                    "detectionQuery": "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-10T00:00:00.000Z' AND \"@timestamp\" < '2025-10-11T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+                    "from": "2025-10-10T00:00:00Z",
+                    "frequency": "*/15 * * * *",
+                    "detectionWindow": 60,
+                    "mode": "detection",
+                    "isActive": False
+                }
+            },
+            daAlgParameters={
+                "zscore": [
+                    {"observedValue": "status_code_200_counter"},
+                    {"observedValue": "status_code_5xx_counter"}
+                ]
+            }
         )
     if da_alg_parameters is None:
-        da_alg_parameters = DaAlgParameters(algorithms=[
-            ZScore(threshold=3.0, observed_value="status_code_200_counter"),
-            ZScore(threshold=2.5, observed_value="status_code_5xx_counter")
-        ])
+        # Try to extract custom algorithms from KB config first
+        # Handle both KBConfig objects and dict inputs from MCP
+        da_alg_params = None
+        if isinstance(kb_config, dict) and 'daAlgParameters' in kb_config:
+            da_alg_params = kb_config['daAlgParameters']
+        elif hasattr(kb_config, 'daAlgParameters'):
+            da_alg_params = kb_config.daAlgParameters
+
+        if da_alg_params:
+            custom_algs = []
+            # Extract zscore algorithms from KB config
+            zscore_configs = da_alg_params.get("zscore", [])
+            for alg_dict in zscore_configs:
+                if isinstance(alg_dict, dict) and "observedValue" in alg_dict:
+                    custom_algs.append(ZScore(observed_value=alg_dict["observedValue"]))
+
+            if custom_algs:
+                da_alg_parameters = DaAlgParameters(algorithms=custom_algs)
+                log_message(f"Using {len(custom_algs)} custom algorithms from KB config")
+            else:
+                # Fall back to defaults if no valid custom algorithms found
+                da_alg_parameters = DaAlgParameters(algorithms=[
+                    ZScore(observed_value="status_code_200_counter"),
+                    ZScore(observed_value="status_code_5xx_counter")
+                ])
+                log_message("No valid custom algorithms found, using defaults")
+        else:
+            # Use defaults when no KB config or daAlgParameters provided
+            da_alg_parameters = DaAlgParameters(algorithms=[
+                ZScore(observed_value="status_code_200_counter"),
+                ZScore(observed_value="status_code_5xx_counter")
+            ])
+            log_message("Using default algorithms")
 
     validation_errors = []
     
@@ -636,26 +693,37 @@ def create_da_config(
             validation_errors.append("KB Config ID must be a non-empty string")
         if not kb_config.description or not isinstance(kb_config.description, str):
             validation_errors.append("KB Config description must be a non-empty string")
-        # ESQL validation happens automatically in KBConfig setter
+        # SQL validation will happen in the tool functions
     except ValueError as e:
-        validation_errors.append(f"KB Config ESQL validation failed: {str(e)}")
+        validation_errors.append(f"KB Config validation failed: {str(e)}")
     
     # Validate Training Config
     try:
-        if scheduling_training_config.from_date >= scheduling_training_config.to_date:
-            validation_errors.append("Training 'from_date' must be before 'to_date'")
-        if scheduling_training_config.mode not in ["batch", "streaming"]:
-            validation_errors.append("Training mode must be 'batch' or 'streaming'")
-    except AttributeError:
-        validation_errors.append("Invalid scheduling_training_config object")
-    
+        training_config = kb_config.scheduling.get('trainingConfig', {})
+        if training_config.get('from') >= training_config.get('to'):
+            validation_errors.append("Training 'from' must be before 'to'")
+        if training_config.get('mode') not in ["training", "batch", "streaming"]:
+            validation_errors.append("Training mode must be 'training', 'batch', or 'streaming'")
+        if not isinstance(training_config.get('trainingWindow'), int) or training_config.get('trainingWindow') <= 0:
+            validation_errors.append("Training window must be a positive integer")
+    except (AttributeError, TypeError):
+        validation_errors.append("Invalid training config in scheduling")
+
     # Validate Detection Config
     try:
-        if scheduling_detection_config.mode not in ["batch", "streaming"]:
-            validation_errors.append("Detection mode must be 'batch' or 'streaming'")
-        # CRON validation happens automatically in schedulingDetectionConfig
-    except AttributeError:
-        validation_errors.append("Invalid scheduling_detection_config object")
+        detection_config = kb_config.scheduling.get('detectionConfig', {})
+        if detection_config.get('mode') not in ["detection", "batch", "streaming"]:
+            validation_errors.append("Detection mode must be 'detection', 'batch', or 'streaming'")
+        if not isinstance(detection_config.get('detectionWindow'), int) or detection_config.get('detectionWindow') <= 0:
+            validation_errors.append("Detection window must be a positive integer")
+        # CRON validation for frequency
+        if 'frequency' in detection_config:
+            try:
+                CRON(detection_config['frequency'])
+            except ValueError as e:
+                validation_errors.append(f"Invalid detection frequency CRON: {str(e)}")
+    except (AttributeError, TypeError):
+        validation_errors.append("Invalid detection config in scheduling")
     
     # Validate DA Algorithm Parameters
     try:
@@ -665,57 +733,83 @@ def create_da_config(
             if not hasattr(alg, 'to_dict'):
                 validation_errors.append(f"Algorithm {i} must have a to_dict() method")
 
-        # Cross-validate: Check that observed_value fields match ESQL output fields
+        # Cross-validate: Check that observed_value fields match SQL output fields
         if kb_config:
             try:
-                esql_obj = ESQL(kb_config.query_elastic)
-                output_fields = esql_obj.extract_output_fields()
-                stats_fields = esql_obj.extract_stats_fields()
+                # Validate training query using elasticsearch_sql tool
+                training_query = kb_config.scheduling.get('trainingConfig', {}).get('trainingQuery')
+                if training_query:
+                    # Use elasticsearch_sql tool to validate and get output fields
+                    validation_result = elasticsearch_sql(training_query + " LIMIT 0")
+                    if "ERROR" in validation_result:
+                        validation_errors.append(f"Training SQL query validation failed: {validation_result}")
+                    else:
+                        # Parse the result to get output fields
+                        try:
+                            result_data = json.loads(validation_result)
+                            output_fields = [col['name'] for col in result_data.get('columns', [])]
 
-                if not output_fields:
-                    validation_errors.append(
-                        "ESQL query validation failed: No output fields found. "
-                        "The query must contain either EVAL or STATS clauses that produce named fields."
-                    )
-                elif not stats_fields:
-                    validation_errors.append(
-                        "ESQL query validation failed: No STATS clause found. "
-                        "The query must contain a STATS clause to aggregate data for anomaly detection."
-                    )
-                else:
-                    # Check each algorithm's observed_value against all available output fields
-                    missing_fields = []
-                    invalid_algorithms = []
-
-                    for i, alg in enumerate(da_alg_parameters.algorithms):
-                        if hasattr(alg, 'observed_value'):
-                            if alg.observed_value not in output_fields:
-                                missing_fields.append(f"'{alg.observed_value}' (Algorithm {i})")
-                            elif alg.observed_value not in stats_fields:
-                                # Field exists but is not from STATS - this might be valid if it's an EVAL field
-                                # but for anomaly detection, we typically want aggregated STATS fields
+                            if not output_fields:
                                 validation_errors.append(
-                                    f"Algorithm {i} observed_value '{alg.observed_value}' is an EVAL field, "
-                                    f"not a STATS aggregation field. For anomaly detection, use STATS output fields. "
-                                    f"Available STATS fields: {stats_fields}"
+                                    "Training SQL query validation failed: No output fields found. "
+                                    "The query must contain a SELECT clause that produces named fields."
                                 )
-                        else:
-                            invalid_algorithms.append(f"Algorithm {i} (missing observed_value field)")
+                            else:
+                                # Check each algorithm's observed_value against available output fields
+                                missing_fields = []
+                                for i, alg in enumerate(da_alg_parameters.algorithms):
+                                    if hasattr(alg, 'observed_value'):
+                                        if alg.observed_value not in output_fields:
+                                            missing_fields.append(f"'{alg.observed_value}' (Algorithm {i})")
+                                    else:
+                                        validation_errors.append(f"Algorithm {i} missing observed_value field")
 
-                    if missing_fields:
-                        validation_errors.append(
-                            f"Observed value fields not found in ESQL output: {', '.join(missing_fields)}. "
-                            f"Available ESQL output fields: {output_fields}"
-                        )
+                                if missing_fields:
+                                    validation_errors.append(
+                                        f"Observed value fields not found in training SQL output: {', '.join(missing_fields)}. "
+                                        f"Available SQL output fields: {output_fields}"
+                                    )
+                        except json.JSONDecodeError:
+                            validation_errors.append("Training SQL query validation failed: Could not parse Elasticsearch response")
 
-                    if invalid_algorithms:
-                        validation_errors.append(
-                            f"Invalid algorithms: {', '.join(invalid_algorithms)}. "
-                            "All algorithms must have an observed_value field."
-                        )
+                # Validate detection query using elasticsearch_sql tool
+                detection_query = kb_config.scheduling.get('detectionConfig', {}).get('detectionQuery')
+                if detection_query:
+                    # Use elasticsearch_sql tool to validate and get output fields
+                    validation_result = elasticsearch_sql(detection_query + " LIMIT 0")
+                    if "ERROR" in validation_result:
+                        validation_errors.append(f"Detection SQL query validation failed: {validation_result}")
+                    else:
+                        # Parse the result to get output fields
+                        try:
+                            result_data = json.loads(validation_result)
+                            output_fields = [col['name'] for col in result_data.get('columns', [])]
 
-            except ValueError as e:
-                validation_errors.append(f"ESQL query validation failed: {str(e)}")
+                            if not output_fields:
+                                validation_errors.append(
+                                    "Detection SQL query validation failed: No output fields found. "
+                                    "The query must contain a SELECT clause that produces named fields."
+                                )
+                            else:
+                                # Check each algorithm's observed_value against available output fields
+                                missing_fields = []
+                                for i, alg in enumerate(da_alg_parameters.algorithms):
+                                    if hasattr(alg, 'observed_value'):
+                                        if alg.observed_value not in output_fields:
+                                            missing_fields.append(f"'{alg.observed_value}' (Algorithm {i})")
+                                    else:
+                                        validation_errors.append(f"Algorithm {i} missing observed_value field")
+
+                                if missing_fields:
+                                    validation_errors.append(
+                                        f"Observed value fields not found in detection SQL output: {', '.join(missing_fields)}. "
+                                        f"Available SQL output fields: {output_fields}"
+                                    )
+                        except json.JSONDecodeError:
+                            validation_errors.append("Detection SQL query validation failed: Could not parse Elasticsearch response")
+
+            except Exception as e:
+                validation_errors.append(f"SQL query validation failed: {str(e)}")
 
     except AttributeError:
         validation_errors.append("Invalid da_alg_parameters object")
@@ -728,24 +822,12 @@ def create_da_config(
     
     # Build preview of configuration
     config_preview = {
-        "KB_Config": {
-            "Id": kb_config.id,
-            "Description": kb_config.description,
-            "Query_Elastic": {"query": kb_config.query_elastic},
-            "Scheduling": {
-                "TrainingPeriod": {
-                    "from": scheduling_training_config.from_date.isoformat(),
-                    "to": scheduling_training_config.to_date.isoformat(),
-                    "mode": scheduling_training_config.mode
-                },
-                "Detection": {
-                    "frequency": scheduling_detection_config.frequency,
-                    "window": scheduling_detection_config.window,
-                    "start": scheduling_detection_config.start.isoformat(),
-                    "mode": scheduling_detection_config.mode
-                }
-            },
-            "DA_Alg_Parameters": da_alg_parameters.to_dict()
+        "kbConfig": {
+            "id": kb_config.id,
+            "description": kb_config.description,
+            "changeFlag": kb_config.changeFlag,
+            "scheduling": kb_config.scheduling,
+            "daAlgParameters": da_alg_parameters.to_dict() if da_alg_parameters else kb_config.daAlgParameters
         }
     }
     
@@ -795,13 +877,153 @@ def create_da_config(
             log_message(f"Error closing MongoDB client: {str(e)}", "warning")
 
 
-if __name__ == "__main__":
-    # Test the create_da_config function to demonstrate config_preview logging
-    print("Testing create_da_config function...")
-    result = create_da_config()
-    print("Function result:")
-    print(result)
-    print("\nTest completed.")
+@mcp.tool()
+def elasticsearch_sql(query: str) -> str:
+    """
+    Execute a SQL query against Elasticsearch.
 
-    # Now start the MCP server
-    mcp.run()
+    This tool allows running SQL queries on Elasticsearch indices, providing a SQL interface
+    to the data stored in Elasticsearch.
+
+    Args:
+        query (str): The SQL query to execute (e.g., "SELECT * FROM index_name WHERE field = 'value' LIMIT 10")
+
+    Returns:
+        str: The results of the query in JSON format, including columns, rows, and cursor information.
+             Returns an error message if the query fails on all available Elasticsearch hosts.
+
+    Raises:
+        No exceptions raised - errors are handled internally and returned as strings
+    """
+    # Try multiple Elasticsearch hosts for reliability
+    es_hosts = ["http://localhost:9200", "http://elasticsearch-dataset:9200"]
+
+    for host in es_hosts:
+        try:
+            log_message(f"Attempting SQL query execution with Elasticsearch at {host}")
+            es = Elasticsearch(host)
+
+            # Execute the SQL query using Elasticsearch's SQL API
+            response = es.sql.query(query=query)
+
+            # Format the results for easy consumption
+            results = {
+                "columns": response.get("columns", []),
+                "rows": response.get("rows", []),
+                "cursor": response.get("cursor"),
+                "total_rows": len(response.get("rows", []))
+            }
+
+            log_message(f"SQL query executed successfully with {host}, returned {results['total_rows']} rows")
+            return json.dumps(results, indent=2)
+
+        except Exception as e:
+            log_message(f"SQL query failed with {host}: {str(e)}", "warning")
+            continue
+
+    # If all hosts failed
+    error_msg = "ERROR: Failed to execute SQL query on all Elasticsearch hosts"
+    log_message(error_msg, "error")
+    return error_msg
+
+
+if __name__ == "__main__":
+    # Check if this is being run as an MCP server (no arguments or --server flag)
+    import sys
+    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == "--server"):
+        # Start MCP server - NO stdout output allowed for stdio transport
+        mcp.run()
+    else:
+        # Run test with command line arguments
+        parser = argparse.ArgumentParser(description="KB-MCP Configuration Tool")
+        parser.add_argument("--kb-config", type=str, help="JSON string for KB configuration")
+        parser.add_argument("--da-alg", type=str, help="JSON string for DA algorithm parameters")
+        parser.add_argument("--id", type=str, help="KB configuration ID")
+        parser.add_argument("--description", type=str, help="KB configuration description")
+        parser.add_argument("--change-flag", type=int, default=0, help="Change flag for KB config")
+        parser.add_argument("--training-query", type=str, help="SQL query for training")
+        parser.add_argument("--detection-query", type=str, help="SQL query for detection")
+        parser.add_argument("--training-from", type=str, help="Training from date (ISO format)")
+        parser.add_argument("--training-to", type=str, help="Training to date (ISO format)")
+        parser.add_argument("--training-mode", type=str, default="training", help="Training mode")
+        parser.add_argument("--training-window", type=int, default=60, help="Training window")
+        parser.add_argument("--training-active", action="store_true", help="Training is active")
+        parser.add_argument("--detection-from", type=str, help="Detection from date (ISO format)")
+        parser.add_argument("--detection-frequency", type=str, help="Detection frequency (CRON)")
+        parser.add_argument("--detection-mode", type=str, default="detection", help="Detection mode")
+        parser.add_argument("--detection-window", type=int, default=60, help="Detection window")
+        parser.add_argument("--detection-active", action="store_true", help="Detection is active")
+
+        args = parser.parse_args()
+
+        # Run test with parameters
+        print("Testing create_da_config function...")
+
+        # Build KB config from arguments
+        if args.kb_config:
+            try:
+                kb_data = json.loads(args.kb_config)
+                kb_config = KBConfig(**kb_data)
+            except json.JSONDecodeError as e:
+                print(f"Error parsing kb-config JSON: {e}")
+                exit(1)
+        else:
+            # Build from individual arguments with defaults
+            scheduling = {}
+
+            # Default training config
+            training_config = {
+                "trainingQuery": args.training_query or "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+                "from": args.training_from or "2025-09-01T00:00:00Z",
+                "to": args.training_to or "2025-09-30T23:59:59Z",
+                "mode": args.training_mode,
+                "trainingWindow": args.training_window,
+                "isActive": args.training_active
+            }
+            scheduling["trainingConfig"] = training_config
+
+            # Default detection config
+            detection_config = {
+                "detectionQuery": args.detection_query or "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-10T00:00:00.000Z' AND \"@timestamp\" < '2025-10-11T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+                "from": args.detection_from or "2025-10-10T00:00:00Z",
+                "frequency": args.detection_frequency or "*/15 * * * *",
+                "mode": args.detection_mode,
+                "detectionWindow": args.detection_window,
+                "isActive": args.detection_active
+            }
+            scheduling["detectionConfig"] = detection_config
+
+            kb_config = KBConfig(
+                id=args.id or str(uuid.uuid4()),
+                description=args.description or "Test configuration",
+                changeFlag=args.change_flag,
+                scheduling=scheduling,
+                daAlgParameters={
+                    "zscore": [
+                        {"observedValue": "status_code_200_counter"},
+                        {"observedValue": "status_code_5xx_counter"}
+                    ]
+                }
+            )
+
+        # Build DA alg parameters
+        da_alg_parameters = None
+        if args.da_alg:
+            try:
+                alg_data = json.loads(args.da_alg)
+                # Map observedValue to observed_value for ZScore
+                zscore_algs = []
+                for alg in alg_data.get("zscore", []):
+                    if "observedValue" in alg:
+                        alg["observed_value"] = alg.pop("observedValue")
+                    zscore_algs.append(ZScore(**alg))
+                da_alg_parameters = DaAlgParameters(algorithms=zscore_algs)
+            except json.JSONDecodeError as e:
+                print(f"Error parsing da-alg JSON: {e}")
+                exit(1)
+
+        # Call the function
+        result = create_da_config(kb_config=kb_config, da_alg_parameters=da_alg_parameters)
+        print("Function result:")
+        print(result)
+        print("\nTest completed.")
