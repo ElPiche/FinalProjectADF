@@ -10,6 +10,7 @@
       "name": "ZScore",
       "parameters": {
         "train_window": 60,
+        "dimensions": ["5xx_status_code", "4xx_status_code", "2xx_status_code"],
         "from": "2025-10-01T00:00:00.000Z",
         "to": "2025-11-10T00:00:00.000Z"
       }

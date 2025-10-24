@@ -42,11 +42,11 @@ class ZScore:
 # conexión a MongoDB KB
 MONGO_KB_URL = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin"
 KB_DB_NAME = "logsdb"
-KB_COLLECTION_NAME = "testLogsKB"
+KB_COLLECTION_NAME = "testingConfig"
 
 # conexión a MongoDB MotorDA pendiente
 DB_NAME_MOTOR_DA = "logsdb"
-DA_COLLECTION_NAME = "testingConfig"
+DA_COLLECTION_NAME = "series"
 
 DA_RESULT_COLLECTION_NAME = "seriesResult"
 
@@ -76,12 +76,18 @@ def CreateConnectionToDA() -> MongoClient:
     print("Nos conectamos a la DA")
     return mongo_da_client
 
+# returns
 
-def ExtractLatestConfiguration(client: MongoClient):
+
+def ExtractLatestConfigurationKB(client: MongoClient):
 
     # as of right now, we get only one document, the idea would be to get the latest one when mongo change stream
     # calls us
-    result = client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME].find_one({})
+    # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
+    result = client[DB_NAME_MOTOR_DA][KB_COLLECTION_NAME].find().sort(
+        '_id', -1).limit(1).next()
+
+    print(result)
 
     # we parse with BSON cuz mongo brings some binary data inside, and we want to serialize it into JSON
     with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
@@ -89,7 +95,6 @@ def ExtractLatestConfiguration(client: MongoClient):
         """
         latest_document = collection.find().sort('created_at', -1).limit(1).next()print(latest_document)
         """
-
     return result
 
 # Lector de json
@@ -141,8 +146,6 @@ def choose_algorithm(doc: Dict[str, Any], priority: Tuple[str, ...] = ALGO_KEYS)
             return p
     return None
 """
-
-# Correr algoritmos (placeholders)
 
 
 def run_zscore(config_block: Dict[str, Any]):
@@ -209,8 +212,16 @@ def parse_json_to_classes(json_data: dict) -> tuple[TrainingAlgorithm, ZScore]:
     """
 
     # Extract training_data
-    training_data = json_data.get("training_data", {})
-    algorithm_config = training_data.get("algorithm", {})
+
+    algorithm = json_data.get("algorithm", {})
+    # print(algorithm)
+
+    algorithm_parameters = algorithm.get("parameters", {})
+    print(algorithm.get("name"))
+
+    if (algorithm.get("name") == "zscore"):
+        print("soy EL zscore uwu")
+
     parameters = algorithm_config.get("parameters", {})
 
     # Create TrainingAlgorithm instance
@@ -262,8 +273,10 @@ def main():
     # nos conectamos a la DB donde está la data que nos interesa
     da_client = CreateConnectionToDA()
 
+    # TODO: add a watch on the connection to the KBConfig one
+
     # de aquí extraemos los datos de las operativas que vayamos a llamar
-    latest_series_config = ExtractLatestConfiguration(kb_client)
+    latest_series_config = ExtractLatestConfigurationKB(kb_client)
 
     # latest_series_config_json = json.loads(latest_series_config)
 

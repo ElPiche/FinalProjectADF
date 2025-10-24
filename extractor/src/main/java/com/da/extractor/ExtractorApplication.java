@@ -4,6 +4,7 @@ import com.da.extractor.entity.KbMongo;
 import com.da.extractor.service.ElasticService;
 import com.da.extractor.service.KbConfigReaderService;
 import com.da.extractor.repository.SeriesRepository;
+import com.da.extractor.service.pipeline.ExtractorService;
 import com.da.extractor.service.pipeline.FilterService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -23,21 +24,22 @@ public class ExtractorApplication{
         ElasticService elasticService = context.getBean(ElasticService.class);
         SeriesRepository seriesRepository = context.getBean(SeriesRepository.class);
         FilterService filterService = context.getBean(FilterService.class);
+        ExtractorService extractorService = context.getBean(ExtractorService.class);
 
         KbConfigReaderService kbConfigReaderService = context.getBean(KbConfigReaderService.class);
 
 
         //Esto ejecuta el kbconfig, haciendo entrar a ejecución el flujo entero.
-        kbConfigReaderService.getAllConfigs();
+//        kbConfigReaderService.getAllConfigs();
 
         System.out.println("Extractor Service Started...");
 
-        Map<String, Object> result = null;
+//        Map<String, Object> result = null;
 
         try {
-            String clusterInfo = elasticService.getClusterInfo();
-            System.out.println("Conexión exitosa a Elasticsearch:");
-            System.out.println(clusterInfo);
+//            String clusterInfo = elasticService.getClusterInfo();
+//            System.out.println("Conexión exitosa a Elasticsearch:");
+//            System.out.println(clusterInfo);
 
             /*
             IO.println("Ejecutando consulta ESQL de ejemplo...");
@@ -53,21 +55,21 @@ public class ExtractorApplication{
 
 
             //TODO: Hacer un servicio que se encargue de ejecutar esto
-            var configs = kbConfigReaderService.listAll();
-
-            for(KbMongo kbMongoConfig : configs){
-
-                var config = kbMongoConfig.getKbConfig();
-
-                if(config == null){
-                    IO.println("Saltando documento, estructura invalida");
-                    continue;
-                }
-
-                IO.println("\n=== KB ===");
-                IO.println("Id mongo: " + kbMongoConfig.getId());
-                IO.println("Descripción: " + config.getDescription());
-                IO.println("Kb id: " + config.getKbId());
+//            var configs = kbConfigReaderService.listAll();
+//
+//            for(KbMongo kbMongoConfig : configs){
+//
+//                var config = kbMongoConfig.getKbConfig();
+//
+//                if(config == null){
+//                    IO.println("Saltando documento, estructura invalida");
+//                    continue;
+//                }
+//
+//                IO.println("\n=== KB ===");
+//                IO.println("Id mongo: " + kbMongoConfig.getId());
+//                IO.println("Descripción: " + config.getDescription());
+//                IO.println("Kb id: " + config.getKbId());
 
 //                if (config.getQueryElastic() == null) {
 //                    System.out.println("Sin query elastic skipeo iteración");
@@ -109,7 +111,14 @@ public class ExtractorApplication{
 //                }
 
 
-            }
+//            }
+
+            extractorService.extractData("SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, " +
+                    "SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN " +
+                    "CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS " +
+                    "status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= " +
+                    "'2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' GROUP BY " +
+                    "es_timestamp ORDER BY es_timestamp");
 
         } catch (Exception e) {
             System.err.println("Error con Elasticsearch: " + e.getMessage());

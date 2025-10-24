@@ -1,49 +1,33 @@
 package com.da.extractor.service.pipeline;
 
+import com.da.extractor.entity.serie.Metadata;
+import com.da.extractor.entity.serie.Mode;
 import com.da.extractor.entity.serie.Serie;
 import com.da.extractor.model.PipelineConfig;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 @Service
 public class FilterService {
 
-    /// Recibe un Map que representa la respusta de una consulta Elasticsearch y lo trasforma a una Serie filtrada
-    /// @param data El Map con los datos de la consulta Elasticsearch
-    /// @return Un objeto Serie con los datos filtrados
-    public Serie applyFilter(Map<String, Object> data, PipelineConfig config) {
 
-        if(data.containsKey("error")){
-            throw new IllegalArgumentException(
-                    "No se puede aplica filtro ya que la data contiene un error: " + data.get("error"));
-        }
+    public List<Serie> applyFilter(List<Map<String, Object>> data, List<String> observedValues, Mode mode, String kbId) {
 
-        if(!data.containsKey("columns") || !data.containsKey("values")){
-            throw  new IllegalArgumentException("Data inválida: faltan las claves 'columns' o 'values'");
-        }
+        List<Serie> series = new ArrayList<>();
 
-        List<Map> columns = (List<Map>) data.get("columns");
-        List<List> values = (List<List>) data.get("values");
-
-        // Crear lista unificada
-        List<Map<String, Object>> unifiedData = new ArrayList<>();
-
-        for (List row : values) {
-            Map<String, Object> rowMap = new HashMap<>();
-            for (int i = 0; i < columns.size(); i++) {
-                String columnName = (String) ((Map<?, ?>) columns.get(i)).get("name");
-                Object value = row.get(i);
-                rowMap.put(columnName, value);
+        for(Map<String, Object> row : data){
+            for(String observedValue : observedValues){
+                if(row.containsKey(observedValue)){
+                    Long val = row.get(observedValue) != null ? (Long) row.get(observedValue) : 0;
+                    Date ts = (Date) row.get("es_timestamp");
+                    series.add(new Serie(null, val, ts, new Metadata(kbId, observedValue, mode)));
+                }
             }
-            unifiedData.add(rowMap);
         }
 
+        IO.println("Filtered " + series.size() + " series for KB: " + kbId + " with mode: " + mode);
 
-        return new Serie(null, config.getKbId(), config.getDescription(), unifiedData);
+        return series;
     }
-
 }

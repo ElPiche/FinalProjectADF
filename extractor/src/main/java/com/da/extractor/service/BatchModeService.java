@@ -36,7 +36,7 @@ public class BatchModeService {
                     ADAlgParameters
             );
 
-            extractorService.extractData(pipelineConfig);
+//            extractorService.extractData(pipelineConfig);
 
 
         }
