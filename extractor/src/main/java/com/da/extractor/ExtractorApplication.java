@@ -1,16 +1,23 @@
 package com.da.extractor;
 
 import com.da.extractor.entity.KbMongo;
+import com.da.extractor.entity.training.AlgorithmConfig;
+import com.da.extractor.entity.training.AlgorithmParameters;
+import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.service.ElasticService;
 import com.da.extractor.service.KbConfigReaderService;
 import com.da.extractor.repository.SeriesRepository;
 import com.da.extractor.service.pipeline.ExtractorService;
 import com.da.extractor.service.pipeline.FilterService;
+import com.da.extractor.service.pipeline.LoaderService;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.ApplicationContext;
 
 import java.io.IOException;
+import java.time.Instant;
+import java.util.Date;
+import java.util.List;
 import java.util.Map;
 
 
@@ -25,6 +32,7 @@ public class ExtractorApplication{
         SeriesRepository seriesRepository = context.getBean(SeriesRepository.class);
         FilterService filterService = context.getBean(FilterService.class);
         ExtractorService extractorService = context.getBean(ExtractorService.class);
+        LoaderService loaderService = context.getBean(LoaderService.class);
 
         KbConfigReaderService kbConfigReaderService = context.getBean(KbConfigReaderService.class);
 
@@ -113,15 +121,32 @@ public class ExtractorApplication{
 
 //            }
 
-            extractorService.extractData("SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, " +
-                    "SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN " +
-                    "CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS " +
-                    "status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= " +
-                    "'2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' GROUP BY " +
-                    "es_timestamp ORDER BY es_timestamp");
+            extractorService.extractData("SELECT DATE_TRUNC('HOUR', \"@timestamp\") " +
+                    "AS es_timestamp, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) " +
+                    "< 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\"" +
+                    " WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' " +
+                    "GROUP BY es_timestamp ORDER BY es_timestamp");
+
+            loaderService.loadTrainingConfig(new TrainConfig(
+                    null,
+                    "1fbb07a4-favf-46ed-9eae-b8d1289c570c",
+                    "Training config example",
+                    Date.from(Instant.now()),
+                    (short) 0,
+                    new AlgorithmConfig(
+                            "zscore",
+                            new AlgorithmParameters(
+                                    60,
+                                    List.of("status_code_5xx_counter"),
+                                    Date.from(Instant.parse("2025-10-01T00:00:00.000Z")),
+                                    Date.from(Instant.parse("2025-11-01T00:00:00.000Z"))
+                            )
+                    )
+
+            ));
 
         } catch (Exception e) {
-            System.err.println("Error con Elasticsearch: " + e.getMessage());
+            System.err.println("Error al correr el prgorama: " + e.getMessage());
         }
 
         IO.println("Extractor Service Finished.");
