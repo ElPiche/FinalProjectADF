@@ -1,3 +1,5 @@
+
+
 # KB Directory - Knowledge Base Configurations
 
 This directory stores the generated Knowledge Base (KB) configuration files created by the KB-MCP (Model Context Protocol) server.

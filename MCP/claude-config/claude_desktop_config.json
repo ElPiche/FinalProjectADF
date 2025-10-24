@@ -15,12 +15,16 @@
         "ES_URL": "http://host.docker.internal:9200"
       }
     },
-    "KB-MCP": {
+    "kb-mcp": {
       "command": "python",
       "args": [
-        "../KB-MCP/kb-mcp.py" //use your relative path to kb-mcp.py in claude_desktop_config.json
+        "../KB-MCP/kb-mcp.py"
       ],
-      "env": {}
+      "env": {},
+      "alwaysAllow": [
+        "create_da_config",
+        "elasticsearch_sql"
+      ]
     }
   }
 }
