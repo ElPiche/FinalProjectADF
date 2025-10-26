@@ -19,5 +19,5 @@ public class Metadata {
     private String dim;
 
     @Field("mode")
-    private Mode mode;
+    private short mode;
 }
