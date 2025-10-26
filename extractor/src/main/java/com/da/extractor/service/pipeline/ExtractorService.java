@@ -4,7 +4,7 @@ import co.elastic.clients.elasticsearch.sql.Column;
 import co.elastic.clients.elasticsearch.sql.QueryResponse;
 import co.elastic.clients.json.JsonData;
 import com.da.extractor.entity.serie.Mode;
-import com.da.extractor.entity.serie.SerieElement;
+import com.da.extractor.entity.serie.SeriesElement;
 import com.da.extractor.service.ElasticService;
 import com.da.extractor.utils.Utils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -59,7 +59,7 @@ public class ExtractorService {
 //            IO.println("Unified Data Page: " + page++);
 //            IO.println(data);
 
-            List<SerieElement> series = filterService.applyFilter(
+            List<SeriesElement> series = filterService.applyFilter(
                     data,
                     List.of("status_code_5xx_counter"),
                     Mode.TRAINING,

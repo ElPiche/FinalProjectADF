@@ -1,6 +1,6 @@
 package com.da.extractor.service.pipeline;
 
-import com.da.extractor.entity.serie.SerieElement;
+import com.da.extractor.entity.serie.SeriesElement;
 import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.repository.SeriesRepository;
 import com.da.extractor.repository.TrainingConfigRepository;
@@ -18,8 +18,8 @@ public class LoaderService {
         this.trainingConfigRepository = trainingConfigRepository;
     }
 
-    public void loadSeries(List<SerieElement> series){
-        List<SerieElement> savedSeries = seriesRepository.saveAll(series);
+    public void loadSeries(List<SeriesElement> series){
+        List<SeriesElement> savedSeries = seriesRepository.saveAll(series);
 
         System.out.println("Loaded " + savedSeries.size() + " series into the database.");
     }
