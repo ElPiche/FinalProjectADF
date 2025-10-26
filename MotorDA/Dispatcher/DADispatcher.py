@@ -1,3 +1,5 @@
+from datetime import datetime
+from typing import Dict, List
 import json
 from bson import json_util
 from pymongo import MongoClient
@@ -14,7 +16,7 @@ from ..ZScore.standalone_da_algorithm_z_score import (
 
 
 class TrainingAlgorithm:
-    def __init__(self,  mode: str):
+    def __init__(self,  mode: int):
 
         self.mode = mode
 
@@ -42,7 +44,7 @@ class ZScore:
 # conexión a MongoDB KB
 MONGO_KB_URL = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin"
 KB_DB_NAME = "logsdb"
-KB_COLLECTION_NAME = "testingConfig"
+KB_COLLECTION_NAME = "trainingconfig"
 
 # conexión a MongoDB MotorDA pendiente
 DB_NAME_MOTOR_DA = "logsdb"
@@ -158,6 +160,9 @@ def run_zscore(config_block: Dict[str, Any]):
 
 def run_zscore_batch_training(zScore: ZScore, data_to_train: TrainingAlgorithm, da_client: MongoClient):
 
+    # {'train_window': 60, 'dimensions': ['5xx_status_code', '4xx_status_code', '2xx_status_code'], 'from': '2025-10-01T00:00:00.000Z', 'to': '2025-11-10T00:00:00.000Z'}
+    #     # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
+
     # iterating both key and values
     for key, value in zScore.observed_values.items():
         print(key)
@@ -200,66 +205,277 @@ ALGORITHM_HANDLERS = {
 }
 
 
-def parse_json_to_classes(json_data: dict) -> tuple[TrainingAlgorithm, ZScore]:
+def fetch_series_data_with_aggregation(
+    config_doc: Dict,
+    da_client: MongoClient,
+    db_name: str = "logsdb",
+    series_collection_name: str = "series"
+) -> Dict[str, pd.DataFrame]:
     """
-    Parse JSON data into TrainingAlgorithm and ZScore classes.
+    Fetch series data for all dimensions using MongoDB aggregation pipeline.
 
     Args:
-        json_data: Dictionary containing training_data and trained_data
+        config_doc: Configuration document from trainingconfig collection
+        da_client: MongoDB client connected to the DA database
+        db_name: Database name
+        series_collection_name: Series collection name
+
+    Returns:
+        Dictionary mapping dimension names to their respective DataFrames
+    """
+
+    # Extract parameters from config
+    algorithm_params = config_doc.get('algorithm', {}).get('parameters', {})
+    dimensions = algorithm_params.get('dimensions', [])
+    kb_id = config_doc.get('kb_id')
+    mode = config_doc.get('mode', 0)  # Convert to uppercase
+    date_from = algorithm_params.get('from')
+    date_to = algorithm_params.get('to')
+
+    # Get series collection
+    series_collection = da_client[db_name][series_collection_name]
+
+    print(f"\n{'='*60}")
+    print(f"Fetching data for {len(dimensions)} dimensions")
+    print(f"KB ID: {kb_id}")
+    print(f"Mode: {mode}")
+    print(f"Date range: {date_from} to {date_to}")
+    print(f"Dimensions: {dimensions}")
+    print(f"{'='*60}\n")
+
+    # Debug: Check what's actually in the series collection
+    print("DEBUG: Checking series collection...")
+    sample_doc = series_collection.find_one()
+    if sample_doc:
+        print(f"Sample document structure:")
+        print(f"  metadata.kbId: {sample_doc.get('metadata', {}).get('kbId')}")
+        print(f"  metadata.dim: {sample_doc.get('metadata', {}).get('dim')}")
+        print(f"  metadata.mode: {sample_doc.get('metadata', {}).get('mode')}")
+        print(f"  timestamp: {sample_doc.get('timestamp')}")
+    else:
+        print("  ✗ Collection is empty!")
+    print()
+
+    observed_values = {}
+
+    for dimension in dimensions:
+        # Build aggregation pipeline
+        match_query = {
+            'metadata.kbId': kb_id,
+            'metadata.dim': dimension
+        }
+
+        # Add timestamp filter if dates are provided
+        if date_from and date_to:
+            match_query['timestamp'] = {
+                '$gte': {'$date': date_from},
+                '$lte': {'$date': date_to}
+            }
+
+        pipeline = [
+            {
+                '$match': match_query
+            },
+            {
+                '$project': {
+                    '_id': 0,
+                    'timestamp': 1,
+                    'value': 1
+                }
+            },
+            {
+                '$sort': {'timestamp': 1}
+            }
+        ]
+
+        print(f"Processing dimension: {dimension}")
+        print(f"  Match query: {match_query}")
+
+        # Debug: Try to find at least one document with this dimension
+        test_query = {'metadata.dim': dimension}
+        count_with_dim = series_collection.count_documents(test_query)
+        print(f"  DEBUG: Documents with dim='{dimension}': {count_with_dim}")
+
+        if count_with_dim > 0:
+            # Check kb_id match
+            test_query['metadata.kbId'] = kb_id
+            count_with_kb = series_collection.count_documents(test_query)
+            print(
+                f"  DEBUG: Documents with dim='{dimension}' AND kbId='{kb_id}': {count_with_kb}")
+
+            # Check mode match
+            test_query['metadata.mode'] = mode
+            count_with_mode = series_collection.count_documents(test_query)
+            print(
+                f"  DEBUG: Documents with dim='{dimension}' AND kbId='{kb_id}' AND mode='{mode}': {count_with_mode}")
+
+        try:
+            # Execute aggregation pipeline
+            cursor = series_collection.aggregate(pipeline)
+            results = list(cursor)
+
+            if results:
+                # Create DataFrame
+                df = pd.DataFrame(results)
+
+                # Convert timestamp to datetime
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+                # Convert value to numeric (handle MongoDB numberLong)
+                if 'value' in df.columns:
+                    # Handle nested value structure from MongoDB
+                    df['value'] = df['value'].apply(
+                        lambda x: float(x) if isinstance(x, (int, float))
+                        else float(x.get('$numberLong', 0)) if isinstance(x, dict)
+                        else 0
+                    )
+
+                observed_values[dimension] = df
+                print(f"  ✓ Fetched {len(df)} records")
+                print(
+                    f"  → Date range in data: {df['timestamp'].min()} to {df['timestamp'].max()}")
+            else:
+                print(f"  ✗ No data found")
+                # Create empty DataFrame with proper structure
+                observed_values[dimension] = pd.DataFrame(
+                    columns=['timestamp', 'value'])
+
+        except Exception as e:
+            print(f"  ✗ Error fetching data: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            observed_values[dimension] = pd.DataFrame(
+                columns=['timestamp', 'value'])
+
+    print(f"\n{'='*60}")
+    print(
+        f"Summary: Successfully fetched data for {len([df for df in observed_values.values() if not df.empty])}/{len(dimensions)} dimensions")
+    print(f"{'='*60}\n")
+
+    return observed_values
+
+
+def fetch_series_data_batch(
+    dimensions: List[str],
+    kb_id: str,
+    mode: str,
+    date_from: str,
+    date_to: str,
+    da_client: MongoClient,
+    db_name: str = "logsdb",
+    series_collection_name: str = "series"
+) -> Dict[str, pd.DataFrame]:
+    """
+    Alternative function to fetch series data when you have individual parameters
+    instead of a config document.
+    """
+
+    series_collection = da_client[db_name][series_collection_name]
+
+    print(f"\nFetching batch data for {len(dimensions)} dimensions...")
+
+    observed_values = {}
+
+    for dimension in dimensions:
+        pipeline = [
+            {
+                '$match': {
+                    'metadata.kbId': kb_id,
+                    'metadata.dim': dimension,
+                    'metadata.mode': mode.upper(),
+                    'timestamp': {
+                        '$gte': {'$date': date_from},
+                        '$lte': {'$date': date_to}
+                    }
+                }
+            },
+            {
+                '$project': {
+                    '_id': 0,
+                    'timestamp': 1,
+                    'value': 1
+                }
+            },
+            {
+                '$sort': {'timestamp': 1}
+            }
+        ]
+
+        try:
+            cursor = series_collection.aggregate(pipeline)
+            results = list(cursor)
+
+            if results:
+                df = pd.DataFrame(results)
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df['value'] = df['value'].apply(
+                    lambda x: float(x) if isinstance(x, (int, float))
+                    else float(x.get('$numberLong', 0)) if isinstance(x, dict)
+                    else 0
+                )
+                observed_values[dimension] = df
+                print(f"  ✓ {dimension}: {len(df)} records")
+            else:
+                observed_values[dimension] = pd.DataFrame(
+                    columns=['timestamp', 'value'])
+                print(f"  ✗ {dimension}: No data")
+
+        except Exception as e:
+            print(f"  ✗ {dimension}: Error - {str(e)}")
+            observed_values[dimension] = pd.DataFrame(
+                columns=['timestamp', 'value'])
+
+    return observed_values
+
+
+# Updated parse_json_to_classes to use the new fetcher
+def parse_json_to_classes(json_data: dict, da_client: MongoClient) -> tuple:
+    """
+    Parse JSON data into TrainingAlgorithm and ZScore classes.
+    Now fetches actual data from MongoDB series collection.
+
+    Args:
+        json_data: Dictionary containing training configuration
+        da_client: MongoDB client for fetching series data
 
     Returns:
         Tuple of (TrainingAlgorithm, ZScore) instances
     """
 
-    # Extract training_data
-
+    # Extract algorithm info
     algorithm = json_data.get("algorithm", {})
-    # print(algorithm)
-
+    algorithm_name = algorithm.get("name")
     algorithm_parameters = algorithm.get("parameters", {})
-    print(algorithm.get("name"))
 
-    if (algorithm.get("name") == "zscore"):
-        print("soy EL zscore uwu")
-
-    parameters = algorithm_config.get("parameters", {})
+    # Extract mode
+    mode = json_data.get("mode", 0)
 
     # Create TrainingAlgorithm instance
-    training_algo = TrainingAlgorithm(
-        #
-        #
-        mode=training_data.get("mode")
-    )
+    training_algo = TrainingAlgorithm(mode=mode)
 
-    # Extract trained_data for ZScore metrics
-    trained_data = json_data.get("trained_data", {})
-    trained_list = trained_data.get("trained_list", [])
+    if algorithm_name == "zscore":
+        print("Processing Z-Score algorithm configuration...")
 
-    # Build observed_values dictionary with DataFrames
-    # Each metric gets its own DataFrame with timestamp and value columns
-    observed_values = {}
-    observed_values_data = training_data.get("observed_values", {})
+        # Fetch data from MongoDB using aggregation pipeline
+        observed_values = fetch_series_data_with_aggregation(
+            config_doc=json_data,
+            da_client=da_client
+        )
 
-    for metric_name, data_points in observed_values_data.items():
-        if data_points:  # If there are data points
-            # Create DataFrame from the list of dictionaries
-            df = pd.DataFrame(data_points)
-            # Convert timestamp to datetime if needed
-            if 'timestamp' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-            observed_values[metric_name] = df
+        # Create ZScore instance
+        z_score = ZScore(
+            train_window=algorithm_parameters.get("train_window", 60),
+            threshold=0,  # You might want to extract this from config
+            observed_values=observed_values,
+            train_from=algorithm_parameters.get("from"),
+            train_to=algorithm_parameters.get("to")
+        )
 
-    # Create ZScore instance
-    z_score = ZScore(
-        train_window=training_data.get("algorithm").get(
-            "parameters").get("train_window"),
-        threshold=10,
-        observed_values=observed_values,
-        train_from=parameters.get("from"),
-        train_to=parameters.get("to"),
-    )
+        return training_algo, z_score
 
-    return training_algo, z_score
+    # Add other algorithm handlers here
+    else:
+        raise ValueError(f"Unsupported algorithm: {algorithm_name}")
 
 
 def main():
@@ -280,40 +496,8 @@ def main():
 
     # latest_series_config_json = json.loads(latest_series_config)
 
-    training_algo, z_score = parse_json_to_classes(latest_series_config)
-
-    print("I am printing the training algo data:")
-    print(training_algo)
-
-    print("--------------------------------------------------------------------")
-
-    print("I am printing the z score DATAFRAMIOS data:")
-    print(z_score.observed_values["2xx_status_codes"])
-
-    print("--------------------------------------------------------------------")
-
-    print("I am printing the z score data:")
-    print(z_score)
-
-    result = run_zscore_batch_training(z_score, training_algo, da_client)
-
-    anomalies = detectar_anomalias_df(
-        z_score.observed_values["5xx_status_codes"], result, z_score.train_window)
-
-    save_anomalies_json(anomalies, result, 'Anomalies_Detected_ZScore.json')
-
-    # por ahora dejaremos el change para despues
-
-    # CENTRARSE EN PARSEAR CONFIG -> ENTRENAR -> DETECTAR
-
-    observed_fields = ["status_code_5xx"]
-
-    # df = run_zscore_batch("2025-10-01T00:00:00Z",
-    #                      "2025-10-09T23:59:59Z", observed_fields, da_client)
-
-# doc = dispatcher.get_record_by_id("8fbb07a4-f8f0-46ed-9eae-b8d4789c570c")
-
-# aca iria un switch o map para llamar al algoritmo correspondiente
+    training_algo, z_score = parse_json_to_classes(
+        latest_series_config, kb_client)
 
 
 if __name__ == "__main__":
