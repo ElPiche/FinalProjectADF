@@ -1,10 +1,10 @@
 package com.da.extractor.repository;
 
-import com.da.extractor.entity.serie.Serie;
+import com.da.extractor.entity.serie.SerieElement;
 import org.springframework.data.mongodb.repository.MongoRepository;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public interface SeriesRepository extends MongoRepository<Serie, String> {
+public interface SeriesRepository extends MongoRepository<SerieElement, String> {
 
 }

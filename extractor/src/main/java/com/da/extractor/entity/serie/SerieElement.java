@@ -14,7 +14,7 @@ import java.util.Date;
 @Document(collection = "series")
 @Getter
 @Setter
-public class Serie {
+public class SerieElement {
 
     @Id
     private String id;
