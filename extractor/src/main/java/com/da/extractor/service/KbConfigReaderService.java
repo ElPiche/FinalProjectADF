@@ -1,9 +1,8 @@
 package com.da.extractor.service;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.json.JsonpMapper;
 
-import com.da.extractor.entity.KbMongo;
+import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.repository.KbConfigRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
