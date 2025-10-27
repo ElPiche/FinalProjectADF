@@ -1,4 +1,4 @@
-package com.da.extractor.service.pipeline;
+package com.da.extractor.pipeline;
 
 import co.elastic.clients.elasticsearch.sql.Column;
 import co.elastic.clients.elasticsearch.sql.QueryResponse;
@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 @Service
 public class ExtractorService {
@@ -28,7 +29,8 @@ public class ExtractorService {
     LoaderService loaderService;
 
 
-    public void extractData(String elasticQuery) throws Exception {
+    public void extractData(String elasticQuery,
+                            Consumer<List<Map<String, Object>>> pageProcessor) throws Exception {
 
         String cursor = null;
         List<Column> columns = new ArrayList<>();
@@ -59,14 +61,16 @@ public class ExtractorService {
 //            IO.println("Unified Data Page: " + page++);
 //            IO.println(data);
 
-            List<SeriesElement> series = filterService.applyFilter(
-                    data,
-                    List.of("status_code_5xx_counter"),
-                    Mode.TRAINING,
-                    "1fbb07a4-favf-46ed-9eae-b8d1289c570c"
-            );
+//            List<SeriesElement> series = filterService.applyFilter(
+//                    data,
+//                    List.of("status_code_5xx_counter"),
+//                    Mode.TRAINING,
+//                    "1fbb07a4-favf-46ed-9eae-b8d1289c570c"
+//            );
+//
+//            loaderService.loadSeries(series);
 
-            loaderService.loadSeries(series);
+            pageProcessor.accept(data);
 
 
         }while (cursor != null);

@@ -7,6 +7,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.util.Date;
 
@@ -20,10 +21,13 @@ public class TrainConfig {
     @Id
     private String id;
 
+    @Field("kb_id")
     private String kbId;
 
+    @Field("kb_description")
     private String kbDescription;
 
+    @Field("created_at")
     private Date createdAt;
 
     private short mode;

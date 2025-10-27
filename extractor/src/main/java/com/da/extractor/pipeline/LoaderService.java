@@ -1,4 +1,4 @@
-package com.da.extractor.service.pipeline;
+package com.da.extractor.pipeline;
 
 import com.da.extractor.entity.serie.SeriesElement;
 import com.da.extractor.entity.training.TrainConfig;
@@ -10,8 +10,8 @@ import java.util.List;
 
 @Service
 public class LoaderService {
-    final SeriesRepository seriesRepository;
-    final TrainingConfigRepository trainingConfigRepository;
+    final private SeriesRepository seriesRepository;
+    final private TrainingConfigRepository trainingConfigRepository;
 
     public LoaderService(SeriesRepository seriesRepository, TrainingConfigRepository trainingConfigRepository) {
         this.seriesRepository = seriesRepository;

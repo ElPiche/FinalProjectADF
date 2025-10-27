@@ -7,10 +7,38 @@
     "created_at": "2025-11-01T12:00:00.000Z",
     "mode": "train",
     "algorithm": {
-      "name": "ZScore",
+      "name": "kmeans",
       "parameters": {
         "train_window": 60,
-        "dimensions": ["5xx_status_code", "4xx_status_code", "2xx_status_code"],
+        "observed_values": [
+          {
+            "dimension": "5xx_status_code",
+            "algorithm_metadata": [
+                {
+                    "key": "clusters",
+                    "value": 2
+                }
+            ]
+          },
+          {
+            "dimension": "4xx_status_code",
+            "algorithm_metadata": [
+              {
+                "key": "clusters",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "dimension": "2xx_status_code",
+            "algorithm_metadata": [
+              {
+                "key": "clusters",
+                "value": 4
+              }
+            ]
+          }
+        ],
         "from": "2025-10-01T00:00:00.000Z",
         "to": "2025-11-10T00:00:00.000Z"
       }

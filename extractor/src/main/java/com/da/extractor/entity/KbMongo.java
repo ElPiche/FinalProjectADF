@@ -51,7 +51,7 @@ public class KbMongo {
         private String from; //O datetime
         private String to;
         private Integer window;
-        private String mode; //TODO: eliminarlo
+        private String mode;
         private Boolean isActive;
         private String queryElastic;
     }
@@ -64,7 +64,7 @@ public class KbMongo {
         private String frequency;
         private Integer window;
         private String start;
-        private String mode; //TODO: eliminarlo
+        private String mode;
         private Boolean isActive;
         private String queryElastic;
     }
@@ -74,6 +74,7 @@ public class KbMongo {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ADAlgParameters{
+        String name;
         Map<String, List<Object>> algorithmParameters;
 //        private Zscore zscore;
 //        private Arma arma;
