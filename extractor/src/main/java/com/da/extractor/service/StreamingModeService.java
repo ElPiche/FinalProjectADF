@@ -1,9 +1,7 @@
 package com.da.extractor.service;
 
 
-import com.da.extractor.entity.KbMongo;
-import com.da.extractor.enums.ConfigMode;
-import com.da.extractor.model.PipelineConfig;
+import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.pipeline.ExtractorService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;

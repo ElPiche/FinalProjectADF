@@ -22,23 +22,17 @@ public class ExtractorService {
     @Autowired
     ElasticService elasticService;
 
-    @Autowired
-    FilterService filterService;
-
-    @Autowired
-    LoaderService loaderService;
-
-
     public void extractData(String elasticQuery,
                             Consumer<List<Map<String, Object>>> pageProcessor) throws Exception {
 
         String cursor = null;
+        String lastCursor = null;
         List<Column> columns = new ArrayList<>();
-        int page = 1;
 
         do{
             QueryResponse response = elasticService.executeQuery(elasticQuery, cursor);
 
+            lastCursor = cursor;
             cursor = response.cursor();
 
             columns = !response.columns().isEmpty() ? response.columns() : columns;
@@ -58,22 +52,11 @@ public class ExtractorService {
                 data.add(rowMap);
             }
 
-//            IO.println("Unified Data Page: " + page++);
-//            IO.println(data);
-
-//            List<SeriesElement> series = filterService.applyFilter(
-//                    data,
-//                    List.of("status_code_5xx_counter"),
-//                    Mode.TRAINING,
-//                    "1fbb07a4-favf-46ed-9eae-b8d1289c570c"
-//            );
-//
-//            loaderService.loadSeries(series);
-
             pageProcessor.accept(data);
 
-
         }while (cursor != null);
+
+        if(lastCursor != null) elasticService.clearCursor(lastCursor);
     }
 
 }
