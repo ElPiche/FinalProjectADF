@@ -166,10 +166,13 @@ def run_zscore_batch_training(zScore: ZScore, data_to_train: TrainingAlgorithm, 
     # iterating both key and values
     for key, value in zScore.observed_values.items():
         print(key)
-        results = train_baseline(value, "value")
-        da_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].insert_one(results)
 
-    return train_baseline(zScore.observed_values["5xx_status_codes"], "value")
+        if (not value.empty):
+            results = train_baseline(value, "value")
+            da_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].insert_one(
+                results)
+
+    return results
 
 
 def run_arma(config_block: Dict[str, Any]):
@@ -516,12 +519,18 @@ def main():
     # de aquí extraemos los datos de las operativas que vayamos a llamar
     latest_series_config = ExtractLatestConfigurationKB(kb_client)
 
-    # latest_series_config_json = json.loads(latest_series_config)
-
     training_algo, z_score = parse_json_to_classes(
         latest_series_config, kb_client)
     print(z_score)
-    run_zscore_batch_training(z_score, training_algo, kb_client)
+
+    results = run_zscore_batch_training(z_score, training_algo, kb_client)
+
+    anomalies = detectar_anomalias_df(
+        z_score.observed_values["status_code_5xx_counter"], results, 60)
+
+    print(anomalies)
+
+    save_anomalies_json(anomalies, results, "detección.json")
 
 
 if __name__ == "__main__":
