@@ -1,42 +1,145 @@
 {
-  "kbConfig": {
+  "kb_config": {
     "id": "1fbb07a4-favf-46ed-9eae-b8d1289c570c",
-    "description": "Geographic Traffic Pattern Analysis - Monitors traffic by region",
-    "changeFlag": 0, // es solo una flag para reflejar un cambio en la kb y que se dispare el Change Stream, se podria pasar a booleano
+    "name": "Geographic Traffic Pattern Analysis",
+    "description": "Analyze traffic patterns based on geographic data to identify anomalies in specific regions. This configuration focuses on monitoring traffic volume and speed across different geographic locations using Elasticsearch SQL queries.",
+    "change_flag": 0,
     "scheduling": {
-      "trainingConfig": {
-        "trainingQuery": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == \"200\", status_code_5xx_counter = COUNT(*) WHERE response >= \"500\" AND response < \"600\" BY es_timestamp | SORT es_timestamp",
+      "training_config": {
+        "training_query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | EVAL es_timestamp = DATE_TRUNC(1 hour, @timestamp) | STATS status_code_200_counter = COUNT(*) WHERE response == \"200\", status_code_5xx_counter = COUNT(*) WHERE response >= \"500\" AND response < \"600\" BY es_timestamp | SORT es_timestamp",
         "from": "2025-10-01T00:00:00Z",
         "to": "2025-10-09T23:59:59Z",
         "mode": "training",
-        "trainingWindow": 60, //60
-        "isActive": true
+        "training_window": 60,
+        "is_active": true
       },
-      "detectionConfig": {
-        "detectionQuery": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | STATS status_code_200_counter = COUNT(*) WHERE response == \"200\", status_code_5xx_counter = COUNT(*) WHERE response >= \"500\" AND response < \"600\" BY es_timestamp | SORT es_timestamp",
+      "detection_config": {
+        "detection_query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | STATS status_code_200_counter = COUNT(*) WHERE response == \"200\", status_code_5xx_counter = COUNT(*) WHERE response >= \"500\" AND response < \"600\" BY es_timestamp | SORT es_timestamp",
         "from": "2025-10-10T00:00:00Z",
         "frequency": "*/15 * * * *",
-        "detectionWindow": 60,  //60
+        "detection_window": 60,
         "mode": "detection",
-        "isActive": false
+        "is_active": false
       }
     },
-    "daAlgParameters": {
+    "da_alg_parameters": {
       "zscore": [
-        { "observedValue": "status_code_200_counter" },
-        { "observedValue": "status_code_5xx_counter" }
+        { "dimension": "status_code_200_counter" },
+        { "dimension": "status_code_5xx_counter" }
       ],
       "arma": [
-        { "p": 2, "d": 1, "q": 2, "observedValue": "status_code_200_counter" },
-        { "p": 3, "d": 1, "q": 3, "observedValue": "status_code_5xx_counter" }
+        { "dimension": "status_code_200_counter", 
+          "algorithm_metadata": [
+            {
+              "key": "p",
+              "value": 2
+            },
+            {
+              "key": "d",
+              "value": 1
+            },
+            {
+              "key": "q",
+              "value": 2
+            }
+          ]
+        },
+        { "dimension": "status_code_5xx_counter", 
+          "algorithm_metadata": [
+            {
+              "key": "p",
+              "value": 1
+            },
+            {
+              "key": "d",
+              "value": 0
+            },
+            {
+              "key": "q",
+              "value": 1
+            }
+          ]
+        }
       ],
       "kmeans": [
-        { "nClusters": 3, "observedValue": "status_code_200_counter" },
-        { "nClusters": 4, "observedValue": "status_code_5xx_counter" }
+        { "dimension": "status_code_200_counter",
+          "algorithm_metadata": [
+            {
+              "key": "clusters",
+              "value": 3
+            },
+            {
+              "key": "random_state",
+              "value": 42
+            }
+          ]
+        },
+        { "dimension": "status_code_200_counter",
+          "algorithm_metadata": [
+            {
+              "key": "clusters",
+              "value": 5
+            },
+            {
+              "key": "random_state",
+              "value": 10
+            }
+          ]
+        },
+        { "dimension": "status_code_5xx_counter",
+          "algorithm_metadata": [
+            {
+              "key": "clusters",
+              "value": 2
+            },
+            {
+              "key": "random_state",
+              "value": 42
+            }
+          ]
+        }
       ],
       "iforest": [
-        { "nEstimators": 100, "contamination": 0.05, "randomState": 42, "observedValue": "status_code_200_counter" },
-        { "nEstimators": 150, "contamination": 0.1, "randomState": 42, "observedValue": "status_code_5xx_counter" }
+        { "dimension": "status_code_200_counter",
+          "algorithm_metadata": [
+            {
+              "key": "n_estimators",
+              "value": 100
+            },
+            {
+              "key": "max_samples",
+              "value": "auto"
+            },
+            {
+              "key": "contamination",
+              "value": "auto"
+            },
+            {
+              "key": "random_state",
+              "value": 42
+            }
+          ]
+        },
+        { "dimension": "status_code_5xx_counter",
+          "algorithm_metadata": [
+            {
+              "key": "n_estimators",
+              "value": 100
+            },
+            {
+              "key": "max_samples",
+              "value": "auto"
+            },
+            {
+              "key": "contamination",
+              "value": "auto"
+            },
+            {
+              "key": "random_state",
+              "value": 42
+            }
+          ]
+        }
       ]
     }
   }

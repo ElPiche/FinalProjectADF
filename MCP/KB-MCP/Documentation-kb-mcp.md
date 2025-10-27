@@ -421,19 +421,120 @@ The system provides detailed error messages for:
 
 ### Prerequisites
 
-- Python 3.8+
-- Elasticsearch instance running
-- MongoDB instance running
-- Required Python packages: fastmcp, pydantic, pymongo, jsonschema, croniter, elasticsearch
+#### System Requirements
+- **Operating System**: Windows 10/11, Linux (Ubuntu/Debian), or macOS
+- **Python Version**: Python 3.8+ (Python 3.11 recommended)
+- **Memory**: Minimum 4GB RAM (8GB recommended for large datasets)
+- **Disk Space**: 2GB free space for dependencies and logs
 
-### Installation
+#### External Services
+- **Elasticsearch**: Version 8.x with SQL API enabled (default: `http://localhost:9200`)
+- **MongoDB**: Version 4.0+ (5.0+ recommended) with authentication (default: `mongodb://admin:1q2w3E*@localhost:27018`)
 
-1. Install dependencies:
+#### Required Python Packages
 ```bash
-pip install fastmcp pydantic pymongo jsonschema croniter elasticsearch
+pip install fastmcp pydantic pymongo jsonschema croniter elasticsearch==8.15.0
 ```
 
-2. Ensure Elasticsearch and MongoDB are running
+**Package Details:**
+- `fastmcp`: MCP server framework for tool exposure
+- `pydantic`: Data validation and configuration models
+- `pymongo`: MongoDB connectivity for configuration storage
+- `jsonschema`: JSON schema validation for configurations
+- `croniter`: CRON expression validation for scheduling
+- `elasticsearch==8.15.0`: Elasticsearch client (specific version for compatibility)
+
+### Installation Options
+
+#### Option 1: Direct Python Installation
+```bash
+# 1. Navigate to project directory
+cd /path/to/FinalProjectADF
+
+# 2. Install Python dependencies
+pip install fastmcp pydantic pymongo jsonschema croniter elasticsearch==8.15.0
+
+# 3. Start external services (Elasticsearch + MongoDB)
+docker-compose up -d elasticsearch-dataset mongodb
+
+# 4. Run the MCP server
+python MCP/KB-MCP/kb-mcp.py
+```
+
+#### Option 2: Docker Installation
+```bash
+# 1. Build the Docker image
+docker build -t kb-mcp -f MCP/KB-MCP/Dockerfile .
+
+# 2. Run with external services
+docker run --network host kb-mcp
+```
+
+#### Option 3: Development Setup
+```bash
+# 1. Install all dependencies
+pip install fastmcp pydantic pymongo jsonschema croniter elasticsearch==8.15.0
+
+# 2. Start full stack
+docker-compose up -d
+
+# 3. Run server in development mode
+python MCP/KB-MCP/kb-mcp.py --server
+```
+
+### Verification Steps
+
+#### Test Installation
+```bash
+# 1. Check Python version
+python --version  # Should be 3.8+
+
+# 2. Test imports
+python -c "import fastmcp, pydantic, pymongo, elasticsearch; print('All imports successful')"
+
+# 3. Test Elasticsearch connection
+curl http://localhost:9200/_cluster/health
+
+# 4. Test MongoDB connection
+docker exec mongodb mongosh --eval "db.runCommand('ping')"
+
+# 5. Test MCP server startup
+python MCP/KB-MCP/kb-mcp.py
+```
+
+#### Test MCP Tools
+```bash
+# Test available algorithms (via MCP client)
+# Should show ZScore as implemented
+
+# Test SQL query execution (via MCP client)
+# Should execute queries against Elasticsearch
+```
+
+### Running the Server
+```bash
+python MCP/KB-MCP/kb-mcp.py
+```
+
+The server will start and listen for MCP protocol messages.
+
+### External Services Setup
+
+#### Elasticsearch Configuration
+- **Version**: Elasticsearch 8.x (tested with 8.15.0)
+- **Connection URLs**: `http://localhost:9200` or `http://elasticsearch-dataset:9200`
+- **Required Features**: SQL API must be enabled
+- **Sample Data**: Use Kibana sample web logs for testing
+- **Index Pattern**: `.ds-kibana_sample_data_logs-*` (data stream pattern)
+- **Field Types**: `@timestamp` (date), `response` (keyword/text), other fields as appropriate
+
+#### MongoDB Configuration
+- **Version**: MongoDB 4.0+ (5.0+ recommended for production)
+- **Connection String**: `mongodb://admin:1q2w3E*@localhost:27018/?authSource=admin`
+- **Authentication**: Username: `admin`, Password: `1q2w3E*` (URL-encoded as `1q2w3E%2A`)
+- **Database**: `kb_configs` (auto-created)
+- **Collection**: `configurations` (auto-created)
+- **Indexes**: Automatic indexing on `kbConfig.id` field
 
 ### Running the Server
 
@@ -495,16 +596,18 @@ The KB-MCP server implements the Model Context Protocol (MCP) using FastMCP fram
 
 - **Tool Exposure**: Functions are exposed as MCP tools
 - **Type Safety**: Uses Pydantic models for input validation
-- **Error Handling**: Structured error responses
-- **Logging**: Comprehensive operation logging
+- **Error Handling**: Structured error responses with detailed validation messages
+- **Logging**: Comprehensive operation logging with timestamps and levels
+- **SQL Validation**: Real-time validation using elasticsearch-sql MCP tool
 
 ### Client Integration
 
 MCP clients can:
-- Discover available tools
+- Discover available tools automatically
 - Invoke tools with structured parameters
-- Receive typed responses
-- Handle errors gracefully
+- Receive typed responses with proper error handling
+- Handle complex nested configuration objects
+- Get real-time validation feedback
 
 ### Configuration
 
@@ -513,13 +616,39 @@ The server is configured in MCP client configuration files (e.g., claude_desktop
 ```json
 {
   "mcpServers": {
-    "kb-mcp": {
+    "KB-MCP": {
       "command": "python",
-      "args": ["/path/to/kb-mcp.py"]
+      "args": ["${KB_MCP_PROJECT_ROOT}/MCP/KB-MCP/kb-mcp.py"],
+      "env": {
+        "KB_MCP_PROJECT_ROOT": "path/to/your/project/FinalProjectADF"
+      }
     }
   }
 }
 ```
+
+### Claude Desktop Setup
+
+1. **Locate Configuration File**:
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Linux: `~/.config/Claude/claude_desktop_config.json`
+
+2. **Add Server Configuration**:
+   ```json
+   {
+     "mcpServers": {
+       "KB-MCP": {
+         "command": "python",
+         "args": ["/full/path/to/FinalProjectADF/MCP/KB-MCP/kb-mcp.py"]
+       }
+     }
+   }
+   ```
+
+3. **Restart Claude Desktop** to load the new MCP server
+
+4. **Verify Installation**: Use the `describe_mcp_server` tool to confirm all tools are available
 
 ## Real-World Usage Examples
 
