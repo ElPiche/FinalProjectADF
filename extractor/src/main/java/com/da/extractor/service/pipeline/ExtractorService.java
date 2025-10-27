@@ -36,13 +36,7 @@ public class ExtractorService {
         int page = 1;
 
         do{
-            QueryResponse response = elasticService.executeQuery("SELECT DATE_TRUNC('HOUR', \"@timestamp\") " +
-                            "AS es_timestamp, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) " +
-                            "< 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\"" +
-                            " WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' " +
-                            "GROUP BY es_timestamp ORDER BY es_timestamp",
-                    cursor
-            );
+            QueryResponse response = elasticService.executeQuery(elasticQuery, cursor);
 
             cursor = response.cursor();
 
@@ -70,7 +64,7 @@ public class ExtractorService {
                     data,
                     List.of("status_code_5xx_counter"),
                     Mode.TRAINING,
-                    "sample_kb_id"
+                    "1fbb07a4-favf-46ed-9eae-b8d1289c570c"
             );
 
             loaderService.loadSeries(series);

@@ -9,7 +9,7 @@
   "algorithm": {
     "name": "ZScore",
     "parameters": {
-      "train_window": 60,
+      "dim""train_window": 60,
       "from": "2025-10-01T00:00:00.000Z",
       "to": "2025-11-10T00:00:00.000Z"
     }
