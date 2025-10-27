@@ -6,6 +6,8 @@ from pymongo import MongoClient
 import pandas as pd
 # from MongoClass import MongoKBConnection
 from typing import Dict, Any, List, Optional, Tuple
+from elasticsearch import Elasticsearch, helpers
+
 
 from ..ZScore.standalone_da_algorithm_z_score import (
     fetch_logs_from_mongo,
@@ -53,10 +55,11 @@ DA_COLLECTION_NAME = "series"
 DA_RESULT_COLLECTION_NAME = "seriesResult"
 
 # conexión a elasticSearch
-ES_HOST = "http://localhost:9200"
+ES_HOST = "http://localhost:9201"
 ES_INDEX = "test_logs"
 
-KEYS = ("zscore", "arma", "kmeans", "iforest")
+
+elastic_client = Elasticsearch(ES_HOST)
 
 
 def CreateConnectionToKB() -> MongoClient:
@@ -521,16 +524,33 @@ def main():
 
     training_algo, z_score = parse_json_to_classes(
         latest_series_config, kb_client)
-    print(z_score)
 
     results = run_zscore_batch_training(z_score, training_algo, kb_client)
 
     anomalies = detectar_anomalias_df(
         z_score.observed_values["status_code_5xx_counter"], results, 60)
 
-    print(anomalies)
+    only_anomalies = [
+        item for item in anomalies if item.get('is_anomaly') == True]
 
-    save_anomalies_json(anomalies, results, "detección.json")
+    # save_anomalies_json(anomalies, results, "detección.json")
+    print(only_anomalies)
+    anomalies_for_elastic = []
+
+    for item in only_anomalies:
+
+        doc = {
+            'algorithm': 'ZScore',
+            'text': 'Anomaly detected',
+            'timestamp': item["timestamp"],
+            'value': item["value"],
+            '_index': "anomaly"
+        }
+        anomalies_for_elastic.append(doc)
+
+    helpers.bulk(elastic_client, anomalies_for_elastic)
+    # resp = client.index(index="anomaly", id=1, document=doc)
+    # print(resp['result'])
 
 
 if __name__ == "__main__":
