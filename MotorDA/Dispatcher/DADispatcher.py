@@ -228,7 +228,8 @@ def fetch_series_data_with_aggregation(
     algorithm_params = config_doc.get('algorithm', {}).get('parameters', {})
     dimensions = algorithm_params.get('dimensions', [])
     kb_id = config_doc.get('kb_id')
-    mode = config_doc.get('mode', 0)  # Convert to uppercase
+    # Don't convert - keep as is (it's an integer!)
+    mode = config_doc.get('mode')
     date_from = algorithm_params.get('from')
     date_to = algorithm_params.get('to')
 
@@ -238,7 +239,7 @@ def fetch_series_data_with_aggregation(
     print(f"\n{'='*60}")
     print(f"Fetching data for {len(dimensions)} dimensions")
     print(f"KB ID: {kb_id}")
-    print(f"Mode: {mode}")
+    print(f"Mode: {mode} (type: {type(mode).__name__})")
     print(f"Date range: {date_from} to {date_to}")
     print(f"Dimensions: {dimensions}")
     print(f"{'='*60}\n")
@@ -248,10 +249,13 @@ def fetch_series_data_with_aggregation(
     sample_doc = series_collection.find_one()
     if sample_doc:
         print(f"Sample document structure:")
-        print(f"  metadata.kbId: {sample_doc.get('metadata', {}).get('kbId')}")
+        print(
+            f"  metadata.kbId: {sample_doc.get('metadata', {}).get('kbId')} (type: {type(sample_doc.get('metadata', {}).get('kbId')).__name__})")
         print(f"  metadata.dim: {sample_doc.get('metadata', {}).get('dim')}")
-        print(f"  metadata.mode: {sample_doc.get('metadata', {}).get('mode')}")
-        print(f"  timestamp: {sample_doc.get('timestamp')}")
+        print(
+            f"  metadata.mode: {sample_doc.get('metadata', {}).get('mode')} (type: {type(sample_doc.get('metadata', {}).get('mode')).__name__})")
+        print(
+            f"  timestamp: {sample_doc.get('timestamp')} (type: {type(sample_doc.get('timestamp')).__name__})")
     else:
         print("  ✗ Collection is empty!")
     print()
@@ -259,17 +263,24 @@ def fetch_series_data_with_aggregation(
     observed_values = {}
 
     for dimension in dimensions:
+        # Convert ISO string dates to datetime objects for MongoDB query
+        date_from_dt = datetime.fromisoformat(
+            date_from.replace('Z', '+00:00')) if date_from else None
+        date_to_dt = datetime.fromisoformat(
+            date_to.replace('Z', '+00:00')) if date_to else None
+
         # Build aggregation pipeline
         match_query = {
             'metadata.kbId': kb_id,
-            'metadata.dim': dimension
+            'metadata.dim': dimension,
+            'metadata.mode': mode  # Use mode as-is (integer)
         }
 
         # Add timestamp filter if dates are provided
-        if date_from and date_to:
+        if date_from_dt and date_to_dt:
             match_query['timestamp'] = {
-                '$gte': {'$date': date_from},
-                '$lte': {'$date': date_to}
+                '$gte': date_from_dt,
+                '$lte': date_to_dt
             }
 
         pipeline = [
@@ -307,12 +318,23 @@ def fetch_series_data_with_aggregation(
             test_query['metadata.mode'] = mode
             count_with_mode = series_collection.count_documents(test_query)
             print(
-                f"  DEBUG: Documents with dim='{dimension}' AND kbId='{kb_id}' AND mode='{mode}': {count_with_mode}")
+                f"  DEBUG: Documents with all filters (no timestamp): {count_with_mode}")
+
+            # Check with timestamp
+            if date_from_dt and date_to_dt:
+                test_query['timestamp'] = {
+                    '$gte': date_from_dt, '$lte': date_to_dt}
+                count_with_timestamp = series_collection.count_documents(
+                    test_query)
+                print(
+                    f"  DEBUG: Documents with all filters (WITH timestamp): {count_with_timestamp}")
 
         try:
             # Execute aggregation pipeline
             cursor = series_collection.aggregate(pipeline)
             results = list(cursor)
+
+            print(f"  Aggregation returned {len(results)} results")
 
             if results:
                 # Create DataFrame
@@ -498,6 +520,8 @@ def main():
 
     training_algo, z_score = parse_json_to_classes(
         latest_series_config, kb_client)
+    print(z_score)
+    run_zscore_batch_training(z_score, training_algo, kb_client)
 
 
 if __name__ == "__main__":
