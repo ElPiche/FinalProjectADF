@@ -61,5 +61,4 @@ public class TrainConfig {
             this.algorithms.add(algorithm);
         });
     }
-    
 }

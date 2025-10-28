@@ -6,7 +6,6 @@ import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.TrainingConfigRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -45,6 +44,9 @@ public class BatchModeService {
                     .replace("$to", kbTrainingConfig.getTo());
 
             pipeline.process(query);
+
+            var trainConfig = new TrainConfig(config);
+            trainingConfigRepository.save(trainConfig);
 
         }
 
