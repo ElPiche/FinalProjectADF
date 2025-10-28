@@ -13,7 +13,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 public class TrainingConfig{
     @Field("training_query")
     private String queryElastic;
-    private String from; //O datetime
+    private String from;
     private String to;
     @Field("train_frequency")
     private Integer window;
