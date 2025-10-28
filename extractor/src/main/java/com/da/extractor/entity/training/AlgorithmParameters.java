@@ -1,9 +1,7 @@
 package com.da.extractor.entity.training;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
+import com.da.extractor.entity.kb.DimensionMetadataMap;
+import lombok.*;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.util.Date;
@@ -14,6 +12,7 @@ import java.util.Map;
 @AllArgsConstructor
 @Getter
 @Setter
+@Builder
 public class AlgorithmParameters {
 
     @Field("train_window")
@@ -26,12 +25,25 @@ public class AlgorithmParameters {
 
     private Date to;
 
+    void setObservedValuesFromDimensionMetadataMaps(List<DimensionMetadataMap> dimensionMetadataMaps){
+        this.observedValues = dimensionMetadataMaps.stream()
+                .map(ObservedValue::new)
+                .toList();
+    }
 
-    private static class ObservedValue {
+    @AllArgsConstructor
+    @NoArgsConstructor
+    @Getter
+    public static class ObservedValue {
         private String dimension;
 
         @Field("algorithm_metadata")
         private List<Map<String, Object>> algorithmMetadata;
+
+        public ObservedValue(DimensionMetadataMap from){
+            this.dimension = from.getDimension();
+            this.algorithmMetadata = from.getAlgorithmMetadata();
+        }
     }
 
 }

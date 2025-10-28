@@ -5,6 +5,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 
 @Getter
@@ -12,5 +14,14 @@ import java.util.Map;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ADAlgParameters{
-    Map<String, DimensionMetadataMap> kvpParams;
+    private Map<String, List<DimensionMetadataMap>> kvpParams;
+
+    public List<String> getObservedValues(){
+        return kvpParams.values()
+                .stream()
+                .flatMap(Collection::stream)
+                .map(DimensionMetadataMap::getDimension)
+                .distinct()
+                .toList();
+    }
 }
