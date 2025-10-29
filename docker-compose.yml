@@ -116,70 +116,77 @@ services:
       \ http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type:\
       \ application/json';\n  echo 'Sample data instalado. Deteniendo Kibana...';\n\
       \  docker stop kibana;\n  echo 'Kibana detenido.';\n\"\n"
+
+  mongodb-keygen:
+    image: alpine:3.20
+    container_name: mongodb-keygen
+    command: >
+      sh -c "
+        set -e;
+        mkdir -p /keydir;
+        # umask 077 => archivos 600 por defecto
+        umask 077;
+        # generar keyfile binario/base64 sin CRLF
+        dd if=/dev/urandom bs=756 count=1 status=none | base64 > /keydir/keyfile;
+        # el mongod corre como uid/gid 999 en la imagen oficial
+        chown 999:999 /keydir/keyfile;
+        chmod 600 /keydir/keyfile;
+        ls -l /keydir;
+      "
+    volumes:
+      - mongo_key:/keydir
+    restart: "no"
+
   mongodb:
     image: mongo:8.0
     container_name: mongodb
     restart: unless-stopped
+    command: ["--replSet", "rs0", "--bind_ip_all", "--keyFile","/data/key/keyfile"]
     environment:
-    - MONGO_INITDB_ROOT_USERNAME=admin
-    - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
     ports:
-    - 27017:27017
+      - 27017:27017
     networks:
-    - adf-network
+      - adf-network
     volumes:
-    - mongo_data:/data/db
+      - mongo_data:/data/db
+      - mongo_key:/data/key
     healthcheck:
-      test:
-      - CMD
-      - mongosh
-      - --quiet
-      - --username
-      - admin
-      - --password
-      - 1q2w3E*
-      - --authenticationDatabase
-      - admin
-      - --eval
-      - db.adminCommand('ping')
+      test: ["CMD", "mongosh", "--quiet", "-u", "admin", "-p", "1q2w3E*", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping').ok"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-  mongodb_kb:
+  mongodb-rs-init:
     image: mongo:8.0
-    container_name: kb-mongodb
-    restart: unless-stopped
-    environment:
-    - MONGO_INITDB_ROOT_USERNAME=admin
-    - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
-    ports:
-    - 27018:27017
-    volumes:
-    - mongo_kb_data:/data/db
-    healthcheck:
-      test:
-      - CMD
-      - mongosh
-      - --quiet
-      - --username
-      - admin
-      - --password
-      - 1q2w3E*
-      - --authenticationDatabase
-      - admin
-      - --eval
-      - db.adminCommand('ping')
-      interval: 10s
-      timeout: 5s
-      retries: 10
-  
+    container_name: mongodb-rs-init
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - adf-network
+    entrypoint: >
+      bash -lc "
+        mongosh -u admin -p 1q2w3E* --authenticationDatabase admin --host mongodb:27017 --eval '
+          try { 
+            rs.status() 
+          } catch (e) {
+            rs.initiate({
+            _id: \"rs0\",
+            members: [{ _id: 0, host: \"localhost:27017\" }]
+          })
+        }';
+        echo 'Replica set rs0 inicializado (mongodb)';
+      "
+    restart: "no"
 
+  
 volumes:
   mongo_data: null
-  mongo_kb_data: null
   elastic_data: null
   elastic_anomalies_data: null
+  mongo_key: null
 
 networks:
   adf-network:

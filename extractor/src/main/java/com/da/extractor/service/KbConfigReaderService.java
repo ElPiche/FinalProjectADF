@@ -1,52 +1,90 @@
 package com.da.extractor.service;
 
-import co.elastic.clients.json.JsonpMapper;
-
 import com.da.extractor.entity.kb.KbMongo;
-import com.da.extractor.repository.KbConfigRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.changestream.ChangeStreamDocument;
+import com.mongodb.client.model.changestream.FullDocument;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
+@Slf4j
 @Service
 public class KbConfigReaderService {
 
-    @Autowired
-    KbConfigRepository kbConfigRepository;
+    private static final String COLLECTION = "kb_configs";
 
-    @Autowired
-    JsonpMapper jsonpMapper;
+    private final MongoTemplate mongoTemplate;
+    private final ExecutorService executor;
+    private volatile boolean running = true;
 
-    @Autowired
-    StreamingModeService streamingModeService;
-
-    @Autowired
-    BatchModeService batchModeService;
-
-    public List<KbMongo> listAll() throws IllegalArgumentException, IOException
-    {
-        return kbConfigRepository.findAll();
+    public KbConfigReaderService(@Qualifier("knowledgeBaseMongoTemplate") MongoTemplate mongoTemplate,
+                                 @Qualifier("changeStreamExecutor") ExecutorService executor) {
+        this.mongoTemplate = mongoTemplate;
+        this.executor = executor;
     }
 
-    public KbMongo getByKbId(String kbId) {
-        return kbConfigRepository.findByKbConfig_KbId(kbId)
-                .orElseThrow(() -> new IllegalArgumentException("KB Config no encontrada: " + kbId));
+    @PostConstruct
+    void start() {
+        executor.submit(this::runStream);
     }
 
-    public void getAllConfigs() throws Exception {
+    private void runStream () {
+        // Listener resiliente para la colección kb_configs transformando a KbMongo
+        MongoCollection<Document> collection = mongoTemplate.getCollection(COLLECTION);
+        // Pipeline simple: escuchar cualquier operación soportada (insert/update/replace/delete)
+        List<Bson> pipeline = List.of(
+                Aggregates.match(Filters.in("operationType", List.of("insert", "update", "replace", "delete")))
+        );
+        int retry = 0;
+        while (running) {
+            try (MongoCursor<ChangeStreamDocument<Document>> cursor = collection
+                    .watch(pipeline)
+                    .fullDocument(FullDocument.UPDATE_LOOKUP)
+                    .iterator()) {
 
-        List<KbMongo> kbMongoList = listAll();
+                log.info("[KB ChangeStream] Iniciado sobre colección '{}'", COLLECTION);
+                retry = 0; // reset de reintentos al conectar
+                while (running && cursor.hasNext()) {
+                    ChangeStreamDocument<Document> change = cursor.next();
+                    String op = change.getOperationType() != null ? change.getOperationType().getValue() : "unknown";
+                    Document full = change.getFullDocument();
 
-        for (KbMongo kbMongo : kbMongoList) {
-
-            streamingModeService.executeConfiguration(kbMongo);
-
-            batchModeService.executeConfiguration(kbMongo);
-
+                    if (full != null) {
+                        // Convertir a entidad tipada
+                        KbMongo kb = mongoTemplate.getConverter().read(KbMongo.class, full);
+                        log.info("[KB ChangeStream] op={} id={} name={} changeFlag={}", op, kb.getId(), kb.getName(), kb.getChangeFlag());
+                        // Aquí se puede disparar lógica adicional (ej: publicar evento interno, refrescar caché, etc.)
+                    } else {
+                        // Para deletes u operaciones sin cuerpo completo
+                        log.info("[KB ChangeStream] op={} key={} (sin fullDocument)", op, change.getDocumentKey());
+                    }
+                }
+            } catch (Exception e) {
+                long backoffMillis = Math.min(10_000, (long) Math.pow(2, Math.min(retry, 5)) * 250L);
+                log.warn("[KB ChangeStream] Error en stream (reintento {} en {} ms): {}", retry, backoffMillis, e.getMessage(), e);
+                try { Thread.sleep(backoffMillis); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+                retry++;
+            }
         }
-
+        log.info("[KB ChangeStream] Finalizado");
     }
 
+    // Método opcional para apagar limpiamente (también invocado automáticamente en shutdown del contexto)
+    @PreDestroy
+    public void stop() {
+        running = false;
+        executor.shutdownNow();
+    }
 }

@@ -9,6 +9,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.DocumentReference;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.time.Instant;
@@ -21,8 +22,8 @@ import java.util.Map;
 @Getter
 @Setter
 @NoArgsConstructor
-@Document(collection ="testLogsKB")
-public class KbMongo {
+@Document(collection ="kb_configs")
+public class KbMongo{
 
     @Id
     private String id;
