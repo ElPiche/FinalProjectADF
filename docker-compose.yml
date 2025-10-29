@@ -145,39 +145,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-
-  mongodb_kb:
-    image: mongo:8.0
-    container_name: kb-mongodb
-    restart: unless-stopped
-    environment:
-    - MONGO_INITDB_ROOT_USERNAME=admin
-    - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
-    ports:
-    - 27018:27017
-    volumes:
-    - mongo_kb_data:/data/db
-    healthcheck:
-      test:
-      - CMD
-      - mongosh
-      - --quiet
-      - --username
-      - admin
-      - --password
-      - 1q2w3E*
-      - --authenticationDatabase
-      - admin
-      - --eval
-      - db.adminCommand('ping')
-      interval: 10s
-      timeout: 5s
-      retries: 10
   
-
 volumes:
   mongo_data: null
-  mongo_kb_data: null
   elastic_data: null
   elastic_anomalies_data: null
 
