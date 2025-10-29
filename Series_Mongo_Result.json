@@ -2,21 +2,69 @@
   "_id": {
     "$oid": "68f3e1e1a856aa9308751164"
   },
-  "kb_id": "sample_kb_id",
+  "kb_id": "3af5b1d2-5d4e-4c3b-9f7e-123456789abc",
   "kb_description": "WIP",
   "created_at": "2025-11-01T12:00:00.000Z",
-  "mode": 0,
-  "algorithm": {
-    "name": "zscore",
-    "parameters": {
-      "train_window": 60,
-      "dimensions": [
-        "status_code_5xx_counter",
-        "status_code_4xx_counter",
-        "status_code_2xx_counter"
-      ],
-      "from": "2025-10-01T00:00:00.000Z",
-      "to": "2025-11-10T00:00:00.000Z"
+  "mode": "0",
+  "algorithms": [
+    {
+      "name": "kmeans",
+      "parameters": {
+        "train_window": 60,
+        "observed_values": [
+          {
+            "dimension": "5xx_status_code",
+            "algorithm_metadata": [
+              {
+                "key": "clusters",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "dimension": "4xx_status_code",
+            "algorithm_metadata": [
+              {
+                "key": "clusters",
+                "value": 3
+              }
+            ]
+          },
+          {
+            "dimension": "2xx_status_code",
+            "algorithm_metadata": [
+              {
+                "key": "clusters",
+                "value": 4
+              }
+            ]
+          }
+        ],
+        "from": "2025-10-01T00:00:00.000Z",
+        "to": "2025-11-10T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "ZScore",
+      "parameters": {
+        "train_window": 60,
+        "observed_values": [
+          {
+            "dimension": "status_code_5xx_counter",
+            "algorithm_metadata": []
+          },
+          {
+            "dimension": "4xx_status_code",
+            "algorithm_metadata": []
+          },
+          {
+            "dimension": "2xx_status_code",
+            "algorithm_metadata": []
+          }
+        ],
+        "from": "2025-10-01T00:00:00.000Z",
+        "to": "2025-11-10T00:00:00.000Z"
+      }
     }
-  }
+  ]
 }

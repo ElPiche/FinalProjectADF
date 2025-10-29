@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Dict, List
 import json
 from bson import json_util
 from pymongo import MongoClient
@@ -7,6 +6,7 @@ import pandas as pd
 # from MongoClass import MongoKBConnection
 from typing import Dict, Any, List, Optional, Tuple
 from elasticsearch import Elasticsearch, helpers
+from dataclasses import dataclass, field
 
 
 from ..ZScore.standalone_da_algorithm_z_score import (
@@ -15,15 +15,6 @@ from ..ZScore.standalone_da_algorithm_z_score import (
     detectar_anomalias_df,
     save_anomalies_json
 )
-
-
-class TrainingAlgorithm:
-    def __init__(self,  mode: int):
-
-        self.mode = mode
-
-    def __repr__(self):
-        return f"TrainingAlgorithm(mode={self.mode})"
 
 
 class ZScore:
@@ -62,6 +53,116 @@ ES_INDEX = "test_logs"
 elastic_client = Elasticsearch(ES_HOST)
 
 
+@dataclass
+class Parameters:
+    train_window: int
+    # dimension → { key → value } key value being for algorithm metadata, might be empty
+    observed_values: Dict[str, Dict[str, int]]
+    from_: datetime
+    to: datetime
+
+
+@dataclass
+class Algorithm:
+    name: str
+    parameters: Parameters
+
+    def execute(self, config):
+
+        match self.name:
+
+            case "zscore":
+
+                print("I am executing Z Score")
+                observed_values = fetch_series_data_with_aggregation(
+                    config, self)
+
+                print(observed_values)
+                results = run_zscore_batch_training(self, observed_values)
+
+                anomalies_dict: Dict[str, List] = {}
+                for key, value in observed_values.items():
+
+                    anomalies = detectar_anomalias_df(
+                        value, results, self.parameters.train_window)
+                    anomalies_dict[key] = anomalies
+
+                # print(anomalies_dict)
+
+                filtered_anomalies = {
+                    key: [item for item in value if item.get('is_anomaly')]
+                    for key, value in anomalies_dict.items()
+                }
+
+                print(filtered_anomalies)
+                anomalies_for_elastic = []
+
+                for key, anomalies in filtered_anomalies.items():
+                    for item in anomalies:
+                        doc = {
+                            'algorithm': 'ZScore',
+                            'metric': key,  # optional — store which metric the anomaly belongs to
+                            'text': 'Anomaly detected',
+                            'timestamp': item["timestamp"],
+                            'value': item["value"],
+                            '_index': "anomaly"
+                        }
+                        anomalies_for_elastic.append(doc)
+
+                helpers.bulk(elastic_client, anomalies_for_elastic)
+            case _:
+                print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
+
+
+@dataclass
+class Config:
+    _id: str
+    kb_id: str
+    kb_description: str
+    created_at: datetime
+    mode: int
+    algorithms: List[Algorithm]
+
+    def execute_algos(self):
+
+        if (not self.algorithms):
+            print("I have no algorithms to call")
+            return None
+
+        for algo in self.algorithms:
+            algo.execute(self)
+
+
+def parse_config(data: dict) -> Config:
+    return Config(
+        _id=data["_id"],
+        kb_id=data["kb_id"],
+        kb_description=data["kb_description"],
+        created_at=datetime.fromisoformat(
+            data["created_at"].replace("Z", "+00:00")),
+        mode=data["mode"],
+
+        algorithms=[
+            Algorithm(
+                name=a["name"].lower(),
+                parameters=Parameters(
+                    train_window=a["parameters"]["train_window"],
+                    observed_values={
+                        ov["dimension"]: {am["key"]: am["value"]
+                                          for am in ov["algorithm_metadata"]}
+                        for ov in a["parameters"]["observed_values"]
+                    },
+                    from_=datetime.fromisoformat(
+                        a["parameters"]["from"].replace("Z", "+00:00")),
+                    to=datetime.fromisoformat(
+                        a["parameters"]["to"].replace("Z", "+00:00")),
+                ),
+            )
+            for a in data["algorithms"]
+        ],
+    )
+
+
 def CreateConnectionToKB() -> MongoClient:
     # we establish the connection to the kb mongo db
     mongo_kb_client = MongoClient(MONGO_KB_URL)
@@ -80,8 +181,6 @@ def CreateConnectionToDA() -> MongoClient:
     mongo_da_client.admin.command("ping")
     print("Nos conectamos a la DA")
     return mongo_da_client
-
-# returns
 
 
 def ExtractLatestConfigurationKB(client: MongoClient):
@@ -102,8 +201,6 @@ def ExtractLatestConfigurationKB(client: MongoClient):
         """
     return result
 
-# Lector de json
-
 
 def get_kb_block(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Devuelve siempre el bloque kbConfig sin importar si viene en camelCase o PascalCase."""
@@ -115,60 +212,13 @@ def get_kb_id(doc: Dict[str, Any]) -> Optional[str]:
     return kb.get("id") or kb.get("Id")
 
 
-def get_selected_algorithms(doc: Dict[str, Any]) -> List[str]:
-    """
-    Devuelve la lista de algoritmos que el usuario 'eligió' (tienen parámetros cargados).
-    """
-    kb = get_kb_block(doc)
-    params = kb.get("daAlgParameters", {}) or kb.get(
-        "DA_Alg_Parameters", {}) or {}
-    selected = []
-
-    """
-    for k in ALGO_KEYS:
-        arr = params.get(k)
-        if isinstance(arr, list) and len(arr) > 0:
-            selected.append(k)
-            """
-    return selected
-
-
-"""
-def choose_algorithm(doc: Dict[str, Any], priority: Tuple[str, ...] = ALGO_KEYS) -> Optional[str]:
-    
-    Elige UN algoritmo. Si hay varios definidos, aplica prioridad.
-    Si no hay ninguno, devuelve None.
-    Si el JSON tuviera kbConfig.selectedAlgorithm, lo respeta si está definido.
-    
-    kb = get_kb_block(doc)
-    explicit = kb.get("selectedAlgorithm")
-    if explicit:
-        return explicit if explicit in ALGO_KEYS else None
-
-    selected = set(get_selected_algorithms(doc))
-    for p in priority:
-        if p in selected:
-            return p
-    return None
-"""
-
-
-def run_zscore(config_block: Dict[str, Any]):
-    params = (config_block.get("daAlgParameters") or {}).get("zscore", [])
-    for p in params:
-        print(
-            f"▶ ZSCORE threshold={p.get('threshold')} observedValue={p.get('observedValue')}")
-    # acá va tu implementación real...
-
-
-def run_zscore_batch_training(zScore: ZScore, data_to_train: TrainingAlgorithm, da_client: MongoClient):
+def run_zscore_batch_training(algorithms: Algorithm, observed_values):
 
     # {'train_window': 60, 'dimensions': ['5xx_status_code', '4xx_status_code', '2xx_status_code'], 'from': '2025-10-01T00:00:00.000Z', 'to': '2025-11-10T00:00:00.000Z'}
     #     # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
-
+    da_client = CreateConnectionToDA()
     # iterating both key and values
-    for key, value in zScore.observed_values.items():
-        print(key)
+    for key, value in observed_values.items():
 
         if (not value.empty):
             results = train_baseline(value, "value")
@@ -202,20 +252,8 @@ def run_iforest(config_block: Dict[str, Any]):
     # implementación...
 
 
-# Map por si sirve
-ALGORITHM_HANDLERS = {
-    "zscore": run_zscore,
-    "arma": run_arma,
-    "kmeans": run_kmeans,
-    "iforest": run_iforest,
-}
-
-
 def fetch_series_data_with_aggregation(
-    config_doc: Dict,
-    da_client: MongoClient,
-    db_name: str = "logsdb",
-    series_collection_name: str = "series"
+    config: Config, algorithm_to_execute: Algorithm
 ) -> Dict[str, pd.DataFrame]:
     """
     Fetch series data for all dimensions using MongoDB aggregation pipeline.
@@ -230,34 +268,37 @@ def fetch_series_data_with_aggregation(
         Dictionary mapping dimension names to their respective DataFrames
     """
 
-    # Extract parameters from config
-    algorithm_params = config_doc.get('algorithm', {}).get('parameters', {})
-    dimensions = algorithm_params.get('dimensions', [])
-    kb_id = config_doc.get('kb_id')
-    # Don't convert - keep as is (it's an integer!)
-    mode = config_doc.get('mode')
-    date_from = algorithm_params.get('from')
-    date_to = algorithm_params.get('to')
+    da_client = CreateConnectionToDA()
 
-    # Get series collection
-    series_collection = da_client[db_name][series_collection_name]
+    series_collection = da_client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME]
+
+    dimensions = list(algorithm_to_execute.parameters.observed_values.keys())
+    kb_id = config.kb_id
+    mode = config.mode
+    date_from = algorithm_to_execute.parameters.from_
+    date_to = algorithm_to_execute.parameters.to
+
+    print(f"\033[33m{algorithm_to_execute.parameters}\033[0m")
 
     print(f"\n{'='*60}")
-    print(f"Fetching data for {len(dimensions)} dimensions")
+    print(
+        f"Fetching data for {len(dimensions)} dimensions")
     print(f"KB ID: {kb_id}")
-    print(f"Mode: {mode} (type: {type(mode).__name__})")
-    print(f"Date range: {date_from} to {date_to}")
+    print(f"Mode: {mode}")
+    # print(f"Date range: {date_from} to {date_to}")
     print(f"Dimensions: {dimensions}")
     print(f"{'='*60}\n")
 
     # Debug: Check what's actually in the series collection
     print("DEBUG: Checking series collection...")
     sample_doc = series_collection.find_one()
+
     if sample_doc:
         print(f"Sample document structure:")
         print(
             f"  metadata.kbId: {sample_doc.get('metadata', {}).get('kbId')} (type: {type(sample_doc.get('metadata', {}).get('kbId')).__name__})")
-        print(f"  metadata.dim: {sample_doc.get('metadata', {}).get('dim')}")
+        print(
+            f"  metadata.dim: {sample_doc.get('metadata', {}).get('dim')}")
         print(
             f"  metadata.mode: {sample_doc.get('metadata', {}).get('mode')} (type: {type(sample_doc.get('metadata', {}).get('mode')).__name__})")
         print(
@@ -269,24 +310,27 @@ def fetch_series_data_with_aggregation(
     observed_values = {}
 
     for dimension in dimensions:
+
+        print(type(date_from))
+        """
         # Convert ISO string dates to datetime objects for MongoDB query
         date_from_dt = datetime.fromisoformat(
             date_from.replace('Z', '+00:00')) if date_from else None
         date_to_dt = datetime.fromisoformat(
             date_to.replace('Z', '+00:00')) if date_to else None
-
+        """
         # Build aggregation pipeline
         match_query = {
             'metadata.kbId': kb_id,
             'metadata.dim': dimension,
-            'metadata.mode': mode  # Use mode as-is (integer)
+            'metadata.mode': int(mode)  # Use mode as-is (integer)
         }
 
         # Add timestamp filter if dates are provided
-        if date_from_dt and date_to_dt:
+        if date_from and date_to:
             match_query['timestamp'] = {
-                '$gte': date_from_dt,
-                '$lte': date_to_dt
+                '$gte': date_from,
+                '$lte': date_to
             }
 
         pipeline = [
@@ -311,9 +355,11 @@ def fetch_series_data_with_aggregation(
         # Debug: Try to find at least one document with this dimension
         test_query = {'metadata.dim': dimension}
         count_with_dim = series_collection.count_documents(test_query)
+
         print(f"  DEBUG: Documents with dim='{dimension}': {count_with_dim}")
 
         if count_with_dim > 0:
+
             # Check kb_id match
             test_query['metadata.kbId'] = kb_id
             count_with_kb = series_collection.count_documents(test_query)
@@ -321,15 +367,15 @@ def fetch_series_data_with_aggregation(
                 f"  DEBUG: Documents with dim='{dimension}' AND kbId='{kb_id}': {count_with_kb}")
 
             # Check mode match
-            test_query['metadata.mode'] = mode
+            test_query['metadata.mode'] = int(mode)
             count_with_mode = series_collection.count_documents(test_query)
             print(
                 f"  DEBUG: Documents with all filters (no timestamp): {count_with_mode}")
 
             # Check with timestamp
-            if date_from_dt and date_to_dt:
+            if date_from and date_to:
                 test_query['timestamp'] = {
-                    '$gte': date_from_dt, '$lte': date_to_dt}
+                    '$gte': date_from, '$lte': date_to}
                 count_with_timestamp = series_collection.count_documents(
                     test_query)
                 print(
@@ -456,56 +502,6 @@ def fetch_series_data_batch(
     return observed_values
 
 
-# Updated parse_json_to_classes to use the new fetcher
-def parse_json_to_classes(json_data: dict, da_client: MongoClient) -> tuple:
-    """
-    Parse JSON data into TrainingAlgorithm and ZScore classes.
-    Now fetches actual data from MongoDB series collection.
-
-    Args:
-        json_data: Dictionary containing training configuration
-        da_client: MongoDB client for fetching series data
-
-    Returns:
-        Tuple of (TrainingAlgorithm, ZScore) instances
-    """
-
-    # Extract algorithm info
-    algorithm = json_data.get("algorithm", {})
-    algorithm_name = algorithm.get("name")
-    algorithm_parameters = algorithm.get("parameters", {})
-
-    # Extract mode
-    mode = json_data.get("mode", 0)
-
-    # Create TrainingAlgorithm instance
-    training_algo = TrainingAlgorithm(mode=mode)
-
-    if algorithm_name == "zscore":
-        print("Processing Z-Score algorithm configuration...")
-
-        # Fetch data from MongoDB using aggregation pipeline
-        observed_values = fetch_series_data_with_aggregation(
-            config_doc=json_data,
-            da_client=da_client
-        )
-
-        # Create ZScore instance
-        z_score = ZScore(
-            train_window=algorithm_parameters.get("train_window", 60),
-            threshold=0,  # You might want to extract this from config
-            observed_values=observed_values,
-            train_from=algorithm_parameters.get("from"),
-            train_to=algorithm_parameters.get("to")
-        )
-
-        return training_algo, z_score
-
-    # Add other algorithm handlers here
-    else:
-        raise ValueError(f"Unsupported algorithm: {algorithm_name}")
-
-
 def main():
 
     # Esto arma la conexión a MongoDB
@@ -519,22 +515,22 @@ def main():
 
     # TODO: add a watch on the connection to the KBConfig one
 
-    # de aquí extraemos los datos de las operativas que vayamos a llamar
+    # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
     latest_series_config = ExtractLatestConfigurationKB(kb_client)
 
-    training_algo, z_score = parse_json_to_classes(
-        latest_series_config, kb_client)
+    # we turn the JSON with the config data into a class
+    config: Config = parse_config(latest_series_config)
 
-    results = run_zscore_batch_training(z_score, training_algo, kb_client)
+    # now we go thru each algorithm call we extracted, and try to execute training on them
+    config.execute_algos()
+
+    # results = run_zscore_batch_training(z_score, training_algo, kb_client)
 
     anomalies = detectar_anomalias_df(
         z_score.observed_values["status_code_5xx_counter"], results, 60)
 
-    only_anomalies = [
-        item for item in anomalies if item.get('is_anomaly') == True]
-
     # save_anomalies_json(anomalies, results, "detección.json")
-    print(only_anomalies)
+    # print(only_anomalies)
     anomalies_for_elastic = []
 
     for item in only_anomalies:
