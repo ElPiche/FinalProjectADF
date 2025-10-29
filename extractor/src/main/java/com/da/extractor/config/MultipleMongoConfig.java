@@ -8,6 +8,12 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.MongoDatabaseFactory;
+import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
+import org.springframework.data.mongodb.core.convert.*;
+import org.springframework.data.mongodb.core.mapping.MongoMappingContext;
+
+import java.util.List;
 
 @Configuration
 public class MultipleMongoConfig {
@@ -29,21 +35,34 @@ public class MultipleMongoConfig {
         return MongoClients.create(uri);
     }
 
+    @Bean(name = "mongoCustomConversions")
+    public MongoCustomConversions mongoCustomConversions() {
+        return new MongoCustomConversions(List.of(StringToDateReadingConverter.INSTANCE));
+    }
+
+    private MongoTemplate buildTemplate(String dbName, MongoClient client, MongoCustomConversions conversions) {
+        MongoDatabaseFactory factory = new SimpleMongoClientDatabaseFactory(client, dbName);
+        MongoMappingContext context = new MongoMappingContext();
+        MappingMongoConverter converter = new MappingMongoConverter(new DefaultDbRefResolver(factory), context);
+        converter.setCustomConversions(conversions);
+        converter.afterPropertiesSet();
+        return new MongoTemplate(factory, converter);
+    }
+
     @Bean
     @Primary
-    public MongoTemplate anomalyDetectionMongoTemplate() {
-        return new MongoTemplate(mongoClient(), anomalyDetectionDb);
+    public MongoTemplate anomalyDetectionMongoTemplate(MongoClient client, @Qualifier("mongoCustomConversions") MongoCustomConversions conversions) {
+        return buildTemplate(anomalyDetectionDb, client, conversions);
     }
 
     @Bean
     @Qualifier("knowledgeBaseMongoTemplate")
-    public MongoTemplate knowledgeBaseMongoTemplate() {
-        return new MongoTemplate(mongoClient(), knowledgeBaseDb);
+    public MongoTemplate knowledgeBaseMongoTemplate(MongoClient client, @Qualifier("mongoCustomConversions") MongoCustomConversions conversions) {
+        return buildTemplate(knowledgeBaseDb, client, conversions);
     }
 
     @Bean
-    public MongoTemplate schedulerMongoTemplate() {
-        return new MongoTemplate(mongoClient(), schedulerDb);
+    public MongoTemplate schedulerMongoTemplate(MongoClient client, @Qualifier("mongoCustomConversions") MongoCustomConversions conversions) {
+        return buildTemplate(schedulerDb, client, conversions);
     }
-
 }
