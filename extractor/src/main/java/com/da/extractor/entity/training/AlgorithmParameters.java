@@ -1,9 +1,11 @@
 package com.da.extractor.entity.training;
 
+import com.da.extractor.entity.KeyValuePair;
 import com.da.extractor.entity.kb.DimensionMetadataMap;
 import lombok.*;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +40,7 @@ public class AlgorithmParameters {
         private String dimension;
 
         @Field("algorithm_metadata")
-        private List<Map<String, Object>> algorithmMetadata;
+        private List<KeyValuePair> algorithmMetadata;
 
         public ObservedValue(DimensionMetadataMap from){
             this.dimension = from.getDimension();

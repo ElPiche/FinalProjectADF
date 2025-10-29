@@ -1,5 +1,6 @@
 package com.da.extractor.entity.kb;
 
+import com.da.extractor.entity.KeyValuePair;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -14,5 +15,5 @@ import java.util.Map;
 public class DimensionMetadataMap{
     private String dimension;
     @Field("algorithm_metadata")
-    List<Map<String, Object>> algorithmMetadata;
+    List<KeyValuePair> algorithmMetadata;
 }
