@@ -17,7 +17,9 @@ from typing import Optional, Dict, Any, List
 from mcp.server.fastmcp import FastMCP
 from croniter import croniter
 from elasticsearch import Elasticsearch
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, Field
+from typing import List, Union, Optional
+from mcp.server.fastmcp.exceptions import ToolError
 
 # Global Configuration Variables --------------------------------------------------------------------------------
 
@@ -38,6 +40,9 @@ structured_log_file = "structured_logs.jsonl"
 
 # Algorithms Configuration
 supported_algorithms = {"zscore"}
+
+# Timeout Configuration
+sql_validation_timeout_seconds = 2
 
 # Configure logging
 logging.basicConfig(
@@ -264,6 +269,20 @@ class schedulingDetectionConfig(BaseModel):
 
 # Supported algorithms - only fully implemented ones
 SUPPORTED_ALGORITHMS = {"zscore"}
+
+# Algorithm configuration models for FastMCP tool parameters
+class ZScoreConfig(BaseModel):
+    algorithm: str = Field(default="zscore", description="Algorithm type")
+    dimensions: List[str] = Field(description="List of field names to monitor for anomalies")
+
+# Commented out for future implementation when KMeans is added to framework
+# class KMeansConfig(BaseModel):
+#     algorithm: str = Field(default="kmeans", description="Algorithm type")
+#     dimension: str = Field(description="Field name to cluster")
+#     clusters: List[int] = Field(description="List of cluster counts to test")
+
+# Union type for all supported algorithms (expand when more algorithms are added)
+AlgorithmConfig = Union[ZScoreConfig]  # Add KMeansConfig, ARMAConfig, etc. when implemented
 
 
 def validate_algorithms(algorithms: List[Dict[str, Any]]) -> List[str]:
@@ -742,8 +761,15 @@ class ExtractorModes(str):
 
 @mcp.tool()
 def create_da_config(
-    kb_config: dict,
-    algorithms: list[dict]
+    name: str = Field(description="Configuration name"),
+    description: str = Field(description="Human-readable description"),
+    training_query: str = Field(description="SQL query for training data"),
+    detection_query: str = Field(description="SQL query for detection"),
+    training_from: str = Field(description="Training start timestamp (ISO format)"),
+    training_to: str = Field(description="Training end timestamp (ISO format)"),
+    detection_frequency: str = Field(description="Detection frequency (CRON format)"),
+    detection_start: str = Field(description="Detection start timestamp (ISO format)"),
+    algorithms: List[AlgorithmConfig] = Field(description="List of algorithm configurations")
 ) -> str:
     """Create a Data Analytics (DA) algorithm configuration for the Knowledge Base system."""
     request_id = str(uuid.uuid4())[:8]
@@ -751,142 +777,135 @@ def create_da_config(
 
     log_message("Tool execution started", "info", "create_da_config", "entry",
                 request_id=request_id, extra_data={
-                    "kb_config_name": kb_config.name if hasattr(kb_config, 'name') else kb_config.get("name", "unknown"),
+                    "config_name": name,
                     "algorithm_count": len(algorithms) if algorithms else 0
                 })
     """
     Create a Data Analytics configuration for the Knowledge Base system.
 
+    This tool accepts individual parameters for KB configuration and uses structured algorithm objects
+    for type safety and validation. Currently supports ZScore algorithm with multiple dimensions.
+
     Args:
-        kb_config: Configuration dict with name, description, change_flag, scheduling
-        algorithms: List of algorithm configurations with validated field matching
+        name: Configuration name
+        description: Human-readable description
+        training_query: SQL query for training data (must include fields used by algorithms)
+        detection_query: SQL query for detection (must include same fields as training)
+        training_from: Training period start (ISO timestamp)
+        training_to: Training period end (ISO timestamp)
+        detection_frequency: CRON expression for detection frequency
+        detection_start: Detection start timestamp (ISO format)
+        algorithms: List of algorithm configurations (currently ZScoreConfig supported)
 
-    Algorithm Submission Format:
-    Each algorithm in the list must follow this exact structure:
+    Algorithm Configuration:
+    Use ZScoreConfig objects to specify ZScore algorithm parameters:
 
-    [
-        {
-            "alg_name": "zscore",  // REQUIRED: Currently only "zscore" is supported
-            "alg_parameters": [    // REQUIRED: Array of parameter objects
-                {
-                    "dimension": "field_name"  // REQUIRED: Must match SQL query output field exactly
-                }
-            ]
-        }
-    ]
+    ZScoreConfig(
+        dimensions=["field1", "field2"]  # List of field names from SQL queries
+    )
 
-    CRITICAL VALIDATION RULES:
-    - alg_name must be "zscore" (case-insensitive, but stored as lowercase)
-    - alg_parameters must be a non-empty array
-    - Each parameter must have a "dimension" field
-    - dimension values must exactly match field names from SQL query outputs
-    - SQL queries are validated first; dimensions are cross-checked against query results
+    Field names in dimensions must exactly match output fields from both training_query and detection_query.
 
-    Example algorithms (valid):
-    [
-        {
-            "alg_name": "zscore",
-            "alg_parameters": [
-                {"dimension": "request_count"},
-                {"dimension": "error_rate"}
-            ]
-        }
-    ]
-
-    Common Mistakes to Avoid:
-    - Using "z-score" instead of "zscore"
-    - Missing "alg_parameters" array
-    - Empty alg_parameters array
-    - dimension names not matching SQL SELECT aliases
-    - Using field names that don't exist in query output
+    Example:
+        algorithms=[
+            ZScoreConfig(dimensions=["status_200_count", "bytes_sum"])
+        ]
 
     Returns:
-        Success message with configuration details or detailed validation error messages
+        Success message with configuration ID or detailed validation error
     """
 
-    # Validate KB config structure
-    if not isinstance(kb_config, dict):
-        return "ERROR: kb_config must be a dictionary"
+    # Basic parameter validation
+    if not name or not isinstance(name, str):
+        raise ToolError("name must be a non-empty string")
+    if not description or not isinstance(description, str):
+        raise ToolError("description must be a non-empty string")
 
-    required_kb_fields = ["name", "description", "change_flag", "scheduling"]
-    for field in required_kb_fields:
-        if field not in kb_config:
-            return f"ERROR: kb_config missing required field: {field}"
+    # Validate CRON expression
+    try:
+        CRON(detection_frequency)
+    except ValueError as e:
+        raise ToolError(f"Invalid detection frequency CRON: {str(e)}")
 
-    # Validate algorithms
-    algorithm_errors = validate_algorithms(algorithms)
+    # Convert algorithm configs to internal format
+    internal_algorithms = []
+    for alg_config in algorithms:
+        if isinstance(alg_config, ZScoreConfig):
+            internal_algorithms.append({
+                "alg_name": "zscore",
+                "alg_parameters": [{"dimension": dim} for dim in alg_config.dimensions]
+            })
+        else:
+            raise ToolError(f"Unsupported algorithm type: {type(alg_config)}")
+
+    # Validate algorithms using existing validation function
+    algorithm_errors = validate_algorithms(internal_algorithms)
     if algorithm_errors:
         error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
         log_message(f"Algorithm validation failed: {len(algorithm_errors)} errors", "error",
                     "create_da_config", "validation", request_id=request_id)
-        return error_msg
-
-    # Validate scheduling structure
-    scheduling = kb_config.get("scheduling", {})
-    if not isinstance(scheduling, dict):
-        return "ERROR: scheduling must be a dictionary"
-
-    required_scheduling = ["training_config", "detection_config"]
-    for field in required_scheduling:
-        if field not in scheduling:
-            return f"ERROR: scheduling missing required field: {field}"
-
-    # Validate CRON expressions
-    detection_config = scheduling.get("detection_config", {})
-    if "frequency" in detection_config:
-        try:
-            CRON(detection_config["frequency"])
-        except ValueError as e:
-            return f"ERROR: Invalid detection frequency CRON: {str(e)}"
+        raise ToolError(error_msg)
 
     # Cross-validate algorithms against SQL queries
-    training_query = scheduling.get("training_config", {}).get("training_query")
-    detection_query = scheduling.get("detection_config", {}).get("detection_query")
-
     if training_query:
         validation_result = elasticsearch_sql(training_query + " LIMIT 0")
         if "ERROR" in validation_result:
-            return f"ERROR: Training SQL query validation failed: {validation_result}"
+            raise ToolError(f"Training SQL query validation failed: {validation_result}")
         else:
             try:
                 result_data = json.loads(validation_result)
                 available_fields = [col['name'] for col in result_data.get('columns', [])]
 
-                for alg in algorithms:
-                    for param in alg.get("alg_parameters", []):
-                        dimension = param.get("dimension")
-                        if dimension and dimension not in available_fields:
-                            return f"ERROR: Dimension '{dimension}' not found in training query output. Available fields: {available_fields}"
+                for alg_config in algorithms:
+                    if isinstance(alg_config, ZScoreConfig):
+                        for dimension in alg_config.dimensions:
+                            if dimension not in available_fields:
+                                raise ToolError(f"Dimension '{dimension}' not found in training query output. Available fields: {available_fields}")
             except json.JSONDecodeError:
-                return "ERROR: Could not parse training SQL validation response"
+                raise ToolError("Could not parse training SQL validation response")
 
     if detection_query:
         validation_result = elasticsearch_sql(detection_query + " LIMIT 0")
         if "ERROR" in validation_result:
-            return f"ERROR: Detection SQL query validation failed: {validation_result}"
+            raise ToolError(f"Detection SQL query validation failed: {validation_result}")
         else:
             try:
                 result_data = json.loads(validation_result)
                 available_fields = [col['name'] for col in result_data.get('columns', [])]
 
-                for alg in algorithms:
-                    for param in alg.get("alg_parameters", []):
-                        dimension = param.get("dimension")
-                        if dimension and dimension not in available_fields:
-                            return f"ERROR: Dimension '{dimension}' not found in detection query output. Available fields: {available_fields}"
+                for alg_config in algorithms:
+                    if isinstance(alg_config, ZScoreConfig):
+                        for dimension in alg_config.dimensions:
+                            if dimension not in available_fields:
+                                raise ToolError(f"Dimension '{dimension}' not found in detection query output. Available fields: {available_fields}")
             except json.JSONDecodeError:
-                return "ERROR: Could not parse detection SQL validation response"
+                raise ToolError("Could not parse detection SQL validation response")
 
     # Build configuration for storage
     config_to_store = {
-        "name": kb_config["name"],
-        "description": kb_config["description"],
-        "change_flag": kb_config["change_flag"],
-        "scheduling": scheduling,
-        "algorithms": algorithms
+        "name": name,
+        "description": description,
+        "change_flag": 0,  # Always start with 0 for new configs
+        "scheduling": {
+            "training_config": {
+                "training_query": training_query,
+                "from": training_from,
+                "to": training_to,
+                "training_window": 3600,  # Default value
+                "is_active": True  # Default value
+            },
+            "detection_config": {
+                "detection_query": detection_query,
+                "from": detection_start,
+                "frequency": detection_frequency,
+                "detection_window": 3600,  # Default value
+                "is_active": False  # Default value
+            }
+        },
+        "algorithms": internal_algorithms
     }
 
-    log_message(f"Configuration validation successful for: {kb_config['name']}", "info",
+    log_message(f"Configuration validation successful for: {name}", "info",
                 "create_da_config", "validation", request_id=request_id)
 
     # Print configuration preview
@@ -899,7 +918,7 @@ def create_da_config(
     if client is None:
         error_msg = "Failed to connect to MongoDB - configuration not saved"
         log_message(error_msg, "error", "create_da_config", "save", request_id=request_id)
-        return f"ERROR: {error_msg}"
+        raise ToolError(error_msg)
 
     try:
         db = client["kb_configs"]
@@ -917,10 +936,10 @@ def create_da_config(
 
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
-        error_msg = f"ERROR: Failed to save configuration: {str(e)}"
+        error_msg = f"Failed to save configuration: {str(e)}"
         log_message(error_msg, "error", "create_da_config", "save", request_id=request_id,
                     duration_ms=duration_ms, extra_data={"error_type": type(e).__name__})
-        return error_msg
+        raise ToolError(error_msg)
     finally:
         try:
             client.close()
@@ -968,7 +987,7 @@ def modify_kb_config(
     """
     client = connect_mongodb()
     if client is None:
-        return "ERROR: Failed to connect to MongoDB"
+        raise ToolError("Failed to connect to MongoDB")
 
     try:
         db = client["kb_configs"]
@@ -978,10 +997,10 @@ def modify_kb_config(
         try:
             config_doc = collection.find_one({"_id": ObjectId(config_id)})
         except Exception as e:
-            return f"ERROR: Invalid configuration ID format: '{config_id}' - {str(e)}"
+            raise ToolError(f"Invalid configuration ID format: '{config_id}' - {str(e)}")
 
         if not config_doc:
-            return f"ERROR: Configuration with ID '{config_id}' not found"
+            raise ToolError(f"Configuration with ID '{config_id}' not found")
 
         # Prepare updates - direct field access, no kbConfig wrapper
         updates = {}
@@ -995,7 +1014,7 @@ def modify_kb_config(
                 sql_obj = SQL(training_query)
                 updates["scheduling.training_config.training_query"] = training_query  # snake_case
             except ValueError as e:
-                return f"ERROR: Invalid training query: {str(e)}"
+                raise ToolError(f"Invalid training query: {str(e)}")
 
         if detection_query is not None:
             # Validate SQL query
@@ -1003,7 +1022,7 @@ def modify_kb_config(
                 sql_obj = SQL(detection_query)
                 updates["scheduling.detection_config.detection_query"] = detection_query  # snake_case
             except ValueError as e:
-                return f"ERROR: Invalid detection query: {str(e)}"
+                raise ToolError(f"Invalid detection query: {str(e)}")
 
         if training_from is not None:
             updates["scheduling.training_config.from"] = training_from  # snake_case
@@ -1017,7 +1036,7 @@ def modify_kb_config(
                 CRON(detection_frequency)
                 updates["scheduling.detection_config.frequency"] = detection_frequency  # snake_case
             except ValueError as e:
-                return f"ERROR: Invalid detection frequency: {str(e)}"
+                raise ToolError(f"Invalid detection frequency: {str(e)}")
 
         if detection_start is not None:
             updates["scheduling.detection_config.from"] = detection_start  # snake_case
@@ -1027,13 +1046,13 @@ def modify_kb_config(
             algorithm_errors = validate_algorithms(algorithms)
             if algorithm_errors:
                 error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
-                return error_msg
+                raise ToolError(error_msg)
             updates["algorithms"] = algorithms
 
         if not updates:
             log_message("No valid updates provided", "warning", "modify_kb_config", "validation",
-                       request_id=request_id, extra_data={"config_id": config_id})
-            return "WARNING: No valid updates provided"
+                        request_id=request_id, extra_data={"config_id": config_id})
+            raise ToolError("No valid updates provided")
 
         # Apply updates - increment change_flag directly
         updates["change_flag"] = config_doc.get("change_flag", 0) + 1  # Direct field access, snake_case
@@ -1046,9 +1065,9 @@ def modify_kb_config(
 
         if result.modified_count == 0:
             log_message("No changes were made to the configuration", "warning",
-                       "modify_kb_config", "update", request_id=request_id,
-                       extra_data={"config_id": config_id})
-            return "WARNING: No changes were made to the configuration"
+                        "modify_kb_config", "update", request_id=request_id,
+                        extra_data={"config_id": config_id})
+            raise ToolError("No changes were made to the configuration")
 
         # Retrieve and return updated configuration (exclude MongoDB ObjectId)
         updated_doc = collection.find_one({"_id": ObjectId(config_id)}, {"_id": 0})
@@ -1068,9 +1087,9 @@ def modify_kb_config(
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         log_message(f"Error modifying configuration {config_id}: {str(e)}", "error",
-                   "modify_kb_config", "error", request_id=request_id,
-                   duration_ms=duration_ms, extra_data={"config_id": config_id, "error_type": type(e).__name__})
-        return f"ERROR: Failed to modify configuration: {str(e)}"
+                    "modify_kb_config", "error", request_id=request_id,
+                    duration_ms=duration_ms, extra_data={"config_id": config_id, "error_type": type(e).__name__})
+        raise ToolError(f"Failed to modify configuration: {str(e)}")
     finally:
         try:
             client.close()
@@ -1097,7 +1116,7 @@ def list_kb_configurations() -> str:
     """
     client = connect_mongodb()
     if client is None:
-        return "ERROR: Failed to connect to MongoDB"
+        raise ToolError("Failed to connect to MongoDB")
 
     try:
         db = client["kb_configs"]
@@ -1161,9 +1180,9 @@ def list_kb_configurations() -> str:
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         log_message(f"Error listing configurations: {str(e)}", "error",
-                   "list_kb_configurations", "error", request_id=request_id,
-                   duration_ms=duration_ms, extra_data={"error_type": type(e).__name__})
-        return f"ERROR: Failed to list configurations: {str(e)}"
+                    "list_kb_configurations", "error", request_id=request_id,
+                    duration_ms=duration_ms, extra_data={"error_type": type(e).__name__})
+        raise ToolError(f"Failed to list configurations: {str(e)}")
     finally:
         try:
             client.close()
@@ -1211,7 +1230,7 @@ db_kb_collection_name = "kb_configs"
 mongo_connection_string = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin&replicaSet=rs0"
 
 # Elasticsearch Configuration
-es_hosts = ["http://localhost:9200", "http://elasticsearch-dataset:9200"]
+es_hosts = ["http://localhost:9200"]
 
 # Logging Configuration
 logs_dir = "logs"
@@ -1636,18 +1655,18 @@ def elasticsearch_sql(query: str) -> str:
 
     Returns:
         str: The results of the query in JSON format, including columns, rows, and cursor information.
-             Returns an error message if the query fails on all available Elasticsearch hosts.
+              Returns an error message if the query fails on all available Elasticsearch hosts.
 
     Raises:
         No exceptions raised - errors are handled internally and returned as strings
     """
     # Try multiple Elasticsearch hosts for reliability
-    es_hosts = ["http://localhost:9200", "http://elasticsearch-dataset:9200"]
+    es_hosts = ["http://localhost:9200"]
 
     for host in es_hosts:
         try:
             log_message(f"Attempting SQL query execution with Elasticsearch at {host}")
-            es = Elasticsearch(host)
+            es = Elasticsearch(host, timeout=sql_validation_timeout_seconds)
 
             # Execute the SQL query using Elasticsearch's SQL API
             response = es.sql.query(query=query)
@@ -1662,22 +1681,24 @@ def elasticsearch_sql(query: str) -> str:
 
             duration_ms = (time.time() - start_time) * 1000
             log_message(f"SQL query executed successfully with {host}, returned {results['total_rows']} rows", "info",
-                       "elasticsearch_sql", "execution", request_id=request_id,
-                       duration_ms=duration_ms, extra_data={"host": host, "row_count": results['total_rows']})
+                        "elasticsearch_sql", "execution", request_id=request_id,
+                        duration_ms=duration_ms, extra_data={"host": host, "row_count": results['total_rows']})
             return json.dumps(results, indent=2)
 
         except Exception as e:
             log_message(f"SQL query failed with {host}: {str(e)}", "warning",
-                       "elasticsearch_sql", "retry", request_id=request_id,
-                       extra_data={"host": host, "error_type": type(e).__name__})
+                        "elasticsearch_sql", "retry", request_id=request_id,
+                        extra_data={"host": host, "error_type": type(e).__name__})
+            # Store the last error for reporting
+            last_error = e
             continue
 
     # If all hosts failed
     duration_ms = (time.time() - start_time) * 1000
-    error_msg = "ERROR: Failed to execute SQL query on all Elasticsearch hosts"
+    error_msg = f"ERROR: Failed to execute SQL query on all Elasticsearch hosts - {str(last_error) if 'last_error' in locals() else 'No hosts available'}"
     log_message(error_msg, "error", "elasticsearch_sql", "failure", request_id=request_id,
-               duration_ms=duration_ms, extra_data={"hosts_tried": len(es_hosts)})
-    return error_msg
+                duration_ms=duration_ms, extra_data={"hosts_tried": len(es_hosts)})
+    raise ToolError(error_msg)
 
 
 if __name__ == "__main__":
