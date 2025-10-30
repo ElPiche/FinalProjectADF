@@ -8,6 +8,7 @@ import argparse
 from jsonschema import validate, ValidationError
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
+from bson import ObjectId
 import uuid
 import os
 from datetime import datetime
@@ -1003,8 +1004,8 @@ def list_kb_configurations() -> str:
         db = client["kb_configs"]
         collection = db["configurations"]
 
-        # Retrieve all configurations
-        configs = list(collection.find({}, {"_id": 0}))
+        # Retrieve all configurations - include all fields including _id
+        configs = list(collection.find({}, {}))
 
         if not configs:
             return "No KB configurations found in the database."
@@ -1037,8 +1038,8 @@ def list_kb_configurations() -> str:
             detection_freq = detection_config.get("frequency", "Unknown")
             detection_from = detection_config.get("from", "Unknown")
 
-            output += f"## Configuration: {config_id}\n"
-            output += f"- **Name**: {name}\n"
+            output += f"## Configuration: {name}\n"
+            output += f"- **ID**: {config_id}\n"
             output += f"- **Description**: {description}\n"
             output += f"- **Algorithms**: {', '.join(algorithms) if algorithms else 'None'}\n"
             output += f"- **Training Period**: {training_from} to {training_to}\n"
