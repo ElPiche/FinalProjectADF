@@ -759,12 +759,30 @@ def create_da_config(
 
     Args:
         kb_config: Configuration dict with name, description, change_flag, scheduling
-        algorithms: List of algorithm configurations. Each algorithm should have:
-            - alg_name: string (currently only "zscore" is supported)
-            - alg_parameters: list of parameter dicts, each with:
-                - dimension: string (field name from SQL query)
+        algorithms: List of algorithm configurations with validated field matching
 
-    Example algorithms:
+    Algorithm Submission Format:
+    Each algorithm in the list must follow this exact structure:
+
+    [
+        {
+            "alg_name": "zscore",  // REQUIRED: Currently only "zscore" is supported
+            "alg_parameters": [    // REQUIRED: Array of parameter objects
+                {
+                    "dimension": "field_name"  // REQUIRED: Must match SQL query output field exactly
+                }
+            ]
+        }
+    ]
+
+    CRITICAL VALIDATION RULES:
+    - alg_name must be "zscore" (case-insensitive, but stored as lowercase)
+    - alg_parameters must be a non-empty array
+    - Each parameter must have a "dimension" field
+    - dimension values must exactly match field names from SQL query outputs
+    - SQL queries are validated first; dimensions are cross-checked against query results
+
+    Example algorithms (valid):
     [
         {
             "alg_name": "zscore",
@@ -775,8 +793,15 @@ def create_da_config(
         }
     ]
 
+    Common Mistakes to Avoid:
+    - Using "z-score" instead of "zscore"
+    - Missing "alg_parameters" array
+    - Empty alg_parameters array
+    - dimension names not matching SQL SELECT aliases
+    - Using field names that don't exist in query output
+
     Returns:
-        Success message with configuration details or validation error messages
+        Success message with configuration details or detailed validation error messages
     """
 
     # Validate KB config structure
@@ -1208,7 +1233,7 @@ supported_algorithms = {"zscore"}
 ### 1. create_da_config
 Creates and validates new anomaly detection configurations with comprehensive cross-validation.
 - **Input**: KB configuration dict with name, description, scheduling, and algorithms array
-- **Algorithms Format**:
+- **Algorithms Format** (REQUIRED STRUCTURE):
   ```json
   "algorithms": [
     {
@@ -1220,6 +1245,11 @@ Creates and validates new anomaly detection configurations with comprehensive cr
     }
   ]
   ```
+- **Critical Requirements**:
+  - `alg_name` must be "zscore" (only supported algorithm)
+  - `alg_parameters` must be non-empty array
+  - Each parameter needs `dimension` field matching SQL output exactly
+  - Dimensions validated against both training and detection queries
 - **Validation**: SQL queries, CRON expressions, algorithm parameters, field matching
 - **Output**: Validation results, configuration preview, and MongoDB storage confirmation
 - **Performance**: Request tracking with duration metrics
@@ -1292,6 +1322,9 @@ Provides current system documentation and usage guidance.
 
 ## Algorithm Format (Current Implementation)
 
+### Required Structure
+Each algorithm configuration must follow this exact JSON structure:
+
 ```json
 "algorithms": [
   {
@@ -1302,6 +1335,62 @@ Provides current system documentation and usage guidance.
     ]
   }
 ]
+```
+
+### Field Requirements
+- **alg_name**: String, must be "zscore" (case-insensitive)
+- **alg_parameters**: Array of objects, cannot be empty
+- **dimension**: String, must exactly match SQL query output field names
+
+### Validation Process
+1. **Algorithm Support**: Only "zscore" is currently supported
+2. **Parameter Structure**: alg_parameters must be a non-empty array
+3. **Field Matching**: Each dimension must exist in both training and detection SQL query outputs
+4. **SQL Validation**: Queries are tested against Elasticsearch before configuration storage
+
+### Common Configuration Mistakes
+- ❌ `"alg_name": "z-score"` → ✅ `"alg_name": "zscore"`
+- ❌ Missing `alg_parameters` array → ✅ Include empty array minimum
+- ❌ `"dimension": "field_that_does_not_exist"` → ✅ Use only fields from SQL output
+- ❌ Empty alg_parameters → ✅ Include at least one dimension
+
+### Example Valid Configurations
+
+**Single Dimension ZScore:**
+```json
+"algorithms": [
+  {
+    "alg_name": "zscore",
+    "alg_parameters": [
+      {"dimension": "request_count"}
+    ]
+  }
+]
+```
+
+**Multi-Dimension ZScore:**
+```json
+"algorithms": [
+  {
+    "alg_name": "zscore",
+    "alg_parameters": [
+      {"dimension": "total_requests"},
+      {"dimension": "error_rate"},
+      {"dimension": "response_time"}
+    ]
+  }
+]
+```
+
+### SQL Query Compatibility
+Algorithm dimensions must match SQL SELECT field names exactly:
+
+```sql
+-- Valid: dimension "request_count" matches alias
+SELECT COUNT(*) AS request_count FROM "index-*" GROUP BY timestamp
+
+-- Invalid: dimension "COUNT(*)" doesn't match alias
+SELECT COUNT(*) AS request_count FROM "index-*" GROUP BY timestamp
 ```
 
 ## SQL Query Guidelines
@@ -1341,17 +1430,43 @@ Provides current system documentation and usage guidance.
 ## Error Handling & Validation
 
 ### Comprehensive Validation
-- **SQL Syntax**: Basic SQL structure validation
-- **Field Matching**: Algorithm dimensions vs query outputs
-- **CRON Expressions**: Scheduling frequency validation
-- **Algorithm Parameters**: Supported algorithms and parameter structure
-- **MongoDB Connectivity**: Connection and authentication validation
+- **SQL Syntax**: Basic SQL structure validation with Elasticsearch testing
+- **Field Matching**: Algorithm dimensions cross-validated against SQL query outputs
+- **CRON Expressions**: Scheduling frequency validation using croniter
+- **Algorithm Parameters**: Supported algorithms and parameter structure validation
+- **MongoDB Connectivity**: Connection and authentication validation with fallback logging
+
+### Algorithm-Specific Validation Rules
+
+**ZScore Algorithm Validation:**
+- Must have `alg_name: "zscore"` (case-insensitive)
+- `alg_parameters` must be non-empty array
+- Each parameter must contain `dimension` field
+- All dimensions must exist in training AND detection query outputs
+- Dimensions are validated against actual Elasticsearch SQL query results
+
+**Common Validation Errors:**
+```
+ERROR: Algorithm validation failed:
+- algorithm 0: 'z-score' is not supported. Supported algorithms: {'zscore'}
+- algorithm 0: missing alg_parameters
+- algorithm 0, parameter 0: missing dimension
+- ERROR: Dimension 'invalid_field' not found in training query output. Available fields: ['request_count', 'error_rate']
+```
 
 ### Error Response Format
 ```
 ERROR: [Specific Error Type]: [Detailed Description]
 Available fields: [field1, field2, ...]
+Validation failed for algorithm 0: [specific issue]
 ```
+
+### Best Practices for Error Prevention
+1. **Test SQL Queries First**: Use `elasticsearch_sql` tool to verify queries before configuration
+2. **Validate Field Names**: Ensure all algorithm dimensions match SQL SELECT aliases exactly
+3. **Use Supported Algorithms**: Currently only "zscore" is implemented
+4. **Check Parameter Structure**: Follow exact JSON structure requirements
+5. **Review Configuration**: Use the preview output to verify before MongoDB storage
 
 ### Logging Integration
 - All operations logged with session and request correlation
