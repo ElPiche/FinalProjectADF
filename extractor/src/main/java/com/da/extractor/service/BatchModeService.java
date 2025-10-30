@@ -30,8 +30,7 @@ public class BatchModeService {
 
         if(kbTrainingConfig != null){
 
-            List<String> observedValues = config.getAdAlgParameters()
-                    .getObservedValues();
+            List<String> observedValues = config.getObservedValues();
 
             var pipeline = pipelineFactory.createPipeline(new PipeMetadata(
                     config.getId(),

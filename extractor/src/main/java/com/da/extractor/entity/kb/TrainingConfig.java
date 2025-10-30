@@ -15,7 +15,7 @@ public class TrainingConfig{
     private String queryElastic;
     private String from;
     private String to;
-    @Field("train_frequency")
+    @Field("training_window")
     private Integer window;
     @Field("is_active")
     private Boolean isActive;

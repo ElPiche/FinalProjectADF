@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
-@Document(collection = "trainingconfig")
+@Document(collection = "training_config")
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter
@@ -45,9 +45,9 @@ public class TrainConfig {
         
         var trainingConfig = from.getScheduling().getTrainingConfig();
 
-        from.getAdAlgParameters().getKvpParams().forEach((algorithmName , dimMetadata) -> {
+        from.getAlgorithms().forEach((algorithmConfig) -> {
             var algorithm = new AlgorithmConfig();
-            algorithm.setName(algorithmName);
+            algorithm.setName(algorithmConfig.getAlgName());
 
             var algorithmParameters = AlgorithmParameters.builder()
                     .trainWindow(trainingConfig.getWindow())
@@ -55,7 +55,7 @@ public class TrainConfig {
                     .to(Date.from(Instant.parse(trainingConfig.getTo())))
                     .build();
 
-            algorithmParameters.setObservedValuesFromDimensionMetadataMaps(dimMetadata);
+            algorithmParameters.setObservedValuesFromDimensionMetadataMaps(algorithmConfig.getAlgParameters());
             algorithm.setParameters(algorithmParameters);
 
             this.algorithms.add(algorithm);
