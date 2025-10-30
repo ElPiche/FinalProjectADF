@@ -23,7 +23,11 @@
       "env": {},
       "alwaysAllow": [
         "create_da_config",
-        "elasticsearch_sql"
+        "elasticsearch_sql",
+        "list_available_algorithms",
+        "modify_kb_config",
+        "list_kb_configurations",
+        "describe_mcp_server"
       ]
     }
   }
