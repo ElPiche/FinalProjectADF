@@ -211,3 +211,4 @@ MotorDA/MongoConnection.py
 .kilocode/
 .kilocode/mcp.json
 MCP/KB-MCP/logs/log.txt
+MCP/KB-MCP/logs/structured_logs.jsonl
