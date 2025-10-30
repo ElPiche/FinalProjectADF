@@ -7,6 +7,7 @@ import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.changestream.ChangeStreamDocument;
 import com.mongodb.client.model.changestream.FullDocument;
+import com.mongodb.client.model.changestream.OperationType;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -23,14 +24,21 @@ import java.util.concurrent.ExecutorService;
 @Service
 public class KbConfigReaderService {
 
+    private final BatchModeService batchModeService;
+    private final StreamingModeService streamingModeService;
+
     private static final String COLLECTION = "kb_configs";
 
     private final MongoTemplate mongoTemplate;
     private final ExecutorService executor;
     private volatile boolean running = true;
 
-    public KbConfigReaderService(@Qualifier("knowledgeBaseMongoTemplate") MongoTemplate mongoTemplate,
+    public KbConfigReaderService(BatchModeService batchModeService,
+                                 StreamingModeService streamingModeService,
+                                 @Qualifier("knowledgeBaseMongoTemplate") MongoTemplate mongoTemplate,
                                  @Qualifier("changeStreamExecutor") ExecutorService executor) {
+        this.batchModeService = batchModeService;
+        this.streamingModeService = streamingModeService;
         this.mongoTemplate = mongoTemplate;
         this.executor = executor;
     }
@@ -45,7 +53,7 @@ public class KbConfigReaderService {
         MongoCollection<Document> collection = mongoTemplate.getCollection(COLLECTION);
         // Pipeline simple: escuchar cualquier operación soportada (insert/update/replace/delete)
         List<Bson> pipeline = List.of(
-                Aggregates.match(Filters.in("operationType", List.of("insert", "update", "replace", "delete")))
+                Aggregates.match(Filters.in("operationType", List.of("insert", "update", "replace")))
         );
         int retry = 0;
         while (running) {
@@ -64,6 +72,12 @@ public class KbConfigReaderService {
                     if (full != null) {
                         // Convertir a entidad tipada
                         KbMongo kb = mongoTemplate.getConverter().read(KbMongo.class, full);
+
+                        OperationType operationType = change.getOperationType();
+                        if (operationType == OperationType.INSERT || operationType == OperationType.UPDATE) {
+                            batchModeService.executeConfiguration(kb);
+                        }
+
                         log.info("[KB ChangeStream] op={} id={} name={} changeFlag={}", op, kb.getId(), kb.getName(), kb.getChangeFlag());
                         // Aquí se puede disparar lógica adicional (ej: publicar evento interno, refrescar caché, etc.)
                     } else {

@@ -5,8 +5,8 @@
   "scheduling": {
     "training_config": {
       "training_query": "SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
-      "from": "2025-10-01T00:00:00Z",
-      "to": "2025-10-09T23:59:59Z",
+      "from": "2025-11-01T00:00:00Z",
+      "to": "2025-11-09T23:59:59Z",
       "training_window": 3600,
       "is_active": true
     },
@@ -36,13 +36,7 @@
         {
           "dimension": "status_code_5xx_counter",
           "alg_metadata": [
-            {"key": "clusters", "values": "3"}
-          ]
-        },
-        {
-          "dimension": "status_code_5xx_counter",
-          "alg_metadata": [
-            {"key": "clusters", "values": "5"}
+            {"key": "clusters", "value": 3}
           ]
         }
       ]

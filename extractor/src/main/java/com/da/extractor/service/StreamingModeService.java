@@ -33,8 +33,7 @@ public class StreamingModeService {
             var streamingConfigs = kbStreamingConfig.getFrequency();
             var id = config.getId();
 
-            List<String> observedValues = config.getAdAlgParameters()
-                    .getObservedValues();
+            List<String> observedValues = config.getObservedValues();
 
             schedulerService.createStreamingTask(queryElastic,
                     window,

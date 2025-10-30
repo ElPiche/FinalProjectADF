@@ -1,22 +1,14 @@
 package com.da.extractor.entity.kb;
 
-import com.da.extractor.entity.training.AlgorithmConfig;
-import com.da.extractor.entity.training.AlgorithmParameters;
-import com.da.extractor.entity.training.TrainConfig;
-import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
-import org.springframework.data.mongodb.core.mapping.DocumentReference;
 import org.springframework.data.mongodb.core.mapping.Field;
 
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Date;
+import java.util.Collection;
 import java.util.List;
-import java.util.Map;
 
 //@AllArgsConstructor
 @Getter
@@ -32,7 +24,15 @@ public class KbMongo{
     @Field("change_flag")
     private short changeFlag;
     private Scheduling scheduling;
-    @Field("ad_alg_parameters")
-    private ADAlgParameters adAlgParameters;
+    private List<Algorithm> algorithms;
+
+    public List<String> getObservedValues(){
+        return algorithms.stream()
+                .flatMap(algorithm -> algorithm.getAlgParameters()
+                        .stream()
+                        .map(AlgorithmParameter::getDimension)
+                )
+                .toList();
+    }
 
 }

@@ -1,14 +1,14 @@
 package com.da.extractor.entity.training;
 
 import com.da.extractor.entity.KeyValuePair;
-import com.da.extractor.entity.kb.DimensionMetadataMap;
+import com.da.extractor.entity.kb.AlgorithmParameter;
+import com.mongodb.lang.Nullable;
+import jakarta.validation.constraints.Null;
 import lombok.*;
 import org.springframework.data.mongodb.core.mapping.Field;
 
-import java.util.Collection;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 
 @NoArgsConstructor
 @AllArgsConstructor
@@ -27,7 +27,7 @@ public class AlgorithmParameters {
 
     private Date to;
 
-    void setObservedValuesFromDimensionMetadataMaps(List<DimensionMetadataMap> dimensionMetadataMaps){
+    void setObservedValuesFromDimensionMetadataMaps(List<AlgorithmParameter> dimensionMetadataMaps){
         this.observedValues = dimensionMetadataMaps.stream()
                 .map(ObservedValue::new)
                 .toList();
@@ -40,11 +40,12 @@ public class AlgorithmParameters {
         private String dimension;
 
         @Field("algorithm_metadata")
+        @Nullable
         private List<KeyValuePair> algorithmMetadata;
 
-        public ObservedValue(DimensionMetadataMap from){
+        public ObservedValue(AlgorithmParameter from){
             this.dimension = from.getDimension();
-            this.algorithmMetadata = from.getAlgorithmMetadata();
+            this.algorithmMetadata = from.getAlgMetadata();
         }
     }
 
