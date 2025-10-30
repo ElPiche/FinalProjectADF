@@ -5,6 +5,7 @@ import datetime
 import logging
 import re
 import argparse
+import time
 from jsonschema import validate, ValidationError
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
@@ -12,7 +13,7 @@ from bson import ObjectId
 import uuid
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from mcp.server.fastmcp import FastMCP
 from croniter import croniter
 from elasticsearch import Elasticsearch
@@ -28,6 +29,131 @@ logger = logging.getLogger(__name__)
 
 mcp = FastMCP("KB-MCP")
 
+
+# Structured Logging System ----------------------------------------------------------------------------------
+
+class StructuredLogger:
+    """Enhanced logging system with MongoDB storage and structured JSON format."""
+
+    def __init__(self):
+        self.mongo_client = None
+        self.logs_collection = None
+        self.file_fallback = True
+        self.session_id = str(uuid.uuid4())  # Unique session identifier
+
+    def connect(self) -> bool:
+        """Connect to kb-mcp-logs database for structured logging."""
+        try:
+            self.mongo_client = MongoClient("mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin")
+            db = self.mongo_client["kb-mcp-logs"]
+            self.logs_collection = db["logs"]
+            # Test connection
+            self.mongo_client.admin.command('ping')
+            return True
+        except Exception as e:
+            print(f"Failed to connect to logs database: {e}")
+            self.file_fallback = True
+            return False
+
+    def log(self, level: str, component: str, method: str, message: str,
+            request_id: Optional[str] = None, duration_ms: Optional[float] = None,
+            extra_data: Optional[Dict[str, Any]] = None):
+        """Log a structured message to both MongoDB and file."""
+
+        log_entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "session_id": self.session_id,
+            "level": level.upper(),
+            "component": component,
+            "method": method,
+            "message": message,
+            "request_id": request_id,
+            "duration_ms": duration_ms,
+            "extra_data": extra_data or {}
+        }
+
+        # Always write to file as backup
+        self._write_to_file(log_entry)
+
+        # Write to MongoDB if connected
+        if self.logs_collection is not None:
+            try:
+                self.logs_collection.insert_one(log_entry)
+            except Exception as e:
+                # Fallback to enhanced file logging
+                log_entry["mongo_error"] = str(e)
+                log_entry["fallback"] = True
+                self._write_to_file(log_entry)
+
+    def _write_to_file(self, log_entry: Dict[str, Any]):
+        """Write log entry to file in both human-readable and JSON formats."""
+        logs_dir = os.path.join(os.path.dirname(__file__), "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+
+        # Human-readable format for console/logs
+        timestamp = log_entry["timestamp"]
+        level = log_entry["level"]
+        component = log_entry["component"]
+        method = log_entry["method"]
+        message = log_entry["message"]
+        request_id = log_entry.get("request_id", "")[:8] if log_entry.get("request_id") else ""
+        duration = f" ({log_entry['duration_ms']:.1f}ms)" if log_entry.get("duration_ms") else ""
+
+        human_readable = f"[{timestamp}] [{level}] [{component}:{method}] {message}{duration}"
+        if request_id:
+            human_readable += f" [REQ:{request_id[:8]}]"
+        # Add session ID to human-readable format
+        human_readable += f" [SESSION:{self.session_id[:8]}]"
+
+        # Write human-readable to console and file
+        print(human_readable)
+
+        log_file = os.path.join(logs_dir, "log.txt")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(human_readable + "\n")
+
+        # Write JSON to separate file for structured analysis
+        json_log_file = os.path.join(logs_dir, "structured_logs.jsonl")
+        with open(json_log_file, "a", encoding="utf-8") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+
+# Global structured logger instance
+structured_logger = StructuredLogger()
+
+
+def log_message(message: str, level: str = "info", component: str = None, method: str = None,
+                request_id: str = None, duration_ms: float = None, extra_data: dict = None):
+    """
+    Enhanced logging with both file and MongoDB structured storage.
+
+    Args:
+        message: Log message
+        level: Log level (error, warning, info, debug)
+        component: Component name (auto-detected if None)
+        method: Method name (auto-detected if None)
+        request_id: Request correlation ID
+        duration_ms: Operation duration in milliseconds
+        extra_data: Additional structured data
+    """
+    # Auto-detect component/method from call stack if not provided
+    if component is None or method is None:
+        import inspect
+        frame = inspect.currentframe().f_back
+        method_name = frame.f_code.co_name
+
+        # Try to get class name from self
+        component_name = "unknown"
+        if 'self' in frame.f_locals:
+            component_name = frame.f_locals['self'].__class__.__name__
+
+        if component is None:
+            component = component_name
+        if method is None:
+            method = method_name
+
+    # Log to structured system
+    structured_logger.log(level, component, method, message, request_id, duration_ms, extra_data)
 
 
 #Classes ------------------------------------------------------------------------------------------------------
@@ -48,16 +174,16 @@ class KBConfig(BaseModel):
             raise ValueError("Name must be a non-empty string")
         if not self.description or not isinstance(self.description, str):
             raise ValueError("Description must be a non-empty string")
-        log_message(f"KB config structure validated for: {self.name}")
+        log_message(f"KB config structure validated for: {self.name}", "info", "kb_config", "validation")
 
 # CRON class moved before classes that use it
 class CRON:
     def __init__(self, value: str):
         if not self._is_valid_cron(value):
-            log_message(f"CRON validation failed: Invalid CRON format: {value}", "error")
+            log_message(f"CRON validation failed: Invalid CRON format: {value}", "error", "cron", "validation")
             raise ValueError(f"Invalid CRON format: {value}")
         self.value = value
-        log_message(f"CRON validated successfully: {value}", "info")
+        log_message(f"CRON validated successfully: {value}", "info", "cron", "validation")
 
     @staticmethod
     def _is_valid_cron(cron_string: str) -> bool:
@@ -477,10 +603,10 @@ class SQL:
             if single_quotes % 2 != 0 or double_quotes % 2 != 0:
                 return False
 
-            log_message("SQL basic validation successful")
+            log_message("SQL basic validation successful", "info", "sql", "validation")
             return True
         except Exception as e:
-            log_message(f"SQL validation failed: {str(e)}", "warning")
+            log_message(f"SQL validation failed: {str(e)}", "warning", "sql", "validation")
             return False
 
     def extract_output_fields(self) -> list[str]:
@@ -517,10 +643,10 @@ class SQL:
 class UUID:
     def __init__(self, value: str):
         if not self._is_valid_uuid(value):
-            log_message(f"UUID validation failed: Invalid UUID format: {value}")
+            log_message(f"UUID validation failed: Invalid UUID format: {value}", "error", "uuid", "validation")
             raise ValueError(f"Invalid UUID format: {value}")
         self.value = value
-        log_message(f"UUID validated successfully: {value}")
+        log_message(f"UUID validated successfully: {value}", "info", "uuid", "validation")
 
     @staticmethod
     def _is_valid_uuid(uuid_str: str) -> bool:
@@ -537,28 +663,17 @@ class UUID:
         return f"UUID('{self.value}')"
 
 
-def log_message(message: str, level: str = "info"):
-    """
-    Logs a message to both console and logs/log.txt file.
-    Creates the logs folder and file if they don't exist.
-    """
-    # Log to console with proper formatting
-    if level.lower() == "error":
-        logger.error(message)
-    elif level.lower() == "warning":
-        logger.warning(message)
-    elif level.lower() == "debug":
-        logger.debug(message)
-    else:
-        logger.info(message)
-
-    # Also log to file
-    logs_dir = os.path.join(os.path.dirname(__file__), "logs")
-    os.makedirs(logs_dir, exist_ok=True)
-    log_file = os.path.join(logs_dir, "log.txt")
-    timestamp = datetime.now().isoformat()
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(f"[{timestamp}] {message}\n")
+# Initialize structured logger connection and log session start
+try:
+    structured_logger.connect()
+    log_message("KB-MCP session started", "info", "kb_mcp", "startup")
+    log_message("KB-MCP session initialized", "info", "structured_logger", "init",
+                extra_data={"session_id": structured_logger.session_id})
+    print(f"Structured logger initialized successfully - Session ID: {structured_logger.session_id[:8]}...")
+except Exception as e:
+    print(f"Structured logger initialization failed: {e}")
+    # Fallback to basic logging if structured logger fails
+    logger.error(f"Structured logger initialization failed: {e}")
 
 
 def connect_mongodb():
@@ -572,27 +687,37 @@ def connect_mongodb():
     mongo_uri = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin"
     db_name = "kb_configs"  # Database name for KB configurations
 
+    start_time = time.time()
     try:
-        log_message(f"Attempting to connect to MongoDB at {mongo_uri.replace('1q2w3E%2A', '***')}")
+        log_message(f"Attempting to connect to MongoDB at {mongo_uri.replace('1q2w3E%2A', '***')}",
+                    "info", "connect_mongodb", "connection")
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
 
         # Test the connection
         client.admin.command('ping')
-        log_message("MongoDB connection successful")
+        duration_ms = (time.time() - start_time) * 1000
+        log_message("MongoDB connection successful", "info", "connect_mongodb", "connection",
+                    duration_ms=duration_ms)
 
         # Verify database access
         db = client[db_name]
-        log_message(f"MongoDB database '{db_name}' accessible")
+        log_message(f"MongoDB database '{db_name}' accessible", "info", "connect_mongodb", "database")
         return client
 
     except ConnectionFailure as e:
-        log_message(f"MongoDB connection failed: {str(e)}", "error")
+        duration_ms = (time.time() - start_time) * 1000
+        log_message(f"MongoDB connection failed: {str(e)}", "error", "connect_mongodb", "connection",
+                    duration_ms=duration_ms)
         return None
     except OperationFailure as e:
-        log_message(f"MongoDB authentication/authorization failed: {str(e)}", "error")
+        duration_ms = (time.time() - start_time) * 1000
+        log_message(f"MongoDB authentication/authorization failed: {str(e)}", "error", "connect_mongodb", "auth",
+                    duration_ms=duration_ms)
         return None
     except Exception as e:
-        log_message(f"Unexpected MongoDB connection error: {str(e)}", "error")
+        duration_ms = (time.time() - start_time) * 1000
+        log_message(f"Unexpected MongoDB connection error: {str(e)}", "error", "connect_mongodb", "connection",
+                    duration_ms=duration_ms)
         return None
     
 # Extractor modes enum
@@ -607,6 +732,15 @@ def create_da_config(
     kb_config: dict,
     da_alg_parameters: dict
 ) -> str:
+    """Create a Data Analytics (DA) algorithm configuration for the Knowledge Base system."""
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    log_message("Tool execution started", "info", "create_da_config", "entry",
+                request_id=request_id, extra_data={
+                    "kb_config_name": kb_config.get("name", "unknown") if isinstance(kb_config, dict) else kb_config.name,
+                    "algorithm_count": len(da_alg_parameters.get("algorithms", [])) if isinstance(da_alg_parameters, dict) and da_alg_parameters else 0
+                })
     """
     Create a Data Analytics (DA) algorithm configuration for the Knowledge Base system.
 
@@ -632,26 +766,34 @@ def create_da_config(
 
     # Convert dictionaries to proper objects
     try:
-        # Convert kb_config dict to KBConfig object
-        kb_config_obj = KBConfig(**kb_config)
-        log_message(f"DEBUG: Successfully converted kb_config to KBConfig object")
+        # kb_config is already a KBConfig object from MCP, da_alg_parameters is None for console testing
+        kb_config_obj = kb_config
+        log_message(f"DEBUG: kb_config is already KBConfig object")
 
-        # Convert da_alg_parameters dict to DaAlgParameters object
-        # Handle the algorithms list conversion
-        algorithms_list = []
-        if 'algorithms' in da_alg_parameters:
-            for alg_dict in da_alg_parameters['algorithms']:
-                if isinstance(alg_dict, dict) and 'observed_value' in alg_dict:
-                    algorithms_list.append(ZScore(**alg_dict))
-                else:
-                    # Try to convert observedValue to observed_value if needed
-                    alg_copy = alg_dict.copy()
-                    if 'observedValue' in alg_copy and 'observed_value' not in alg_copy:
-                        alg_copy['observed_value'] = alg_copy.pop('observedValue')
-                    algorithms_list.append(ZScore(**alg_copy))
+        # For console testing, create default DA parameters if none provided
+        if da_alg_parameters is None:
+            algorithms_list = [
+                ZScore(observed_value="total_requests")
+            ]
+            da_params_obj = DaAlgParameters(algorithms=algorithms_list)
+            log_message(f"DEBUG: Created default DaAlgParameters for console testing")
+        else:
+            # Convert da_alg_parameters dict to DaAlgParameters object
+            # Handle the algorithms list conversion
+            algorithms_list = []
+            if 'algorithms' in da_alg_parameters:
+                for alg_dict in da_alg_parameters['algorithms']:
+                    if isinstance(alg_dict, dict) and 'observed_value' in alg_dict:
+                        algorithms_list.append(ZScore(**alg_dict))
+                    else:
+                        # Try to convert observedValue to observed_value if needed
+                        alg_copy = alg_dict.copy()
+                        if 'observedValue' in alg_copy and 'observed_value' not in alg_copy:
+                            alg_copy['observed_value'] = alg_copy.pop('observedValue')
+                        algorithms_list.append(ZScore(**alg_copy))
 
-        da_params_obj = DaAlgParameters(algorithms=algorithms_list)
-        log_message(f"DEBUG: Successfully converted da_alg_parameters to DaAlgParameters object")
+            da_params_obj = DaAlgParameters(algorithms=algorithms_list)
+            log_message(f"DEBUG: Successfully converted da_alg_parameters to DaAlgParameters object")
 
     except Exception as e:
         log_message(f"ERROR: Failed to convert input objects: {str(e)}", "error")
@@ -789,7 +931,9 @@ def create_da_config(
     # If validation failed, return detailed errors
     if validation_errors:
         error_msg = "Configuration validation failed:\n" + "\n".join(f"- {err}" for err in validation_errors)
-        log_message(f"Configuration validation failed: {len(validation_errors)} errors")
+        log_message(f"Configuration validation failed: {len(validation_errors)} errors", "error",
+                   "create_da_config", "validation", request_id=request_id,
+                   extra_data={"error_count": len(validation_errors)})
         return error_msg
     
     # Build configuration in template format (snake_case, no wrapper, NO id field)
@@ -801,8 +945,11 @@ def create_da_config(
         "da_alg_parameters": kb_config_obj.da_alg_parameters  # Use da_alg_parameters directly
     }
 
-    log_message(f"Configuration validation successful for: {kb_config_obj.name}")
-    log_message(f"Configuration to store: {json.dumps(config_to_store, indent=2)}")
+    log_message(f"Configuration validation successful for: {kb_config_obj.name}", "info",
+               "create_da_config", "validation", request_id=request_id)
+
+    log_message("Configuration preview generated", "info", "create_da_config", "preview",
+               request_id=request_id, extra_data={"config_name": kb_config_obj.name})
 
     # Print configuration preview to console in correct format
     print("\nConfiguration Preview:")
@@ -822,23 +969,33 @@ def create_da_config(
 
         # Insert the configuration directly (no kbConfig wrapper)
         result = collection.insert_one(config_to_store)
-        log_message(f"Configuration saved to MongoDB with document ID: {str(result.inserted_id)}")
+        log_message(f"Configuration saved to MongoDB with document ID: {str(result.inserted_id)}", "info",
+                   "create_da_config", "save", request_id=request_id,
+                   extra_data={"document_id": str(result.inserted_id)})
 
         # Verify the save by counting documents with this name
         doc_count = collection.count_documents({"name": kb_config_obj.name})
-        log_message(f"Verification: {doc_count} document(s) found with name {kb_config_obj.name}")
+        log_message(f"Verification: {doc_count} document(s) found with name {kb_config_obj.name}", "info",
+                   "create_da_config", "verification", request_id=request_id,
+                   extra_data={"doc_count": doc_count})
 
+        duration_ms = (time.time() - start_time) * 1000
         success_msg = f"SUCCESS: Configuration saved to MongoDB!\n\nDocument ID: {str(result.inserted_id)}\n\nConfiguration saved successfully."
-        log_message("Configuration creation and saving completed successfully")
+        log_message("Configuration creation and saving completed successfully", "info",
+                   "create_da_config", "completion", request_id=request_id,
+                   duration_ms=duration_ms, extra_data={"document_id": str(result.inserted_id)})
         return success_msg
 
     except OperationFailure as e:
         error_msg = f"MongoDB operation failed: {str(e)}"
-        log_message(error_msg, "error")
+        log_message(error_msg, "error", "create_da_config", "save", request_id=request_id,
+                   extra_data={"error_type": "OperationFailure"})
         return f"ERROR: {error_msg}"
     except Exception as e:
         error_msg = "Unexpected error during MongoDB save"
-        log_message(f"{error_msg}: {type(e).__name__}: {str(e)}", "error")
+        log_message(f"{error_msg}: {type(e).__name__}: {str(e)}", "error",
+                   "create_da_config", "save", request_id=request_id,
+                   extra_data={"error_type": type(e).__name__})
         return f"ERROR: {error_msg}"
     finally:
         try:
@@ -859,6 +1016,12 @@ def modify_kb_config(
     detection_start: str = None,
     da_alg_parameters: dict = None
 ) -> str:
+    """Modify an existing KB configuration by ID."""
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    log_message("Tool execution started", "info", "modify_kb_config", "entry",
+                request_id=request_id, extra_data={"config_id": config_id})
     """
     Modify an existing KB configuration by ID.
 
@@ -954,6 +1117,8 @@ def modify_kb_config(
                 return f"ERROR: Invalid algorithm parameters: {str(e)}"
 
         if not updates:
+            log_message("No valid updates provided", "warning", "modify_kb_config", "validation",
+                       request_id=request_id, extra_data={"config_id": config_id})
             return "WARNING: No valid updates provided"
 
         # Apply updates - increment change_flag directly
@@ -966,17 +1131,31 @@ def modify_kb_config(
         )
 
         if result.modified_count == 0:
+            log_message("No changes were made to the configuration", "warning",
+                       "modify_kb_config", "update", request_id=request_id,
+                       extra_data={"config_id": config_id})
             return "WARNING: No changes were made to the configuration"
 
         # Retrieve and return updated configuration (exclude MongoDB ObjectId)
         updated_doc = collection.find_one({"_id": ObjectId(config_id)}, {"_id": 0})
+        duration_ms = (time.time() - start_time) * 1000
+
         if updated_doc:
+            log_message(f"Configuration '{config_id}' updated successfully", "info",
+                       "modify_kb_config", "completion", request_id=request_id,
+                       duration_ms=duration_ms, extra_data={"config_id": config_id})
             return f"SUCCESS: Configuration '{config_id}' updated successfully."
         else:
+            log_message(f"Configuration '{config_id}' updated but could not retrieve document", "warning",
+                       "modify_kb_config", "completion", request_id=request_id,
+                       duration_ms=duration_ms, extra_data={"config_id": config_id})
             return f"SUCCESS: Configuration '{config_id}' updated successfully, but could not retrieve updated document."
 
     except Exception as e:
-        log_message(f"Error modifying configuration {config_id}: {str(e)}", "error")
+        duration_ms = (time.time() - start_time) * 1000
+        log_message(f"Error modifying configuration {config_id}: {str(e)}", "error",
+                   "modify_kb_config", "error", request_id=request_id,
+                   duration_ms=duration_ms, extra_data={"config_id": config_id, "error_type": type(e).__name__})
         return f"ERROR: Failed to modify configuration: {str(e)}"
     finally:
         try:
@@ -987,6 +1166,12 @@ def modify_kb_config(
 
 @mcp.tool()
 def list_kb_configurations() -> str:
+    """List all KB configurations stored in MongoDB."""
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    log_message("Tool execution started", "info", "list_kb_configurations", "entry",
+                request_id=request_id)
     """
     List all KB configurations stored in MongoDB.
 
@@ -1008,9 +1193,14 @@ def list_kb_configurations() -> str:
         configs = list(collection.find({}, {}))
 
         if not configs:
+            log_message("No KB configurations found in database", "info",
+                       "list_kb_configurations", "query", request_id=request_id)
             return "No KB configurations found in the database."
 
         # Format output
+        log_message(f"Found {len(configs)} configurations in database", "info",
+                   "list_kb_configurations", "query", request_id=request_id,
+                   extra_data={"config_count": len(configs)})
         output = "# KB Configurations Summary\n\n"
         output += f"Found {len(configs)} configuration(s):\n\n"
 
@@ -1045,10 +1235,17 @@ def list_kb_configurations() -> str:
             output += f"- **Training Period**: {training_from} to {training_to}\n"
             output += f"- **Detection**: Every {detection_freq} starting {detection_from}\n\n"
 
+        duration_ms = (time.time() - start_time) * 1000
+        log_message(f"Configurations list generated successfully", "info",
+                   "list_kb_configurations", "completion", request_id=request_id,
+                   duration_ms=duration_ms, extra_data={"config_count": len(configs)})
         return output
 
     except Exception as e:
-        log_message(f"Error listing configurations: {str(e)}", "error")
+        duration_ms = (time.time() - start_time) * 1000
+        log_message(f"Error listing configurations: {str(e)}", "error",
+                   "list_kb_configurations", "error", request_id=request_id,
+                   duration_ms=duration_ms, extra_data={"error_type": type(e).__name__})
         return f"ERROR: Failed to list configurations: {str(e)}"
     finally:
         try:
@@ -1059,6 +1256,12 @@ def list_kb_configurations() -> str:
 
 @mcp.tool()
 def describe_mcp_server() -> str:
+    """Get a comprehensive description of the KB-MCP server and how to use it."""
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    log_message("Tool execution started", "info", "describe_mcp_server", "entry",
+                request_id=request_id)
     """
     Get a comprehensive description of the KB-MCP server and how to use it.
 
@@ -1231,11 +1434,21 @@ The system provides detailed error messages for:
 
 This migration provides unlimited scalability while maintaining all core anomaly detection functionality.
 """
+    duration_ms = (time.time() - start_time) * 1000
+    log_message("Server description generated successfully", "info",
+               "describe_mcp_server", "completion", request_id=request_id,
+               duration_ms=duration_ms)
     return description
 
 
 @mcp.tool()
 def list_available_algorithms() -> str:
+    """List all available DA algorithms and their parameters."""
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    log_message("Tool execution started", "info", "list_available_algorithms", "entry",
+                request_id=request_id)
     """
     List all available DA algorithms and their parameters.
 
@@ -1337,11 +1550,24 @@ def list_available_algorithms() -> str:
         ]
     }
 
+    duration_ms = (time.time() - start_time) * 1000
+    log_message("Algorithm list generated successfully", "info",
+               "list_available_algorithms", "completion", request_id=request_id,
+               duration_ms=duration_ms, extra_data={
+                   "available_count": len(algorithms_info["available_algorithms"]),
+                   "future_count": len(algorithms_info["future_algorithms"])
+               })
     return json.dumps(algorithms_info, indent=2)
 
 
 @mcp.tool()
 def elasticsearch_sql(query: str) -> str:
+    """Execute a SQL query against Elasticsearch."""
+    request_id = str(uuid.uuid4())[:8]
+    start_time = time.time()
+
+    log_message("Tool execution started", "info", "elasticsearch_sql", "entry",
+                request_id=request_id, extra_data={"query_length": len(query)})
     """
     Execute a SQL query against Elasticsearch.
 
@@ -1377,16 +1603,23 @@ def elasticsearch_sql(query: str) -> str:
                 "total_rows": len(response.get("rows", []))
             }
 
-            log_message(f"SQL query executed successfully with {host}, returned {results['total_rows']} rows")
+            duration_ms = (time.time() - start_time) * 1000
+            log_message(f"SQL query executed successfully with {host}, returned {results['total_rows']} rows", "info",
+                       "elasticsearch_sql", "execution", request_id=request_id,
+                       duration_ms=duration_ms, extra_data={"host": host, "row_count": results['total_rows']})
             return json.dumps(results, indent=2)
 
         except Exception as e:
-            log_message(f"SQL query failed with {host}: {str(e)}", "warning")
+            log_message(f"SQL query failed with {host}: {str(e)}", "warning",
+                       "elasticsearch_sql", "retry", request_id=request_id,
+                       extra_data={"host": host, "error_type": type(e).__name__})
             continue
 
     # If all hosts failed
+    duration_ms = (time.time() - start_time) * 1000
     error_msg = "ERROR: Failed to execute SQL query on all Elasticsearch hosts"
-    log_message(error_msg, "error")
+    log_message(error_msg, "error", "elasticsearch_sql", "failure", request_id=request_id,
+               duration_ms=duration_ms, extra_data={"hosts_tried": len(es_hosts)})
     return error_msg
 
 
