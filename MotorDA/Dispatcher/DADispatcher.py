@@ -1,9 +1,10 @@
+import threading
+import time
 from datetime import datetime
 import json
 from bson import json_util
 from pymongo import MongoClient
 import pandas as pd
-# from MongoClass import MongoKBConnection
 from typing import Dict, Any, List, Optional, Tuple
 from elasticsearch import Elasticsearch, helpers
 from dataclasses import dataclass, field
@@ -78,7 +79,8 @@ class Algorithm:
                     config, self)
 
                 print(observed_values)
-                results = run_zscore_batch_training(self, observed_values)
+                results = run_zscore_batch_training(config, observed_values)
+                # ----------------------------ENDING OF TRAINING ZSCORE----------------------------------------------------------------------------
 
                 anomalies_dict: Dict[str, List] = {}
                 for key, value in observed_values.items():
@@ -94,7 +96,7 @@ class Algorithm:
                     for key, value in anomalies_dict.items()
                 }
 
-                print(filtered_anomalies)
+                print(f"Found {len(filtered_anomalies)} anomalies")
                 anomalies_for_elastic = []
 
                 for key, anomalies in filtered_anomalies.items():
@@ -212,16 +214,20 @@ def get_kb_id(doc: Dict[str, Any]) -> Optional[str]:
     return kb.get("id") or kb.get("Id")
 
 
-def run_zscore_batch_training(algorithms: Algorithm, observed_values):
+def run_zscore_batch_training(config: Config, observed_values):
 
     # {'train_window': 60, 'dimensions': ['5xx_status_code', '4xx_status_code', '2xx_status_code'], 'from': '2025-10-01T00:00:00.000Z', 'to': '2025-11-10T00:00:00.000Z'}
     #     # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
     da_client = CreateConnectionToDA()
+    print(f"I am printing kb_id: " + config.kb_id)
     # iterating both key and values
     for key, value in observed_values.items():
 
         if (not value.empty):
-            results = train_baseline(value, "value")
+            print(f"printing the key of the observed_values: {key}")
+            print(f"printing the key of the observed_values: {value}")
+
+            results = train_baseline(config.kb_id, key, value, "value")
             da_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].insert_one(
                 results)
 
@@ -502,6 +508,84 @@ def fetch_series_data_batch(
     return observed_values
 
 
+def watch_kb_changes(kb_client):
+    with kb_client[KB_DB_NAME][KB_COLLECTION_NAME].watch() as stream:
+        for change in stream:
+            print(f"something happened on: {KB_COLLECTION_NAME}")
+
+            if change.get("operationType") == "insert":
+                print(
+                    f"\033[31m Someone inserted data into: {KB_COLLECTION_NAME} \033[0m")
+
+                # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
+                latest_series_config = ExtractLatestConfigurationKB(kb_client)
+
+                # we turn the JSON with the config data into a class
+                config: Config = parse_config(latest_series_config)
+
+                # now we go thru each algorithm call we extracted, and try to execute training on them
+                config.execute_algos()
+
+
+def watch_detection_changes(kb_client):
+
+    with kb_client[KB_DB_NAME][DA_COLLECTION_NAME].watch([
+        {"$match": {"fullDocument.metadata.mode": 1}}
+    ]) as stream:
+
+        for change in stream:
+            print(f"something happened on: {DA_COLLECTION_NAME}")
+
+            if change.get("operationType") == "insert":
+                print(
+                    f"\033[31m Someone inserted data into: {DA_COLLECTION_NAME} \033[0m")
+
+                serie_to_detect = change.get("fullDocument")
+
+                query = {
+                    'kb_id': serie_to_detect.get("metadata.kbId"),
+                    'field': serie_to_detect.get("metadata.dim")
+                }
+
+                result = kb_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].find_one(
+                    query)
+
+                print("I am printing the result of training:", result)
+                # training_result = next(result, None)
+                """
+                anomalies_dict: Dict[str, List] = {}
+                for key, value in observed_values.items():
+
+                    anomalies = detectar_anomalias_df(
+                        value, results, self.parameters.train_window)
+                    anomalies_dict[key] = anomalies
+
+                # print(anomalies_dict)
+
+                filtered_anomalies = {
+                    key: [item for item in value if item.get('is_anomaly')]
+                    for key, value in anomalies_dict.items()
+                }
+
+                print(f"Found {len(filtered_anomalies)} anomalies")
+                anomalies_for_elastic = []
+
+                for key, anomalies in filtered_anomalies.items():
+                    for item in anomalies:
+                        doc = {
+                            'algorithm': 'ZScore',
+                            'metric': key,  # optional — store which metric the anomaly belongs to
+                            'text': 'Anomaly detected',
+                            'timestamp': item["timestamp"],
+                            'value': item["value"],
+                            '_index': "anomaly"
+                        }
+                        anomalies_for_elastic.append(doc)
+
+                helpers.bulk(elastic_client, anomalies_for_elastic)
+                """
+
+
 def main():
 
     # Esto arma la conexión a MongoDB
@@ -509,44 +593,28 @@ def main():
 
     # aquí llamariamos a nuestra lógica para checkear la metadata para corroborar si ya hemos hechos
     # esta operativa antes
-
-    # nos conectamos a la DB donde está la data que nos interesa
-    da_client = CreateConnectionToDA()
-
     # TODO: add a watch on the connection to the KBConfig one
 
-    # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
-    latest_series_config = ExtractLatestConfigurationKB(kb_client)
+    # Start watcher in its own thread
+    training_watcher = threading.Thread(
+        target=watch_kb_changes, args=(kb_client,), daemon=True)
 
-    # we turn the JSON with the config data into a class
-    config: Config = parse_config(latest_series_config)
+    detection_watcher = threading.Thread(
+        target=watch_detection_changes,
+        args=(kb_client,),
+        daemon=True
+    )
 
-    # now we go thru each algorithm call we extracted, and try to execute training on them
-    config.execute_algos()
+    training_watcher.start()
+    # detection_watcher.start()
 
-    # results = run_zscore_batch_training(z_score, training_algo, kb_client)
-
-    anomalies = detectar_anomalias_df(
-        z_score.observed_values["status_code_5xx_counter"], results, 60)
-
-    # save_anomalies_json(anomalies, results, "detección.json")
-    # print(only_anomalies)
-    anomalies_for_elastic = []
-
-    for item in only_anomalies:
-
-        doc = {
-            'algorithm': 'ZScore',
-            'text': 'Anomaly detected',
-            'timestamp': item["timestamp"],
-            'value': item["value"],
-            '_index': "anomaly"
-        }
-        anomalies_for_elastic.append(doc)
-
-    helpers.bulk(elastic_client, anomalies_for_elastic)
-    # resp = client.index(index="anomaly", id=1, document=doc)
-    # print(resp['result'])
+    try:
+        while training_watcher.is_alive():
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nStopping watcher...")
+        # Let it end naturally when Mongo closes or you implement a stop condition
+        pass
 
 
 if __name__ == "__main__":

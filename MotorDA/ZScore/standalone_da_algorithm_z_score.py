@@ -46,14 +46,14 @@ def fetch_logs_from_mongo(connection_string: str, database: str, collection: str
 
 
 # === TRAIN BASELINE ==========================================================
-def train_baseline(df_train: pd.DataFrame, field: str, percentile: float = 99.5):
+def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, percentile: float = 99.5):
     """Compute mean, std, and dynamic threshold from training data."""
     vals = df_train[field].astype(float).values
     mean = np.mean(vals)
     std = np.std(vals) if np.std(vals) > 0 else 1e-6
     z_scores = np.abs((vals - mean) / std)
     threshold = np.percentile(z_scores, percentile)
-    return {"field": field, "mean": mean, "std": std, "threshold": threshold}
+    return {"kb_id": kb_id, "field": dimension, "mean": mean, "std": std, "threshold": threshold}
 
 
 # === ANOMALY DETECTION ======================================================
@@ -62,7 +62,7 @@ def detectar_anomalias_df(df: pd.DataFrame, baseline: dict, ventana_minutos: int
     if df.empty:
         return []
 
-    field = baseline["field"]
+    field = "value"  # this is harcoded as all the dataframe's have "value" as the name of the observed_value
     mean = baseline["mean"]
     std = baseline["std"]
     threshold = baseline["threshold"]
