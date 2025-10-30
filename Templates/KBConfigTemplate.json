@@ -19,124 +19,28 @@
       "is_active": false
     }
   },
-  "ad_alg_parameters": {
-    "zscore": [
-      { "dimension": "status_code_200_counter" },
-      { "dimension": "status_code_5xx_counter" }
-    ],
-    "arma": [
-      { "dimension": "status_code_200_counter", 
-        "algorithm_metadata": [
-          {
-            "key": "p",
-            "value": 2
-          },
-          {
-            "key": "d",
-            "value": 1
-          },
-          {
-            "key": "q",
-            "value": 2
-          }
-        ]
-      },
-      { "dimension": "status_code_5xx_counter", 
-        "algorithm_metadata": [
-          {
-            "key": "p",
-            "value": 1
-          },
-          {
-            "key": "d",
-            "value": 0
-          },
-          {
-            "key": "q",
-            "value": 1
-          }
-        ]
-      }
-    ],
-    "kmeans": [
-      { "dimension": "status_code_200_counter",
-        "algorithm_metadata": [
-          {
-            "key": "clusters",
-            "value": 3
-          },
-          {
-            "key": "random_state",
-            "value": 42
-          }
-        ]
-      },
-      { "dimension": "status_code_200_counter",
-        "algorithm_metadata": [
-          {
-            "key": "clusters",
-            "value": 5
-          },
-          {
-            "key": "random_state",
-            "value": 10
-          }
-        ]
-      },
-      { "dimension": "status_code_5xx_counter",
-        "algorithm_metadata": [
-          {
-            "key": "clusters",
-            "value": 2
-          },
-          {
-            "key": "random_state",
-            "value": 42
-          }
-        ]
-      }
-    ],
-    "iforest": [
-      { "dimension": "status_code_200_counter",
-        "algorithm_metadata": [
-          {
-            "key": "n_estimators",
-            "value": 100
-          },
-          {
-            "key": "max_samples",
-            "value": "auto"
-          },
-          {
-            "key": "contamination",
-            "value": "auto"
-          },
-          {
-            "key": "random_state",
-            "value": 42
-          }
-        ]
-      },
-      { "dimension": "status_code_5xx_counter",
-        "algorithm_metadata": [
-          {
-            "key": "n_estimators",
-            "value": 100
-          },
-          {
-            "key": "max_samples",
-            "value": "auto"
-          },
-          {
-            "key": "contamination",
-            "value": "auto"
-          },
-          {
-            "key": "random_state",
-            "value": 42
-          }
-        ]
-      }
-    ]
-  }
+  "algorithms": [
+    {
+      "alg_name": "zscore",
+      "alg_parameters": [
+        { 
+          "dimension": "status_code_200_counter" 
+        },
+        { 
+          "dimension": "status_code_5xx_counter" 
+        }
+      ]
+    },
+    {
+      "alg_name": "kmeans",
+      "alg_parameters": [
+        {
+          "dimension": "status_code_5xx_counter",
+          "alg_metadata": [
+            {"k": "clusters", "v": "3"}
+          ]
+        }
+      ]
+    }
+  ]
 }
