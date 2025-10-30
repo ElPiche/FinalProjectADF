@@ -1,7 +1,7 @@
 package com.da.extractor.config;
 
-import com.da.extractor.repository.SeriesRepository;
-import com.da.extractor.repository.TrainingConfigRepository;
+import com.da.extractor.repository.anomaly_detection.SeriesRepository;
+import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.mongodb.repository.config.EnableMongoRepositories;
 

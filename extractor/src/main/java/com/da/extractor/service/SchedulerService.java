@@ -1,91 +1,96 @@
 package com.da.extractor.service;
 
-import com.da.extractor.entity.serie.Mode;
+import com.da.extractor.entity.SchedulerConfig;
 import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
+import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
 import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.ScheduledFuture;
 
 @Service
 public class SchedulerService {
 
+    private static final Logger log = LoggerFactory.getLogger(SchedulerService.class);
+
     private final TaskScheduler taskScheduler;
 
-    private Map<String, ScheduledFuture<?>> scheduledTasks = new HashMap<>();
+    private final Map<String, ScheduledFuture<?>> scheduledTasks = new HashMap<>();
+    private final SchedulerConfigRepository schedulerConfigRepository;
 
     private final DataPipelineFactory dataPipelineFactory;
 
     private static final DateTimeFormatter ISO = DateTimeFormatter.ISO_INSTANT;
 
-    public SchedulerService(TaskScheduler taskScheduler, DataPipelineFactory dataPipelineFactory) {
+    public SchedulerService(TaskScheduler taskScheduler,
+                            SchedulerConfigRepository schedulerConfigRepository,
+                            DataPipelineFactory dataPipelineFactory) {
         this.taskScheduler = taskScheduler;
+        this.schedulerConfigRepository = schedulerConfigRepository;
         this.dataPipelineFactory = dataPipelineFactory;
     }
 
-    public void createTask(String text, long rateMillis) {
-        Runnable task = () -> System.out.println("Scheduled Task: " + text);
+    public void createStreamingTask(SchedulerConfig config, PipeMetadata pipeMetadata) {
 
-        ScheduledFuture<?> scheduledFuture = taskScheduler.scheduleAtFixedRate(
-                task, Duration.ofMillis(rateMillis)
-        );
+        String springCron = normalizeCron(config.getFrequency());
 
-        scheduledTasks.put(UUID.randomUUID().toString(), scheduledFuture);
-    }
-
-    public void createStreamingTask(String query, int window, String frequency, String id, List<String> observedValues) throws Exception {
-
-        String cron = normalizeCron(frequency);
-
-        Trigger trigger = new CronTrigger(cron);// TimeZone.getTimeZone(ZONE)
-
+        CronTrigger cronTrigger = new CronTrigger(springCron);
         Runnable task = () -> {
             try {
-                // Ventana: últimos N segundos
                 Instant to  = Instant.now();
-                Instant from = to.minusSeconds(window);
-
-                String elasticQuery = query
+                Instant from = to.minusSeconds(config.getWindow());
+                String elasticQuery = config.getQuery()
                         .replace("$from", ISO.format(from))
                         .replace("$to",   ISO.format(to));
 
-                var pipeline = dataPipelineFactory.createPipeline(new PipeMetadata(
-                        id,
-                        observedValues,
-                        Mode.DETECTION
-                ));
-
+                var pipeline = dataPipelineFactory.createPipeline(pipeMetadata);
                 pipeline.process(elasticQuery);
 
+                config.setLastRun(Date.from(Instant.now()));
+                schedulerConfigRepository.save(config);
+                log.info("Scheduled task executed for KB ID: {} | from: {} | to: {}",
+                        config.getKbId(), ISO.format(from), ISO.format(to));
+
             } catch (Exception ex) {
-                System.err.println("Error en scheduleStreamingTask(" + id + "): " + ex.getMessage());
-                ex.printStackTrace();
+                log.error("Error en scheduleStreamingTask({}): {}", config.getKbId(), ex.getMessage(), ex);
             }
         };
-
-        cancelTask(id);
-
-        ScheduledFuture<?> future = taskScheduler.schedule(task, trigger);
-
-        scheduledTasks.put(id, future);
-
+        // Trigger compuesto usando Instant (API moderna)
+        Trigger composedTrigger = context -> {
+            Instant last = context.lastScheduledExecution(); // puede ser null primera vez
+            if (last == null) {
+                if (config.getFrom() != null) {
+                    Instant startInstant = config.getFrom().toInstant();
+                    if (startInstant.isAfter(Instant.now())) {
+                        return startInstant; // Primera ejecución en startAt futuro
+                    }
+                }
+                // Ejecutar inmediatamente o según cron siguiente
+                return cronTrigger.nextExecution(context);
+            }
+            return cronTrigger.nextExecution(context);
+        };
+        cancelTask(config.getKbId());
+        ScheduledFuture<?> future = taskScheduler.schedule(task, composedTrigger);
+        scheduledTasks.put(config.getKbId(), future);
+        log.info("Scheduled task saved for KB ID: {} with frequency: {}",
+                config.getKbId(), config.getFrequency());
     }
 
-    //normalizador de cron
+
     private String normalizeCron(String cron){
         String[] parts = cron.trim().split("\\s+");
         return (parts.length == 5) ? "0 " + cron : cron;
     }
 
-    //Detención de tareas por id
     public boolean cancelTask(String id) {
         ScheduledFuture<?> f = scheduledTasks.remove(id);
         return f != null && f.cancel(false);

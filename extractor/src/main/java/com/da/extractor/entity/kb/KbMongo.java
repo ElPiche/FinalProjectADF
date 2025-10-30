@@ -30,9 +30,8 @@ public class KbMongo{
         return algorithms.stream()
                 .flatMap(algorithm -> algorithm.getAlgParameters()
                         .stream()
-                        .map(AlgorithmParameter::getDimension)
-                )
+                        .map(AlgorithmParameter::getDimension))
+                .distinct()
                 .toList();
     }
-
 }

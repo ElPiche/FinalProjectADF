@@ -2,8 +2,8 @@ package com.da.extractor.pipeline;
 
 import com.da.extractor.entity.serie.SeriesElement;
 import com.da.extractor.entity.training.TrainConfig;
-import com.da.extractor.repository.SeriesRepository;
-import com.da.extractor.repository.TrainingConfigRepository;
+import com.da.extractor.repository.anomaly_detection.SeriesRepository;
+import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;

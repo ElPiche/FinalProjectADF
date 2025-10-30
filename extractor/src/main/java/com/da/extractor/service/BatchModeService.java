@@ -5,7 +5,7 @@ import com.da.extractor.entity.serie.Mode;
 import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
-import com.da.extractor.repository.TrainingConfigRepository;
+import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
