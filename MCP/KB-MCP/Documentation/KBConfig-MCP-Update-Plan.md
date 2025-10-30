@@ -16,7 +16,7 @@ This document outlines the comprehensive plan to update the KB-MCP server to con
 
 ## Detailed Action Plan
 
-### 1. Update Function Signature - Remove Optional Parameters
+### 1. Update Function Signature - Remove Optional Parameters ✅ COMPLETED
 **Current:**
 ```python
 @mcp.tool()
@@ -76,7 +76,9 @@ def create_da_config(
     """
 ```
 
-### 2. Update KBConfig Class (Lines 34-52)
+**CHANGE REPORT**: Updated function signature in kb-mcp.py to remove Optional parameters. Function now requires both kb_config and da_alg_parameters to be provided explicitly.
+
+### 2. Update KBConfig Class (Lines 34-52) ✅ COMPLETED
 **Current:**
 ```python
 class KBConfig(BaseModel):
@@ -99,7 +101,9 @@ class KBConfig(BaseModel):
     da_alg_parameters: dict  # snake_case
 ```
 
-### 3. Update Scheduling Validation Logic (Lines 712-736)
+**CHANGE REPORT**: Updated KBConfig class in kb-mcp.py to remove id field and use snake_case field names (change_flag, da_alg_parameters). Removed id validation from __init__ method.
+
+### 3. Update Scheduling Validation Logic (Lines 712-736) ✅ COMPLETED
 **Current:**
 ```python
 training_config = kb_config.scheduling.get('trainingConfig', {})
@@ -121,7 +125,9 @@ if not isinstance(training_config.get('training_window'), int) or training_confi
     validation_errors.append("Training window must be a positive integer")
 ```
 
-### 4. Update SQL Query Validation (Lines 750-821)
+**CHANGE REPORT**: Updated scheduling validation logic in kb-mcp.py to use snake_case field names (training_config, training_window, detection_config, detection_window). Removed mode validation as it's not implemented at this time.
+
+### 4. Update SQL Query Validation (Lines 750-821) ✅ COMPLETED
 **Current:**
 ```python
 training_query = kb_config.scheduling.get('trainingConfig', {}).get('trainingQuery')
@@ -134,7 +140,9 @@ training_query = kb_config.scheduling.get('training_config', {}).get('training_q
 detection_query = kb_config.scheduling.get('detection_config', {}).get('detection_query')  # snake_case
 ```
 
-### 5. Update MongoDB Storage Structure (Lines 834-887)
+**CHANGE REPORT**: Updated SQL query validation in kb-mcp.py to use snake_case field names (training_config.training_query, detection_config.detection_query).
+
+### 5. Update MongoDB Storage Structure (Lines 834-887) ✅ COMPLETED
 **Current:**
 ```python
 config_preview = {
@@ -158,31 +166,14 @@ config_to_store = {
     "name": kb_config.name,
     "description": kb_config.description,
     "change_flag": kb_config.change_flag,  # snake_case
-    "scheduling": {
-        "training_config": {  # snake_case
-            "training_query": kb_config.scheduling["training_config"]["training_query"],  # snake_case
-            "from": kb_config.scheduling["training_config"]["from"],
-            "to": kb_config.scheduling["training_config"]["to"],
-            "training_window": kb_config.scheduling["training_config"]["training_window"],  # snake_case
-            "is_active": kb_config.scheduling["training_config"]["is_active"]  # snake_case
-        },
-        "detection_config": {  # snake_case
-            "detection_query": kb_config.scheduling["detection_config"]["detection_query"],  # snake_case
-            "from": kb_config.scheduling["detection_config"]["from"],
-            "frequency": kb_config.scheduling["detection_config"]["frequency"],
-            "detection_window": kb_config.scheduling["detection_config"]["detection_window"],  # snake_case
-            "is_active": kb_config.scheduling["detection_config"]["is_active"]  # snake_case
-        }
-    },
-    "da_alg_parameters": {
-        "zscore": [
-            {"dimension": "status_code_200_counter"}  # NEW: dimension instead of observedValue
-        ]
-    }
+    "scheduling": kb_config.scheduling,  # Use scheduling directly as it should already be in snake_case format
+    "da_alg_parameters": kb_config.da_alg_parameters  # Use da_alg_parameters directly
 }
 
 result = collection.insert_one(config_to_store)  # Store directly, no wrapper
 ```
+
+**CHANGE REPORT**: Updated MongoDB storage structure in kb-mcp.py to store configurations directly without kbConfig wrapper, using snake_case field names, and removed id field (MongoDB auto-generates _id). Updated success message to show MongoDB document ID instead of config ID.
 
 ### 6. Update Algorithm Parameter Extraction (Lines 665-697)
 **Current:**
