@@ -8,6 +8,7 @@ import argparse
 from jsonschema import validate, ValidationError
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
+from bson import ObjectId
 import uuid
 import os
 from datetime import datetime
@@ -33,23 +34,21 @@ mcp = FastMCP("KB-MCP")
 
 # Knowledge Base Configuration
 class KBConfig(BaseModel):
-    id: str
+    # No id field - MongoDB will auto-generate _id
     name: str
     description: str
-    changeFlag: int
+    change_flag: int  # snake_case
     scheduling: dict
-    daAlgParameters: dict
+    da_alg_parameters: dict  # snake_case
 
     def __init__(self, **data):
         super().__init__(**data)
         # Basic validation - detailed validation happens in tools
-        if not self.id or not isinstance(self.id, str):
-            raise ValueError("ID must be a non-empty string")
         if not self.name or not isinstance(self.name, str):
             raise ValueError("Name must be a non-empty string")
         if not self.description or not isinstance(self.description, str):
             raise ValueError("Description must be a non-empty string")
-        log_message(f"KB config structure validated for ID {self.id}")
+        log_message(f"KB config structure validated for: {self.name}")
 
 # CRON class moved before classes that use it
 class CRON:
@@ -172,7 +171,7 @@ class ZScore(BaseModel):
 
     def to_dict(self):
         return {
-            "observedValue": self.observed_value
+            "dimension": self.observed_value  # Map to dimension for template compatibility
         }
     
 # Auxiliary classes --------------------------------------------------------------------------------------------
@@ -570,7 +569,7 @@ def connect_mongodb():
         MongoClient: Connected MongoDB client, or None if connection fails
     """
     # Use percent-encoded password for host connections
-    mongo_uri = "mongodb://admin:1q2w3E%2A@localhost:27018/?authSource=admin"
+    mongo_uri = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin"
     db_name = "kb_configs"  # Database name for KB configurations
 
     try:
@@ -605,8 +604,8 @@ class ExtractorModes(str):
 
 @mcp.tool()
 def create_da_config(
-    kb_config: Optional[KBConfig] = None,
-    da_alg_parameters: Optional[DaAlgParameters] = None
+    kb_config: dict,
+    da_alg_parameters: dict
 ) -> str:
     """
     Create a Data Analytics (DA) algorithm configuration for the Knowledge Base system.
@@ -615,8 +614,8 @@ def create_da_config(
     to help ensure correct configuration creation.
 
     Args:
-        kb_config (KBConfig): Configuration containing ID, description, changeFlag, scheduling, and daAlgParameters
-        da_alg_parameters (DaAlgParameters): Data analytics algorithm parameters
+        kb_config (dict): Configuration containing name, description, changeFlag, scheduling, and daAlgParameters
+        da_alg_parameters (dict): Data analytics algorithm parameters
 
     Returns:
         str: Validation success message with configuration preview, or detailed error message
@@ -625,107 +624,69 @@ def create_da_config(
         ValueError: If any validation fails with specific error details
     """
 
-    # Set defaults if None
-    if kb_config is None:
-        kb_config = KBConfig(
-            id=str(uuid.uuid4()),  # Always generate new UUID for new configs
-            name="Default HTTP Monitoring",
-            description="Default configuration for monitoring HTTP status codes and detecting anomalies in web traffic patterns using Elasticsearch SQL queries.",
-            changeFlag=0,
-            scheduling={
-                "trainingConfig": {
-                    "trainingQuery": "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
-                    "from": "2025-09-01T00:00:00Z",
-                    "to": "2025-09-30T23:59:59Z",
-                    "mode": "training",
-                    "trainingWindow": 60,
-                    "isActive": True
-                },
-                "detectionConfig": {
-                    "detectionQuery": "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-10T00:00:00.000Z' AND \"@timestamp\" < '2025-10-11T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
-                    "from": "2025-10-10T00:00:00Z",
-                    "frequency": "*/15 * * * *",
-                    "detectionWindow": 60,
-                    "mode": "detection",
-                    "isActive": False
-                }
-            },
-            daAlgParameters={
-                "zscore": [
-                    {"observedValue": "status_code_200_counter"},
-                    {"observedValue": "status_code_5xx_counter"}
-                ]
-            }
-        )
-    else:
-        # If kb_config is provided, ensure ID is always a new UUID (never allow user-provided IDs)
-        kb_config.id = str(uuid.uuid4())
-        kb_config.changeFlag = 0  # Reset change flag for new configs
-    if da_alg_parameters is None:
-        # Try to extract custom algorithms from KB config first
-        # Handle both KBConfig objects and dict inputs from MCP
-        da_alg_params = None
-        if isinstance(kb_config, dict) and 'daAlgParameters' in kb_config:
-            da_alg_params = kb_config['daAlgParameters']
-        elif hasattr(kb_config, 'daAlgParameters'):
-            da_alg_params = kb_config.daAlgParameters
+    # Debug logging to understand what MCP is passing
+    log_message(f"DEBUG: kb_config type: {type(kb_config)}")
+    log_message(f"DEBUG: kb_config value: {kb_config}")
+    log_message(f"DEBUG: da_alg_parameters type: {type(da_alg_parameters)}")
+    log_message(f"DEBUG: da_alg_parameters value: {da_alg_parameters}")
 
-        if da_alg_params:
-            custom_algs = []
-            # Extract zscore algorithms from KB config
-            zscore_configs = da_alg_params.get("zscore", [])
-            for alg_dict in zscore_configs:
-                if isinstance(alg_dict, dict) and "observedValue" in alg_dict:
-                    custom_algs.append(ZScore(observed_value=alg_dict["observedValue"]))
+    # Convert dictionaries to proper objects
+    try:
+        # Convert kb_config dict to KBConfig object
+        kb_config_obj = KBConfig(**kb_config)
+        log_message(f"DEBUG: Successfully converted kb_config to KBConfig object")
 
-            if custom_algs:
-                da_alg_parameters = DaAlgParameters(algorithms=custom_algs)
-                log_message(f"Using {len(custom_algs)} custom algorithms from KB config")
-            else:
-                # Fall back to defaults if no valid custom algorithms found
-                da_alg_parameters = DaAlgParameters(algorithms=[
-                    ZScore(observed_value="status_code_200_counter"),
-                    ZScore(observed_value="status_code_5xx_counter")
-                ])
-                log_message("No valid custom algorithms found, using defaults")
-        else:
-            # Use defaults when no KB config or daAlgParameters provided
-            da_alg_parameters = DaAlgParameters(algorithms=[
-                ZScore(observed_value="status_code_200_counter"),
-                ZScore(observed_value="status_code_5xx_counter")
-            ])
-            log_message("Using default algorithms")
+        # Convert da_alg_parameters dict to DaAlgParameters object
+        # Handle the algorithms list conversion
+        algorithms_list = []
+        if 'algorithms' in da_alg_parameters:
+            for alg_dict in da_alg_parameters['algorithms']:
+                if isinstance(alg_dict, dict) and 'observed_value' in alg_dict:
+                    algorithms_list.append(ZScore(**alg_dict))
+                else:
+                    # Try to convert observedValue to observed_value if needed
+                    alg_copy = alg_dict.copy()
+                    if 'observedValue' in alg_copy and 'observed_value' not in alg_copy:
+                        alg_copy['observed_value'] = alg_copy.pop('observedValue')
+                    algorithms_list.append(ZScore(**alg_copy))
+
+        da_params_obj = DaAlgParameters(algorithms=algorithms_list)
+        log_message(f"DEBUG: Successfully converted da_alg_parameters to DaAlgParameters object")
+
+    except Exception as e:
+        log_message(f"ERROR: Failed to convert input objects: {str(e)}", "error")
+        return f"ERROR: Failed to convert input objects: {str(e)}"
+
+    # REMOVED: Default configuration generation - function now requires explicit parameters
 
     validation_errors = []
     
     # Validate KB Config
     try:
-        if not kb_config.id or not isinstance(kb_config.id, str):
-            validation_errors.append("KB Config ID must be a non-empty string")
-        if not kb_config.description or not isinstance(kb_config.description, str):
+        if not kb_config_obj.name or not isinstance(kb_config_obj.name, str):
+            validation_errors.append("KB Config name must be a non-empty string")
+        if not kb_config_obj.description or not isinstance(kb_config_obj.description, str):
             validation_errors.append("KB Config description must be a non-empty string")
         # SQL validation will happen in the tool functions
-    except ValueError as e:
+    except (ValueError, AttributeError) as e:
         validation_errors.append(f"KB Config validation failed: {str(e)}")
-    
+
     # Validate Training Config
     try:
-        training_config = kb_config.scheduling.get('trainingConfig', {})
+        training_config = kb_config_obj.scheduling.get('training_config', {})  # snake_case
         if training_config.get('from') >= training_config.get('to'):
             validation_errors.append("Training 'from' must be before 'to'")
-        if training_config.get('mode') not in ["training", "batch", "streaming"]:
-            validation_errors.append("Training mode must be 'training', 'batch', or 'streaming'")
-        if not isinstance(training_config.get('trainingWindow'), int) or training_config.get('trainingWindow') <= 0:
+        # Mode validation removed - not implementing at this time
+        if not isinstance(training_config.get('training_window'), int) or training_config.get('training_window') <= 0:  # snake_case
             validation_errors.append("Training window must be a positive integer")
     except (AttributeError, TypeError):
         validation_errors.append("Invalid training config in scheduling")
 
     # Validate Detection Config
     try:
-        detection_config = kb_config.scheduling.get('detectionConfig', {})
-        if detection_config.get('mode') not in ["detection", "batch", "streaming"]:
-            validation_errors.append("Detection mode must be 'detection', 'batch', or 'streaming'")
-        if not isinstance(detection_config.get('detectionWindow'), int) or detection_config.get('detectionWindow') <= 0:
+        detection_config = kb_config_obj.scheduling.get('detection_config', {})  # snake_case
+        # Mode validation removed - not implementing at this time
+        if not isinstance(detection_config.get('detection_window'), int) or detection_config.get('detection_window') <= 0:  # snake_case
             validation_errors.append("Detection window must be a positive integer")
         # CRON validation for frequency
         if 'frequency' in detection_config:
@@ -735,20 +696,20 @@ def create_da_config(
                 validation_errors.append(f"Invalid detection frequency CRON: {str(e)}")
     except (AttributeError, TypeError):
         validation_errors.append("Invalid detection config in scheduling")
-    
+
     # Validate DA Algorithm Parameters
     try:
-        if not da_alg_parameters.algorithms or len(da_alg_parameters.algorithms) == 0:
+        if not da_params_obj.algorithms or len(da_params_obj.algorithms) == 0:
             validation_errors.append("At least one algorithm must be specified")
-        for i, alg in enumerate(da_alg_parameters.algorithms):
+        for i, alg in enumerate(da_params_obj.algorithms):
             if not hasattr(alg, 'to_dict'):
                 validation_errors.append(f"Algorithm {i} must have a to_dict() method")
 
         # Cross-validate: Check that observed_value fields match SQL output fields
-        if kb_config:
+        if kb_config_obj:
             try:
                 # Validate training query using elasticsearch_sql tool
-                training_query = kb_config.scheduling.get('trainingConfig', {}).get('trainingQuery')
+                training_query = kb_config_obj.scheduling.get('training_config', {}).get('training_query')  # snake_case
                 if training_query:
                     # Use elasticsearch_sql tool to validate and get output fields
                     validation_result = elasticsearch_sql(training_query + " LIMIT 0")
@@ -768,7 +729,7 @@ def create_da_config(
                             else:
                                 # Check each algorithm's observed_value against available output fields
                                 missing_fields = []
-                                for i, alg in enumerate(da_alg_parameters.algorithms):
+                                for i, alg in enumerate(da_params_obj.algorithms):
                                     if hasattr(alg, 'observed_value'):
                                         if alg.observed_value not in output_fields:
                                             missing_fields.append(f"'{alg.observed_value}' (Algorithm {i})")
@@ -784,7 +745,7 @@ def create_da_config(
                             validation_errors.append("Training SQL query validation failed: Could not parse Elasticsearch response")
 
                 # Validate detection query using elasticsearch_sql tool
-                detection_query = kb_config.scheduling.get('detectionConfig', {}).get('detectionQuery')
+                detection_query = kb_config_obj.scheduling.get('detection_config', {}).get('detection_query')  # snake_case
                 if detection_query:
                     # Use elasticsearch_sql tool to validate and get output fields
                     validation_result = elasticsearch_sql(detection_query + " LIMIT 0")
@@ -804,7 +765,7 @@ def create_da_config(
                             else:
                                 # Check each algorithm's observed_value against available output fields
                                 missing_fields = []
-                                for i, alg in enumerate(da_alg_parameters.algorithms):
+                                for i, alg in enumerate(da_params_obj.algorithms):
                                     if hasattr(alg, 'observed_value'):
                                         if alg.observed_value not in output_fields:
                                             missing_fields.append(f"'{alg.observed_value}' (Algorithm {i})")
@@ -831,24 +792,21 @@ def create_da_config(
         log_message(f"Configuration validation failed: {len(validation_errors)} errors")
         return error_msg
     
-    # Build preview of configuration
-    config_preview = {
-        "kbConfig": {
-            "id": kb_config.id,
-            "name": kb_config.name,
-            "description": kb_config.description,
-            "changeFlag": kb_config.changeFlag,
-            "scheduling": kb_config.scheduling,
-            "daAlgParameters": kb_config.daAlgParameters
-        }
+    # Build configuration in template format (snake_case, no wrapper, NO id field)
+    config_to_store = {
+        "name": kb_config_obj.name,
+        "description": kb_config_obj.description,
+        "change_flag": kb_config_obj.change_flag,  # snake_case
+        "scheduling": kb_config_obj.scheduling,  # Use scheduling directly as it should already be in snake_case format
+        "da_alg_parameters": kb_config_obj.da_alg_parameters  # Use da_alg_parameters directly
     }
-    
-    log_message(f"Configuration validation successful for ID: {kb_config.id}")
-    log_message(f"Configuration preview: {json.dumps(config_preview, indent=2)}")
+
+    log_message(f"Configuration validation successful for: {kb_config_obj.name}")
+    log_message(f"Configuration to store: {json.dumps(config_to_store, indent=2)}")
 
     # Print configuration preview to console in correct format
     print("\nConfiguration Preview:")
-    print(json.dumps(config_preview, indent=2))
+    print(json.dumps(config_to_store, indent=2))
     print()
 
     # Connect to MongoDB and save the configuration
@@ -862,15 +820,15 @@ def create_da_config(
         db = client["kb_configs"]
         collection = db["configurations"]
 
-        # Insert the configuration
-        result = collection.insert_one(config_preview)
+        # Insert the configuration directly (no kbConfig wrapper)
+        result = collection.insert_one(config_to_store)
         log_message(f"Configuration saved to MongoDB with document ID: {str(result.inserted_id)}")
 
-        # Verify the save by counting documents
-        doc_count = collection.count_documents({"kbConfig.id": kb_config.id})
-        log_message(f"Verification: {doc_count} document(s) found with ID {kb_config.id}")
+        # Verify the save by counting documents with this name
+        doc_count = collection.count_documents({"name": kb_config_obj.name})
+        log_message(f"Verification: {doc_count} document(s) found with name {kb_config_obj.name}")
 
-        success_msg = f"SUCCESS: Configuration saved to MongoDB!\n\nID: {kb_config.id}\n\nConfiguration saved successfully."
+        success_msg = f"SUCCESS: Configuration saved to MongoDB!\n\nDocument ID: {str(result.inserted_id)}\n\nConfiguration saved successfully."
         log_message("Configuration creation and saving completed successfully")
         return success_msg
 
@@ -929,22 +887,26 @@ def modify_kb_config(
         db = client["kb_configs"]
         collection = db["configurations"]
 
-        # Find the configuration
-        config_doc = collection.find_one({"kbConfig.id": config_id})
+        # Find the configuration - use MongoDB _id directly
+        try:
+            config_doc = collection.find_one({"_id": ObjectId(config_id)})
+        except Exception as e:
+            return f"ERROR: Invalid configuration ID format: '{config_id}' - {str(e)}"
+
         if not config_doc:
             return f"ERROR: Configuration with ID '{config_id}' not found"
 
-        # Prepare updates
+        # Prepare updates - direct field access, no kbConfig wrapper
         updates = {}
 
         if description is not None:
-            updates["kbConfig.description"] = description
+            updates["description"] = description  # Direct field access
 
         if training_query is not None:
             # Validate SQL query
             try:
                 sql_obj = SQL(training_query)
-                updates["kbConfig.scheduling.trainingConfig.trainingQuery"] = training_query
+                updates["scheduling.training_config.training_query"] = training_query  # snake_case
             except ValueError as e:
                 return f"ERROR: Invalid training query: {str(e)}"
 
@@ -952,40 +914,40 @@ def modify_kb_config(
             # Validate SQL query
             try:
                 sql_obj = SQL(detection_query)
-                updates["kbConfig.scheduling.detectionConfig.detectionQuery"] = detection_query
+                updates["scheduling.detection_config.detection_query"] = detection_query  # snake_case
             except ValueError as e:
                 return f"ERROR: Invalid detection query: {str(e)}"
 
         if training_from is not None:
-            updates["kbConfig.scheduling.trainingConfig.from"] = training_from
+            updates["scheduling.training_config.from"] = training_from  # snake_case
 
         if training_to is not None:
-            updates["kbConfig.scheduling.trainingConfig.to"] = training_to
+            updates["scheduling.training_config.to"] = training_to  # snake_case
 
         if detection_frequency is not None:
             # Validate CRON
             try:
                 CRON(detection_frequency)
-                updates["kbConfig.scheduling.detectionConfig.frequency"] = detection_frequency
+                updates["scheduling.detection_config.frequency"] = detection_frequency  # snake_case
             except ValueError as e:
                 return f"ERROR: Invalid detection frequency: {str(e)}"
 
         if detection_start is not None:
-            updates["kbConfig.scheduling.detectionConfig.from"] = detection_start
+            updates["scheduling.detection_config.from"] = detection_start  # snake_case
 
         if da_alg_parameters is not None:
             # Validate algorithm parameters
             try:
-                # Extract zscore algorithms
+                # Extract zscore algorithms - handle dimension instead of observedValue
                 zscore_algs = []
                 if "zscore" in da_alg_parameters:
                     for alg_dict in da_alg_parameters["zscore"]:
-                        if isinstance(alg_dict, dict) and "observedValue" in alg_dict:
-                            zscore_algs.append(ZScore(observed_value=alg_dict["observedValue"]))
+                        if isinstance(alg_dict, dict) and "dimension" in alg_dict:  # NEW: dimension
+                            zscore_algs.append(ZScore(observed_value=alg_dict["dimension"]))  # Map dimension to observed_value
 
                 if zscore_algs:
                     da_params = DaAlgParameters(algorithms=zscore_algs)
-                    updates["kbConfig.daAlgParameters"] = da_alg_parameters
+                    updates["da_alg_parameters"] = da_alg_parameters  # snake_case
                 else:
                     return "ERROR: No valid ZScore algorithms found in da_alg_parameters"
             except Exception as e:
@@ -994,29 +956,21 @@ def modify_kb_config(
         if not updates:
             return "WARNING: No valid updates provided"
 
+        # Apply updates - increment change_flag directly
+        updates["change_flag"] = config_doc.get("change_flag", 0) + 1  # Direct field access, snake_case
+
         # Apply updates
         result = collection.update_one(
-            {"kbConfig.id": config_id},
-            {"$set": updates, "$inc": {"kbConfig.changeFlag": 1}}  # Increment change flag
+            {"_id": ObjectId(config_id)},
+            {"$set": updates}
         )
 
         if result.modified_count == 0:
             return "WARNING: No changes were made to the configuration"
 
         # Retrieve and return updated configuration (exclude MongoDB ObjectId)
-        updated_doc = collection.find_one({"kbConfig.id": config_id}, {"_id": 0})
+        updated_doc = collection.find_one({"_id": ObjectId(config_id)}, {"_id": 0})
         if updated_doc:
-            # Convert ObjectId to string if present in nested structures
-            def convert_objectid(obj):
-                if isinstance(obj, dict):
-                    return {k: convert_objectid(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [convert_objectid(item) for item in obj]
-                elif hasattr(obj, '__class__') and 'ObjectId' in str(obj.__class__):
-                    return str(obj)
-                else:
-                    return obj
-            updated_doc = convert_objectid(updated_doc)
             return f"SUCCESS: Configuration '{config_id}' updated successfully."
         else:
             return f"SUCCESS: Configuration '{config_id}' updated successfully, but could not retrieve updated document."
@@ -1050,8 +1004,8 @@ def list_kb_configurations() -> str:
         db = client["kb_configs"]
         collection = db["configurations"]
 
-        # Retrieve all configurations
-        configs = list(collection.find({}, {"_id": 0}))
+        # Retrieve all configurations - include all fields including _id
+        configs = list(collection.find({}, {}))
 
         if not configs:
             return "No KB configurations found in the database."
@@ -1061,30 +1015,31 @@ def list_kb_configurations() -> str:
         output += f"Found {len(configs)} configuration(s):\n\n"
 
         for config_doc in configs:
-            kb_config = config_doc.get("kbConfig", {})
+            # Direct access, no kbConfig wrapper
+            kb_config = config_doc
 
-            config_id = kb_config.get("id", "Unknown")
+            config_id = str(kb_config.get("_id", "Unknown"))  # Use MongoDB _id
             name = kb_config.get("name", "Unknown")
             description = kb_config.get("description", "No description")
 
-            # Extract algorithm info (new lowercase structure)
-            da_params = kb_config.get("daAlgParameters", {})
+            # Extract algorithm info - handle dimension instead of observedValue
+            da_params = kb_config.get("da_alg_parameters", {})  # snake_case
             algorithms = []
             if "zscore" in da_params:
-                algorithms.extend([f"ZScore({alg.get('observedValue', 'unknown')})" for alg in da_params["zscore"]])
+                algorithms.extend([f"ZScore({alg.get('dimension', 'unknown')})" for alg in da_params["zscore"]])  # NEW: dimension
 
-            # Extract scheduling info (new lowercase structure)
+            # Extract scheduling info - snake_case
             scheduling = kb_config.get("scheduling", {})
-            training_config = scheduling.get("trainingConfig", {})
-            detection_config = scheduling.get("detectionConfig", {})
+            training_config = scheduling.get("training_config", {})  # snake_case
+            detection_config = scheduling.get("detection_config", {})  # snake_case
 
             training_from = training_config.get("from", "Unknown")
             training_to = training_config.get("to", "Unknown")
             detection_freq = detection_config.get("frequency", "Unknown")
             detection_from = detection_config.get("from", "Unknown")
 
-            output += f"## Configuration: {config_id}\n"
-            output += f"- **Name**: {name}\n"
+            output += f"## Configuration: {name}\n"
+            output += f"- **ID**: {config_id}\n"
             output += f"- **Description**: {description}\n"
             output += f"- **Algorithms**: {', '.join(algorithms) if algorithms else 'None'}\n"
             output += f"- **Training Period**: {training_from} to {training_to}\n"
@@ -1184,33 +1139,39 @@ Use `create_da_config` with a complete configuration object containing:
 
 ```json
 {
-  "kbConfig": {
-    "id": "unique-uuid",
-    "description": "Human-readable description",
-    "changeFlag": 0,
-    "scheduling": {
-      "trainingConfig": {
-        "trainingQuery": "SELECT ... FROM ... WHERE ... GROUP BY ...",
-        "from": "2025-09-01T00:00:00Z",
-        "to": "2025-09-30T23:59:59Z",
-        "mode": "training",
-        "trainingWindow": 60,
-        "isActive": false
-      },
-      "detectionConfig": {
-        "detectionQuery": "SELECT ... FROM ... WHERE ... GROUP BY ...",
-        "from": "2025-10-10T00:00:00Z",
-        "frequency": "*/15 * * * *",
-        "mode": "detection",
-        "detectionWindow": 60,
-        "isActive": false
-      }
+  "name": "Configuration Name",
+  "description": "Human-readable description",
+  "change_flag": 0,
+  "scheduling": {
+    "training_config": {
+      "training_query": "SELECT ... FROM ... WHERE ... GROUP BY ...",
+      "from": "2025-09-01T00:00:00Z",
+      "to": "2025-09-30T23:59:59Z",
+      "training_window": 3600,
+      "is_active": true
     },
-    "daAlgParameters": {
-      "zscore": [
-        {"observedValue": "field_name"}
-      ]
+    "detection_config": {
+      "detection_query": "SELECT ... FROM ... WHERE ... GROUP BY ...",
+      "from": "2025-10-10T00:00:00Z",
+      "frequency": "*/15 * * * *",
+      "detection_window": 3600,
+      "is_active": false
     }
+  },
+  "da_alg_parameters": {
+    "zscore": [
+      {"dimension": "field_name"}
+    ],
+    "arma": [
+      {
+        "dimension": "field_name",
+        "algorithm_metadata": [
+          {"key": "p", "value": 2},
+          {"key": "d", "value": 1},
+          {"key": "q", "value": 2}
+        ]
+      }
+    ]
   }
 }
 ```
@@ -1476,36 +1437,33 @@ if __name__ == "__main__":
 
             # Default training config
             training_config = {
-                "trainingQuery": args.training_query or "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+                "training_query": args.training_query or "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-01T00:00:00.000Z' AND \"@timestamp\" < '2025-11-01T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
                 "from": args.training_from or "2025-09-01T00:00:00Z",
                 "to": args.training_to or "2025-09-30T23:59:59Z",
-                "mode": args.training_mode,
-                "trainingWindow": args.training_window,
-                "isActive": args.training_active
+                "training_window": args.training_window,
+                "is_active": args.training_active
             }
-            scheduling["trainingConfig"] = training_config
+            scheduling["training_config"] = training_config
 
             # Default detection config
             detection_config = {
-                "detectionQuery": args.detection_query or "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-10T00:00:00.000Z' AND \"@timestamp\" < '2025-10-11T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
+                "detection_query": args.detection_query or "SELECT DATE_TRUNC('hour', \"@timestamp\") AS es_timestamp, COUNT(CASE WHEN response = '200' THEN 1 END) AS status_code_200_counter, COUNT(CASE WHEN response >= '500' AND response < '600' THEN 1 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '2025-10-10T00:00:00.000Z' AND \"@timestamp\" < '2025-10-11T00:00:00.000Z' GROUP BY DATE_TRUNC('hour', \"@timestamp\") ORDER BY es_timestamp",
                 "from": args.detection_from or "2025-10-10T00:00:00Z",
                 "frequency": args.detection_frequency or "*/15 * * * *",
-                "mode": args.detection_mode,
-                "detectionWindow": args.detection_window,
-                "isActive": args.detection_active
+                "detection_window": args.detection_window,
+                "is_active": args.detection_active
             }
-            scheduling["detectionConfig"] = detection_config
+            scheduling["detection_config"] = detection_config
 
             kb_config = KBConfig(
-                id=str(uuid.uuid4()),  # Always generate new UUID, never use user-provided ID
                 name=args.name or "Test Configuration",
                 description=args.description or "Test configuration for anomaly detection",
-                changeFlag=0,  # Always start with 0 for new configs
+                change_flag=0,  # Always start with 0 for new configs
                 scheduling=scheduling,
-                daAlgParameters={
+                da_alg_parameters={
                     "zscore": [
-                        {"observedValue": "status_code_200_counter"},
-                        {"observedValue": "status_code_5xx_counter"}
+                        {"dimension": "status_code_200_counter"},
+                        {"dimension": "status_code_5xx_counter"}
                     ]
                 }
             )
