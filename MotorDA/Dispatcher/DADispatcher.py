@@ -82,38 +82,48 @@ class Algorithm:
                 results = run_zscore_batch_training(config, observed_values)
                 # ----------------------------ENDING OF TRAINING ZSCORE----------------------------------------------------------------------------
 
-                anomalies_dict: Dict[str, List] = {}
-                for key, value in observed_values.items():
+                # --------------------------- START OF DETECTION ZSCORE----------------------------------------------------------------------------
+                # anomalies_dict: Dict[str, List] = {}
+                # for key, value in observed_values.items():
 
-                    anomalies = detectar_anomalias_df(
-                        value, results, self.parameters.train_window)
-                    anomalies_dict[key] = anomalies
+                #    anomalies = detectar_anomalias_df(
+                #        value, results, self.parameters.train_window)
+                #    anomalies_dict[key] = anomalies
 
-                # print(anomalies_dict)
+                # --------------------------- ENDING OF DETECTION ZSCORE----------------------------------------------------------------------------
+                # send_anomalies_elastic(anomalies_dict)
 
-                filtered_anomalies = {
-                    key: [item for item in value if item.get('is_anomaly')]
-                    for key, value in anomalies_dict.items()
-                }
-
-                print(f"Found {len(filtered_anomalies)} anomalies")
-                anomalies_for_elastic = []
-
-                for key, anomalies in filtered_anomalies.items():
-                    for item in anomalies:
-                        doc = {
-                            'algorithm': 'ZScore',
-                            'metric': key,  # optional — store which metric the anomaly belongs to
-                            'text': 'Anomaly detected',
-                            'timestamp': item["timestamp"],
-                            'value': item["value"],
-                            '_index': "anomaly"
-                        }
-                        anomalies_for_elastic.append(doc)
-
-                helpers.bulk(elastic_client, anomalies_for_elastic)
             case _:
                 print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
+
+
+def send_anomalies_elastic(anomalies: Dict[str, List]):
+
+    filtered_anomalies = {
+        key: [item for item in value if item.get('is_anomaly')]
+        for key, value in anomalies.items()
+    }
+
+    print(f"Found {len(filtered_anomalies)} anomalies")
+
+    anomalies_for_elastic = []
+
+    for key, anomalies in filtered_anomalies.items():
+        for item in anomalies:
+            doc = {
+                'algorithm': 'ZScore',
+                'metric': key,  # optional — store which metric the anomaly belongs to
+                'text': 'Anomaly detected',
+                'timestamp': item["timestamp"],
+                'value': item["value"],
+                '_index': "anomaly"
+            }
+            anomalies_for_elastic.append(doc)
+
+    helpers.bulk(elastic_client, anomalies_for_elastic)
+    print(anomalies_for_elastic)
+    print(
+        f" Inserted { len(anomalies_for_elastic) } anomalies into Elastic ")
 
 
 @dataclass
@@ -291,7 +301,6 @@ def fetch_series_data_with_aggregation(
         f"Fetching data for {len(dimensions)} dimensions")
     print(f"KB ID: {kb_id}")
     print(f"Mode: {mode}")
-    # print(f"Date range: {date_from} to {date_to}")
     print(f"Dimensions: {dimensions}")
     print(f"{'='*60}\n")
 
@@ -585,6 +594,16 @@ def watch_detection_changes(kb_client):
                 # print("I am printing the result of bringing series result:", result)
                 # training_result = next(result, None)
 
+                doc = {
+                    'algorithm': 'ZScore',
+                    # optional — store which metric the anomaly belongs to
+                    'metric': training_result.get('field'),
+                    'text': 'Anomaly detected',
+                    'timestamp': anomalies[0].get("timestamp"),
+                    'value': anomalies[0].get("value")
+                }
+                elastic_client.index(index="anomaly", document=doc)
+
                 """
                 anomalies_dict: Dict[str, List] = {}
                 for key, value in observed_values.items():
@@ -626,7 +645,6 @@ def main():
 
     # aquí llamariamos a nuestra lógica para checkear la metadata para corroborar si ya hemos hechos
     # esta operativa antes
-    # TODO: add a watch on the connection to the KBConfig one
 
     # Start watcher in its own thread
     training_watcher = threading.Thread(
