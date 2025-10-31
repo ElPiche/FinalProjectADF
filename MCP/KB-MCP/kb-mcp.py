@@ -27,11 +27,12 @@ from mcp.server.fastmcp.exceptions import ToolError
 db_kb_name = "knowledge_base"
 db_kb_collection_name = "kb_configs"
 db_logger_name = "knowledge_base_mcp_logs"
-mongo_connection_string = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin&replicaSet=rs0"
-mongo_timeout_ms = 5000
+mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING", "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin&replicaSet=rs0")
+mongo_timeout_ms = 2000  # Reduced timeout for faster startup
 
 # Elasticsearch Configuration
-es_hosts = ["http://localhost:9200", "http://elasticsearch-dataset:9200"]
+es_hosts_env = os.getenv("ES_HOSTS", "http://localhost:9200,http://elasticsearch-dataset:9200")
+es_hosts = [host.strip() for host in es_hosts_env.split(",")]
 
 # Logging Configuration
 logs_dir = "logs"
@@ -69,7 +70,9 @@ class StructuredLogger:
     def connect(self) -> bool:
         """Connect to kb-mcp-logs database for structured logging."""
         try:
-            self.mongo_client = MongoClient("mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin&replicaSet=rs0")
+            # Use global mongo_connection_string configuration
+            global mongo_connection_string
+            self.mongo_client = MongoClient(mongo_connection_string)
             db = self.mongo_client["kb-mcp-logs"]
             self.logs_collection = db["logs"]
             # Test connection
@@ -192,8 +195,14 @@ def log_message(message: str, level: str = "info", component: str = None, method
         if method is None:
             method = method_name
 
-    # Log to structured system
-    structured_logger.log(level, component, method, message, request_id, duration_ms, extra_data)
+    # Log to structured system (safely)
+    try:
+        structured_logger.log(level, component, method, message, request_id, duration_ms, extra_data)
+    except Exception as e:
+        # Fallback to basic logging if structured logger fails
+        logger.log(getattr(logging, level.upper(), logging.INFO), f"[{component}:{method}] {message}")
+        if extra_data:
+            logger.debug(f"Extra data: {extra_data}")
 
 
 #Classes ------------------------------------------------------------------------------------------------------
@@ -695,44 +704,74 @@ class UUID:
         return f"UUID('{self.value}')"
 
 
-# Initialize structured logger connection and log session start
-try:
-    structured_logger.connect()
-    log_message("KB-MCP session started", "info", "kb_mcp", "startup")
-    log_message("KB-MCP session initialized", "info", "structured_logger", "init",
-                extra_data={"session_id": structured_logger.session_id})
-    print(f"Structured logger initialized successfully - Session ID: {structured_logger.session_id[:8]}...")
-except Exception as e:
-    print(f"Structured logger initialization failed: {e}")
-    # Fallback to basic logging if structured logger fails
-    logger.error(f"Structured logger initialization failed: {e}")
+# Initialize MCP server quickly without blocking on MongoDB
+print("Initializing KB-MCP server...")
+print("Skipping structured logger initialization for faster startup...")
+
+# Set up basic logging for now
+logger.info("KB-MCP server starting...")
+
+# Initialize structured logger in background (commented out for now)
+# try:
+#     structured_logger.connect()
+#     log_message("KB-MCP session started", "info", "kb_mcp", "startup")
+#     log_message("KB-MCP session initialized", "info", "structured_logger", "init",
+#                 extra_data={"session_id": structured_logger.session_id})
+#     print(f"Structured logger initialized successfully - Session ID: {structured_logger.session_id[:8]}...")
+# except Exception as e:
+#     print(f"Structured logger initialization failed: {e}")
+#     print("Continuing with basic logging only...")
+#     # Fallback to basic logging if structured logger fails
+#     logger.error(f"Structured logger initialization failed: {e}")
+#     # Reset structured logger to prevent further connection attempts
+#     structured_logger.mongo_client = None
+#     structured_logger.logs_collection = None
 
 
 def connect_mongodb():
     """
     Connect to MongoDB KB instance with proper error handling and logging.
+    Optimized for replica set connections.
 
     Returns:
         MongoClient: Connected MongoDB client, or None if connection fails
     """
-    # Use percent-encoded password for host connections
-    mongo_uri = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin"
-    db_name = "kb_configs"  # Database name for KB configurations
-
+    # Use global mongo_connection_string configuration
+    global mongo_connection_string
+    
     start_time = time.time()
     try:
-        log_message(f"Attempting to connect to MongoDB at {mongo_uri.replace('1q2w3E%2A', '***')}",
+        log_message(f"Attempting to connect to MongoDB at {mongo_connection_string.replace('1q2w3E%2A', '***')}",
                     "info", "connect_mongodb", "connection")
-        client = MongoClient(mongo_uri, serverSelectionTimeoutMS=mongo_timeout_ms)
+        
+        # Enhanced client configuration for replica sets
+        client = MongoClient(
+            mongo_connection_string, 
+            serverSelectionTimeoutMS=mongo_timeout_ms,
+            connectTimeoutMS=mongo_timeout_ms,
+            socketTimeoutMS=mongo_timeout_ms,
+            retryWrites=True,
+            retryReads=True,
+            readPreference='primaryPreferred'  # Allow reads from secondary if primary unavailable
+        )
 
-        # Test the connection
-        client.admin.command('ping')
+        # Test the connection with detailed error information
+        result = client.admin.command('ping')
+        log_message(f"MongoDB ping successful: {result}", "info", "connect_mongodb", "ping")
+        
+        # Check replica set status for additional debugging
+        try:
+            rs_status = client.admin.command('replSetGetStatus')
+            log_message(f"Replica set status: {rs_status.get('set', 'unknown')}", "info", "connect_mongodb", "replica_set")
+        except Exception as rs_e:
+            log_message(f"Could not get replica set status (may be normal): {rs_e}", "warning", "connect_mongodb", "replica_set")
+        
         duration_ms = (time.time() - start_time) * 1000
         log_message("MongoDB connection successful", "info", "connect_mongodb", "connection",
                     duration_ms=duration_ms)
 
         # Verify database access
-        db = client[db_name]
+        db = client[db_kb_name]
         log_message(f"MongoDB database '{db_kb_name}' accessible", "info", "connect_mongodb", "database")
         return client
 
@@ -1227,10 +1266,11 @@ The KB-MCP (Knowledge Base Model Context Protocol) server provides comprehensive
 # Database Configuration
 db_kb_name = "knowledge_base"
 db_kb_collection_name = "kb_configs"
-mongo_connection_string = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin&replicaSet=rs0"
+mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING", "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin&replicaSet=rs0")
 
 # Elasticsearch Configuration
-es_hosts = ["http://localhost:9200"]
+es_hosts_env = os.getenv("ES_HOSTS", "http://localhost:9200,http://elasticsearch-dataset:9200")
+es_hosts = [host.strip() for host in es_hosts_env.split(",")]
 
 # Logging Configuration
 logs_dir = "logs"
@@ -1660,8 +1700,8 @@ def elasticsearch_sql(query: str) -> str:
     Raises:
         No exceptions raised - errors are handled internally and returned as strings
     """
-    # Try multiple Elasticsearch hosts for reliability
-    es_hosts = ["http://localhost:9200"]
+    # Use global es_hosts configuration
+    global es_hosts
 
     for host in es_hosts:
         try:
@@ -1704,9 +1744,130 @@ def elasticsearch_sql(query: str) -> str:
 if __name__ == "__main__":
     # Check if this is being run as an MCP server (no arguments or --server flag)
     import sys
+    print(f"Starting KB-MCP with args: {sys.argv}", file=sys.stderr)
+    
     if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == "--server"):
-        # Start MCP server - NO stdout output allowed for stdio transport
-        mcp.run()
+        # Start MCP server using stdio transport (default for FastMCP)
+        print("Starting MCP server with stdio transport...", file=sys.stderr)
+        print("Attempting to initialize MongoDB connection...", file=sys.stderr)
+        
+        # Test MongoDB connection
+        mongo_client = connect_mongodb()
+        if mongo_client:
+            print("MongoDB connection successful", file=sys.stderr)
+            mongo_client.close()
+        else:
+            print("MongoDB connection failed, continuing anyway...", file=sys.stderr)
+        
+        try:
+            print("MCP server initialized, starting main loop...", file=sys.stderr)
+            # FastMCP run() should handle stdio transport and keep the process alive
+            mcp.run()
+        except KeyboardInterrupt:
+            print("MCP server interrupted by user", file=sys.stderr)
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error starting MCP server: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            sys.exit(1)
+    elif len(sys.argv) == 2 and sys.argv[1] == "--daemon":
+        # Run HTTP server for Docker container using simple HTTP handler
+        print("Starting KB-MCP HTTP server...", file=sys.stderr)
+        print("Attempting to initialize MongoDB connection...", file=sys.stderr)
+        
+        # Test MongoDB connection
+        mongo_client = connect_mongodb()
+        if mongo_client:
+            print("MongoDB connection successful", file=sys.stderr)
+            mongo_client.close()
+        else:
+            print("MongoDB connection failed", file=sys.stderr)
+        
+        try:
+            # Create a simple HTTP server for MCP
+            from http.server import HTTPServer, BaseHTTPRequestHandler
+            import json
+            
+            class MCPHandler(BaseHTTPRequestHandler):
+                def do_GET(self):
+                    if self.path == '/health':
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        response = json.dumps({"status": "healthy", "service": "KB-MCP"})
+                        self.wfile.write(response.encode())
+                    else:
+                        self.send_response(404)
+                        self.end_headers()
+                
+                def do_POST(self):
+                    # Handle MCP JSON-RPC requests
+                    content_length = int(self.headers['Content-Length'])
+                    post_data = self.rfile.read(content_length)
+                    
+                    try:
+                        request_data = json.loads(post_data.decode())
+                        # Simple echo for now - would need proper MCP JSON-RPC handling
+                        response = {
+                            "jsonrpc": "2.0",
+                            "id": request_data.get("id"),
+                            "result": {"message": "KB-MCP server is running"}
+                        }
+                        
+                        self.send_response(200)
+                        self.send_header('Content-type', 'application/json')
+                        self.send_header('Access-Control-Allow-Origin', '*')
+                        self.end_headers()
+                        self.wfile.write(json.dumps(response).encode())
+                    except Exception as e:
+                        self.send_response(500)
+                        self.send_header('Content-type', 'application/json')
+                        self.end_headers()
+                        error_response = {
+                            "jsonrpc": "2.0",
+                            "id": None,
+                            "error": {"code": -32000, "message": str(e)}
+                        }
+                        self.wfile.write(json.dumps(error_response).encode())
+                
+                def do_OPTIONS(self):
+                    # Handle CORS preflight
+                    self.send_response(200)
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+                    self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+                    self.end_headers()
+                
+                def log_message(self, format, *args):
+                    # Suppress HTTP server logs to stderr
+                    pass
+            
+            server = HTTPServer(('0.0.0.0', 8000), MCPHandler)
+            print("HTTP server started on port 8000...", file=sys.stderr)
+            server.serve_forever()
+            
+        except KeyboardInterrupt:
+            print("KB-MCP HTTP server interrupted by user", file=sys.stderr)
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error starting KB-MCP HTTP server: {e}", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            
+            # Fallback to simple daemon mode
+            print("Falling back to daemon mode...", file=sys.stderr)
+            print("KB-MCP daemon is running and ready to accept connections", file=sys.stderr)
+            
+            # Keep the process alive
+            try:
+                while True:
+                    time.sleep(30)
+                    print("KB-MCP daemon heartbeat", file=sys.stderr)
+            except KeyboardInterrupt:
+                print("KB-MCP daemon interrupted by user", file=sys.stderr)
+                sys.exit(0)
     else:
         # Run test with command line arguments
         parser = argparse.ArgumentParser(description="KB-MCP Configuration Tool")

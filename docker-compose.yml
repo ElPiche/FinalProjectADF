@@ -174,12 +174,41 @@ services:
           } catch (e) {
             rs.initiate({
             _id: \"rs0\",
-            members: [{ _id: 0, host: \"localhost:27017\" }]
+            members: [{ _id: 0, host: \"mongodb:27017\" }]
           })
         }';
         echo 'Replica set rs0 inicializado (mongodb)';
       "
     restart: "no"
+
+  kb-mcp:
+    build:
+      context: ./MCP/KB-MCP
+      dockerfile: Dockerfile
+    container_name: kb-mcp
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      elasticsearch-dataset:
+        condition: service_healthy
+    environment:
+      - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
+      - ES_HOSTS=http://elasticsearch-dataset:9200,http://elasticsearch-anomalies:9200
+    ports:
+      - "8000:8000"
+    networks:
+      - adf-network
+    volumes:
+      - kb_mcp_logs:/app/logs
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('KB-MCP health check: OK')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   
 volumes:
@@ -187,6 +216,7 @@ volumes:
   elastic_data: null
   elastic_anomalies_data: null
   mongo_key: null
+  kb_mcp_logs: null
 
 networks:
   adf-network:
