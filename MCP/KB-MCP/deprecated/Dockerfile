@@ -12,8 +12,8 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy all Python modules
-COPY *.py .
+# Copy the main script
+COPY kb-mcp.py .
 
 # Create logs directory
 RUN mkdir -p logs
