@@ -1,0 +1,4 @@
+elasticsearch==8.18.1
+pandas==2.3.3
+pymongo==4.15.3
+ZScore==0.1

@@ -2,13 +2,15 @@
 FROM python:3.11-slim
 
 # Crear carpeta de trabajo
-WORKDIR /app
+WORKDIR /MotorDA/
+
+COPY requirements.txt .
 
 # Copiar script
-COPY MotorDA/da-algorithm-zScore.py .
+COPY MotorDA ./MotorDA
 
 # Instalar dependencias necesarias
-RUN pip install --no-cache-dir pandas numpy
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Comando de ejecución por defecto
-CMD ["python", "da-algorithm-zScore.py"]
+CMD ["python", "-m" ,"Dispatcher.DADispatcher"]

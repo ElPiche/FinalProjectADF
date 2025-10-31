@@ -10,7 +10,7 @@ from elasticsearch import Elasticsearch, helpers
 from dataclasses import dataclass, field
 
 
-from ..ZScore.standalone_da_algorithm_z_score import (
+from ZScore.standalone_da_algorithm_z_score import (
     fetch_logs_from_mongo,
     train_baseline,
     detectar_anomalias_df,
