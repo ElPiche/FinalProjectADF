@@ -18,7 +18,7 @@ public class FilterService {
             for(String observedValue : metadata.getObservedValues()){
                 if(row.containsKey(observedValue)){
                     Long val = row.get(observedValue) != null ? (Long) row.get(observedValue) : 0;
-                    Date ts = (Date) row.get("es_timestamp");
+                    Date ts = (Date) row.getOrDefault("es_timestamp", row.get("timestamp"));
                     seriesElements.add(new SeriesElement(null,
                             val,
                             ts,
