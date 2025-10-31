@@ -193,7 +193,7 @@ services:
         condition: service_healthy
     environment:
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
-      - ES_HOSTS=http://elasticsearch-dataset:9200,http://elasticsearch-anomalies:9200
+      - ES_HOSTS=http://elasticsearch-dataset:9200
     ports:
       - "8000:8000"
     networks:

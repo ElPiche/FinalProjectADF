@@ -31,8 +31,8 @@ mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING", "mongodb://admin:
 mongo_timeout_ms = 2000  # Reduced timeout for faster startup
 
 # Elasticsearch Configuration
-es_hosts_env = os.getenv("ES_HOSTS", "http://localhost:9200,http://elasticsearch-dataset:9200")
-es_hosts = [host.strip() for host in es_hosts_env.split(",")]
+# es_host_env = os.getenv("es_host", "http://elasticsearch-dataset:9200")
+es_host = os.getenv("ES_HOSTS", "http://elasticsearch-dataset:9200")
 
 # Logging Configuration
 logs_dir = "logs"
@@ -960,7 +960,7 @@ def create_da_config(
         raise ToolError(error_msg)
 
     try:
-        db = client["kb_configs"]
+        db = client[db_kb_name]
         collection = db[db_kb_collection_name]
 
         result = collection.insert_one(config_to_store)
@@ -1029,7 +1029,7 @@ def modify_kb_config(
         raise ToolError("Failed to connect to MongoDB")
 
     try:
-        db = client["kb_configs"]
+        db = client[db_kb_name]
         collection = db[db_kb_collection_name]
 
         # Find the configuration - use MongoDB _id directly
@@ -1158,7 +1158,7 @@ def list_kb_configurations() -> str:
         raise ToolError("Failed to connect to MongoDB")
 
     try:
-        db = client["kb_configs"]
+        db = client[db_kb_name]
         collection = db[db_kb_collection_name]
 
         # Retrieve all configurations - include all fields including _id
@@ -1269,8 +1269,7 @@ db_kb_collection_name = "kb_configs"
 mongo_connection_string = os.getenv("MONGO_CONNECTION_STRING", "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin&replicaSet=rs0")
 
 # Elasticsearch Configuration
-es_hosts_env = os.getenv("ES_HOSTS", "http://localhost:9200,http://elasticsearch-dataset:9200")
-es_hosts = [host.strip() for host in es_hosts_env.split(",")]
+es_host = os.getenv("ES_HOSTS", "http://localhost:9200,http://elasticsearch-dataset:9200")
 
 # Logging Configuration
 logs_dir = "logs"
@@ -1700,44 +1699,42 @@ def elasticsearch_sql(query: str) -> str:
     Raises:
         No exceptions raised - errors are handled internally and returned as strings
     """
-    # Use global es_hosts configuration
-    global es_hosts
+    # Use global es_host configuration
+    global es_host
 
-    for host in es_hosts:
-        try:
-            log_message(f"Attempting SQL query execution with Elasticsearch at {host}")
-            es = Elasticsearch(host, timeout=sql_validation_timeout_seconds)
+    try:
+        log_message(f"Attempting SQL query execution with Elasticsearch at {es_host}")
+        es = Elasticsearch(es_host, timeout=sql_validation_timeout_seconds)
 
-            # Execute the SQL query using Elasticsearch's SQL API
-            response = es.sql.query(query=query)
+        # Execute the SQL query using Elasticsearch's SQL API
+        response = es.sql.query(query=query)
 
-            # Format the results for easy consumption
-            results = {
-                "columns": response.get("columns", []),
-                "rows": response.get("rows", []),
-                "cursor": response.get("cursor"),
-                "total_rows": len(response.get("rows", []))
-            }
+        # Format the results for easy consumption
+        results = {
+            "columns": response.get("columns", []),
+            "rows": response.get("rows", []),
+            "cursor": response.get("cursor"),
+            "total_rows": len(response.get("rows", []))
+        }
 
-            duration_ms = (time.time() - start_time) * 1000
-            log_message(f"SQL query executed successfully with {host}, returned {results['total_rows']} rows", "info",
-                        "elasticsearch_sql", "execution", request_id=request_id,
-                        duration_ms=duration_ms, extra_data={"host": host, "row_count": results['total_rows']})
-            return json.dumps(results, indent=2)
+        duration_ms = (time.time() - start_time) * 1000
+        log_message(f"SQL query executed successfully with {es_host}, returned {results['total_rows']} rows", "info",
+                    "elasticsearch_sql", "execution", request_id=request_id,
+                    duration_ms=duration_ms, extra_data={"host": es_host, "row_count": results['total_rows']})
+        return json.dumps(results, indent=2)
 
-        except Exception as e:
-            log_message(f"SQL query failed with {host}: {str(e)}", "warning",
-                        "elasticsearch_sql", "retry", request_id=request_id,
-                        extra_data={"host": host, "error_type": type(e).__name__})
-            # Store the last error for reporting
-            last_error = e
-            continue
+    except Exception as e:
+        log_message(f"SQL query failed with {es_host}: {str(e)}", "warning",
+                    "elasticsearch_sql", "retry", request_id=request_id,
+                    extra_data={"host": es_host, "error_type": type(e).__name__})
+        # Store the last error for reporting
+        last_error = e
 
     # If all hosts failed
     duration_ms = (time.time() - start_time) * 1000
     error_msg = f"ERROR: Failed to execute SQL query on all Elasticsearch hosts - {str(last_error) if 'last_error' in locals() else 'No hosts available'}"
     log_message(error_msg, "error", "elasticsearch_sql", "failure", request_id=request_id,
-                duration_ms=duration_ms, extra_data={"hosts_tried": len(es_hosts)})
+                duration_ms=duration_ms, extra_data={"hosts_tried": len(es_host)})
     raise ToolError(error_msg)
 
 
@@ -1745,6 +1742,7 @@ if __name__ == "__main__":
     # Check if this is being run as an MCP server (no arguments or --server flag)
     import sys
     print(f"Starting KB-MCP with args: {sys.argv}", file=sys.stderr)
+    print("Elasticsearch host: ", es_host)
     
     if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == "--server"):
         # Start MCP server using stdio transport (default for FastMCP)
