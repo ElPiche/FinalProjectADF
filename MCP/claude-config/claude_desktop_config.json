@@ -16,9 +16,14 @@
       }
     },
     "kb-mcp": {
-      "command": "python",
+      "command": "docker",
       "args": [
-        "../KB-MCP/kb-mcp.py"
+        "exec",
+        "-i",
+        "kb-mcp",
+        "python",
+        "kb-mcp.py",
+        "--server"
       ],
       "env": {},
       "alwaysAllow": [

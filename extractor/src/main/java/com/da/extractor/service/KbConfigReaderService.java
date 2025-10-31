@@ -75,7 +75,7 @@ public class KbConfigReaderService {
 
                         OperationType operationType = change.getOperationType();
                         if (operationType == OperationType.INSERT || operationType == OperationType.UPDATE) {
-//                            batchModeService.executeConfiguration(kb);
+                            batchModeService.executeConfiguration(kb);
                             streamingModeService.executeConfiguration(kb);
                         }
 
