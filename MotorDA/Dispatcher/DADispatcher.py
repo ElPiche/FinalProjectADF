@@ -542,16 +542,49 @@ def watch_detection_changes(kb_client):
 
                 serie_to_detect = change.get("fullDocument")
 
-                query = {
-                    'kb_id': serie_to_detect.get("metadata.kbId"),
-                    'field': serie_to_detect.get("metadata.dim")
-                }
+                print(f"I am printing serie_to_detect: {serie_to_detect}")
 
-                result = kb_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].find_one(
-                    query)
+                print(
+                    f"I am printing get metadata kbId: {serie_to_detect.get('metadata.kbId')}")
 
-                print("I am printing the result of training:", result)
+                pipeline = [{'$match':
+                            {'kb_id': serie_to_detect["metadata"]["kbId"],
+                             'field': serie_to_detect["metadata"]["dim"]}
+                             }]
+
+                result = kb_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].aggregate(
+                    pipeline)
+
+                training_result = next(result, None)
+                print(
+                    f"I am priting the result of training:  {training_result}")
+                print(f"I am priting the result:  {result}")
+
+                # 2) flatten nested fields (metadata -> metadata.kbId etc.)
+                df = pd.json_normalize(serie_to_detect)
+
+                # optional: rename for convenience
+                df = df.rename(columns={
+                    "metadata.kbId": "kbId",
+                    "metadata.dim": "dim",
+                    "metadata.mode": "mode"
+                })
+
+                # 3) make _id string (pandas doesn't like ObjectId)
+                if "_id" in df.columns:
+                    df["_id"] = df["_id"].astype(str)
+
+                # 4) ensure timestamp is datetime dtype
+                if "timestamp" in df.columns:
+                    df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+                anomalies = detectar_anomalias_df(
+                    df, training_result, 60)
+
+                print(f"I AM PRINTING ANOMALIES: {anomalies}")
+                # print("I am printing the result of bringing series result:", result)
                 # training_result = next(result, None)
+
                 """
                 anomalies_dict: Dict[str, List] = {}
                 for key, value in observed_values.items():
@@ -606,10 +639,10 @@ def main():
     )
 
     training_watcher.start()
-    # detection_watcher.start()
+    detection_watcher.start()
 
     try:
-        while training_watcher.is_alive():
+        while training_watcher.is_alive() or detection_watcher.is_alive():
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nStopping watcher...")
