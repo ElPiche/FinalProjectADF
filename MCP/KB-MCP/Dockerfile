@@ -12,8 +12,9 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy all Python modules
+# Copy all Python modules and packages
 COPY *.py .
+COPY mcp_tools_pkg/ ./mcp_tools_pkg/
 
 # Create logs directory
 RUN mkdir -p logs
