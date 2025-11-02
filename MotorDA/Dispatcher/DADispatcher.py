@@ -37,14 +37,14 @@ class ZScore:
 
 # conexión a MongoDB KB
 MONGO_KB_URL = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin"
-KB_DB_NAME = "logsdb"
-KB_COLLECTION_NAME = "trainingconfig"
+KB_DB_NAME = "anomaly_detection"
+KB_COLLECTION_NAME = "training_config"
 
 # conexión a MongoDB MotorDA pendiente
-DB_NAME_MOTOR_DA = "logsdb"
+DB_NAME_MOTOR_DA = "anomaly_detection"
 DA_COLLECTION_NAME = "series"
 
-DA_RESULT_COLLECTION_NAME = "seriesResult"
+DA_RESULT_COLLECTION_NAME = "series_result"
 
 # conexión a elasticSearch
 ES_HOST = "http://elasticsearch-anomalies:9201"
