@@ -34,7 +34,7 @@ public class StreamingModeService {
                 .getScheduling()
                 .getDetectionConfig();
 
-        if(kbStreamingConfig != null){
+        if(kbStreamingConfig != null && kbStreamingConfig.isActive()) {
 
             var queryElastic = kbStreamingConfig.getQueryElastic();
             var window = kbStreamingConfig.getWindow();

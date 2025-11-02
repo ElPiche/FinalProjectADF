@@ -28,7 +28,7 @@ public class BatchModeService {
                 .getScheduling()
                 .getTrainingConfig();
 
-        if(kbTrainingConfig != null){
+        if(kbTrainingConfig != null && kbTrainingConfig.getIsActive()){
 
             List<String> observedValues = config.getObservedValues();
 
