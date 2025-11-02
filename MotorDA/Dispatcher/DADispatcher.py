@@ -248,6 +248,7 @@ def run_zscore_batch_training(config: Config, observed_values):
     # {'train_window': 60, 'dimensions': ['5xx_status_code', '4xx_status_code', '2xx_status_code'], 'from': '2025-10-01T00:00:00.000Z', 'to': '2025-11-10T00:00:00.000Z'}
     #     # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
     da_client = CreateConnectionToDA()
+
     print(f"I am printing kb_id: " + config.kb_id)
     # iterating both key and values
     for key, value in observed_values.items():
@@ -259,7 +260,16 @@ def run_zscore_batch_training(config: Config, observed_values):
             results = train_baseline(config.kb_id, key, value, "value")
             da_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].insert_one(
                 results)
+# is_trained
+    kb_id = config.kb_id
 
+    query_filter = {'kb_id': kb_id}
+    update_operation = {'$set':
+                        {'is_trained': 'true'}
+                        }
+
+    da_client[KB_DB_NAME][KB_COLLECTION_NAME].update_one(
+        query_filter, update_operation)
     return results
 
 
