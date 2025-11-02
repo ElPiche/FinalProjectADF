@@ -145,13 +145,19 @@ class Config:
             algo.execute(self)
 
 
+def parse_iso(date_str: str) -> datetime:
+    """Parses ISO 8601 timestamps with or without 'Z'."""
+    if date_str.endswith("Z"):
+        date_str = date_str.replace("Z", "+00:00")
+    return datetime.fromisoformat(date_str)
+
+
 def parse_config(data: dict) -> Config:
     return Config(
         _id=data["_id"],
         kb_id=data["kb_id"],
         kb_description=data["kb_description"],
-        created_at=datetime.fromisoformat(
-            data["created_at"].replace("Z", "+00:00")),
+        created_at=parse_iso(data["created_at"]),
         mode=data["mode"],
 
         algorithms=[
@@ -164,10 +170,8 @@ def parse_config(data: dict) -> Config:
                                           for am in ov["algorithm_metadata"]}
                         for ov in a["parameters"]["observed_values"]
                     },
-                    from_=datetime.fromisoformat(
-                        a["parameters"]["from"].replace("Z", "+00:00")),
-                    to=datetime.fromisoformat(
-                        a["parameters"]["to"].replace("Z", "+00:00")),
+                    from_=parse_iso(a["parameters"]["from"]),
+                    to=parse_iso(a["parameters"]["to"]),
                 ),
             )
             for a in data["algorithms"]
@@ -191,7 +195,7 @@ def CreateConnectionToKB() -> MongoClient:
     kb_database = mongo_kb_client[KB_DB_NAME]
     kb_collection = kb_database[KB_COLLECTION_NAME]
     mongo_kb_client.admin.command("ping")
-    print("Nos conectamos a la KB")
+    print("Nos conectamos al Mongo de entrenamiento")
     return mongo_kb_client
 
 
