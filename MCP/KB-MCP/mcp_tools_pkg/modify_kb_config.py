@@ -8,7 +8,7 @@ from db import connect_mongodb
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
-    return _utils_log_message(level, component, method, message, **kwargs)
+    return _utils_log_message(message, level, component, method, **kwargs)
 
 
 def modify_kb_config(
@@ -52,19 +52,20 @@ def modify_kb_config(
             updates["description"] = description
 
         if training_query is not None:
+            # Use lightweight validation helper to extract output fields instead of requiring SQL class
             try:
-                from validation import SQL
-                sql_obj = SQL(training_query)
+                from validation import extract_sql_output_fields
+                _ = extract_sql_output_fields(training_query)
                 updates["scheduling.training_config.training_query"] = training_query
-            except ValueError as e:
+            except Exception as e:
                 raise ToolError(f"Invalid training query: {str(e)}")
 
         if detection_query is not None:
             try:
-                from validation import SQL
-                sql_obj = SQL(detection_query)
+                from validation import extract_sql_output_fields
+                _ = extract_sql_output_fields(detection_query)
                 updates["scheduling.detection_config.detection_query"] = detection_query
-            except ValueError as e:
+            except Exception as e:
                 raise ToolError(f"Invalid detection query: {str(e)}")
 
         if training_from is not None:
@@ -85,11 +86,15 @@ def modify_kb_config(
             updates["scheduling.detection_config.from"] = detection_start
 
         if algorithms is not None:
-            algorithm_errors = validate_algorithms(algorithms)
+            # Accept dict/list inputs from MCP client; coerce into storage format used by validate_algorithms
+            algs_to_validate = algorithms
+            if isinstance(algorithms, dict):
+                algs_to_validate = [algorithms]
+            algorithm_errors = validate_algorithms(algs_to_validate)
             if algorithm_errors:
                 error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
                 raise ToolError(error_msg)
-            updates["algorithms"] = algorithms
+            updates["algorithms"] = algs_to_validate
 
         if not updates:
             log_message("No valid updates provided", "warning", "modify_kb_config", "validation",

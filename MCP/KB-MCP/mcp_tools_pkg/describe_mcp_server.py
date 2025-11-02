@@ -4,7 +4,7 @@ from utils import log_message as _utils_log_message
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
-    return _utils_log_message(level, component, method, message, **kwargs)
+    return _utils_log_message(message, level, component, method, **kwargs)
 
 
 def describe_mcp_server() -> str:

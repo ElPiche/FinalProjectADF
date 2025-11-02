@@ -13,7 +13,7 @@ from utils import log_message as _utils_log_message
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
-    return _utils_log_message(level, component, method, message, **kwargs)
+    return _utils_log_message(message, level, component, method, **kwargs)
 
 
 def create_da_config(
@@ -48,14 +48,61 @@ def create_da_config(
         raise ToolError(f"Invalid detection frequency CRON: {str(e)}")
 
     internal_algorithms = []
-    for alg_config in algorithms:
-        if isinstance(alg_config, ZScoreConfig):
-            internal_algorithms.append({
-                "alg_name": "zscore",
-                "alg_parameters": [{"dimension": dim} for dim in alg_config.dimensions]
-            })
-        else:
-            raise ToolError(f"Unsupported algorithm type: {type(alg_config)}")
+    # Be permissive with the MCP JSON input: accept a list of dicts, a single dict, or Pydantic model
+    alg_items = algorithms or []
+    if isinstance(alg_items, dict):
+        alg_items = [alg_items]
+
+    for alg_input in (alg_items or []):
+        try:
+            alg_config = None
+            # If MCP sent a dict, try to coerce into the known model(s)
+            if isinstance(alg_input, dict):
+                # Accept either legacy keys or pydantic-shaped dicts
+                try:
+                    alg_config = ZScoreConfig(**alg_input)
+                except Exception:
+                    # Try alternative key shapes: {"className": "ZScore", "parameters": {...}}
+                    cls_name = alg_input.get("className") or alg_input.get("name")
+                    params = alg_input.get("parameters") or alg_input.get("params") or alg_input.get("parameters", {})
+                    if cls_name and str(cls_name).lower().startswith("zscore"):
+                        # Build a minimal ZScoreConfig-like object from provided params
+                        dims = []
+                        if isinstance(params, dict) and params.get("observedValue"):
+                            dims = [params.get("observedValue")]
+                        elif isinstance(params, dict) and params.get("dimensions"):
+                            dims = params.get("dimensions")
+                        elif isinstance(params, list):
+                            dims = params
+                        alg_config = ZScoreConfig(dimensions=dims)
+            elif isinstance(alg_input, ZScoreConfig):
+                alg_config = alg_input
+            else:
+                # Last resort: try to interpret strings as algorithm names
+                if isinstance(alg_input, str) and alg_input.lower().startswith("zscore"):
+                    alg_config = ZScoreConfig(dimensions=[])
+
+            if alg_config is None:
+                raise ToolError(f"Unsupported algorithm type: {type(alg_input)}")
+
+            # Only zscore is supported at the moment
+            if isinstance(alg_config, ZScoreConfig):
+                internal_algorithms.append({
+                    "alg_name": "zscore",
+                    "alg_parameters": [{"dimension": dim} for dim in alg_config.dimensions]
+                })
+            else:
+                raise ToolError(f"Unsupported algorithm type after parsing: {type(alg_config)}")
+
+        except ToolError:
+            # Re-raise our ToolError without additional wrapping
+            raise
+        except Exception as e:
+            # Log parsing error and raise a ToolError to surface it to the caller
+            log_message(f"Algorithm parsing/validation failed: {str(e)}", "error",
+                        "create_da_config", "validation", request_id=request_id,
+                        extra_data={"alg_input": alg_input})
+            raise ToolError(f"Algorithm configuration invalid: {str(e)}")
 
     algorithm_errors = validate_algorithms(internal_algorithms)
     if algorithm_errors:

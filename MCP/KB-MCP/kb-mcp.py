@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # Import from our modules
 from mcp_tools import mcp, create_da_config, modify_kb_config, list_kb_configurations, describe_mcp_server, list_available_algorithms, elasticsearch_sql
-from utils import structured_logger, log_message
+from utils import structured_logger, log_message, initialize_logging, shutdown_logging
 from db import connect_mongodb
 
 # Re-export for backward compatibility
@@ -35,13 +35,34 @@ if __name__ == "__main__":
         print("Starting MCP server with stdio transport...", file=sys.stderr)
         print("Attempting to initialize MongoDB connection...", file=sys.stderr)
 
-        # Test MongoDB connection
+        # Test MongoDB connection and get connection string
         mongo_client = connect_mongodb()
+        mongo_connection_string = None
         if mongo_client:
             print("MongoDB connection successful", file=sys.stderr)
+            # Get connection string from db module
+            try:
+                from db import mongo_connection_string as mongo_conn_str
+                mongo_connection_string = mongo_conn_str
+            except ImportError:
+                # Fallback to default connection string
+                mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
             mongo_client.close()
         else:
             print("MongoDB connection failed, continuing anyway...", file=sys.stderr)
+            # Still try to initialize logging with MongoDB attempt
+            mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
+
+        # Initialize dual logging system (file + MongoDB)
+        print("Initializing dual logging system...", file=sys.stderr)
+        print(f"[INIT_LOGGING_DEBUG] initialize_logging will receive: {repr(mongo_connection_string)}", file=sys.stderr)
+        session_id = initialize_logging(mongo_connection_string)
+        print(f"Logging initialized with session ID: {session_id[:8]}", file=sys.stderr)
+        
+        # Log session startup
+        log_message("KB-MCP session started", "info", "kb_mcp", "startup")
+        log_message("KB-MCP session initialized", "info", "structured_logger", "init", 
+                   extra_data={"session_id": session_id})
 
         try:
             print("MCP server initialized, starting main loop...", file=sys.stderr)
@@ -49,24 +70,49 @@ if __name__ == "__main__":
             mcp.run()
         except KeyboardInterrupt:
             print("MCP server interrupted by user", file=sys.stderr)
+            log_message("KB-MCP session ended by user", "info", "kb_mcp", "shutdown")
+            shutdown_logging()
             sys.exit(0)
         except Exception as e:
             print(f"Error starting MCP server: {e}", file=sys.stderr)
+            log_message(f"KB-MCP server error: {str(e)}", "error", "kb_mcp", "startup_error", 
+                       extra_data={"error_type": type(e).__name__})
             import traceback
             traceback.print_exc(file=sys.stderr)
+            shutdown_logging()
             sys.exit(1)
     elif len(sys.argv) == 2 and sys.argv[1] == "--daemon":
         # Run HTTP server for Docker container using simple HTTP handler
         print("Starting KB-MCP HTTP server...", file=sys.stderr)
         print("Attempting to initialize MongoDB connection...", file=sys.stderr)
 
-        # Test MongoDB connection
+        # Test MongoDB connection and get connection string
         mongo_client = connect_mongodb()
+        mongo_connection_string = None
         if mongo_client:
             print("MongoDB connection successful", file=sys.stderr)
+            # Get connection string from db module
+            try:
+                from db import mongo_connection_string as mongo_conn_str
+                mongo_connection_string = mongo_conn_str
+            except ImportError:
+                # Fallback to default connection string
+                mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
             mongo_client.close()
         else:
             print("MongoDB connection failed", file=sys.stderr)
+            # Still try to initialize logging with MongoDB attempt
+            mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
+
+        # Initialize dual logging system (file + MongoDB)
+        print("Initializing dual logging system...", file=sys.stderr)
+        session_id = initialize_logging(mongo_connection_string)
+        print(f"Logging initialized with session ID: {session_id[:8]}", file=sys.stderr)
+        
+        # Log session startup
+        log_message("KB-MCP HTTP server started", "info", "kb_mcp", "startup")
+        log_message("KB-MCP session initialized", "info", "structured_logger", "init", 
+                   extra_data={"session_id": session_id})
 
         try:
             # Create a simple HTTP server for MCP

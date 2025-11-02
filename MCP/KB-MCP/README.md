@@ -29,8 +29,8 @@
 
 ```bash
 # Unit tests
-docker exec kb-mcp python test_models.py
-docker exec kb-mcp python test_validation.py
+docker exec kb-mcp python -m tests.test_models
+docker exec kb-mcp python -m tests.test_validation
 
 # Smoke tests
 docker exec kb-mcp python smoke_test.py
