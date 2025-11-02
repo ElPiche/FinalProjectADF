@@ -1,8 +1,10 @@
 package com.da.extractor.service;
 
 import com.da.extractor.entity.SchedulerConfig;
+import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
+import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
 import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
@@ -25,6 +27,7 @@ public class SchedulerService {
 
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new HashMap<>();
     private final SchedulerConfigRepository schedulerConfigRepository;
+    private final TrainingConfigRepository trainingConfigRepository;
 
     private final DataPipelineFactory dataPipelineFactory;
 
@@ -32,9 +35,11 @@ public class SchedulerService {
 
     public SchedulerService(TaskScheduler taskScheduler,
                             SchedulerConfigRepository schedulerConfigRepository,
+                            TrainingConfigRepository trainingConfigRepository,
                             DataPipelineFactory dataPipelineFactory) {
         this.taskScheduler = taskScheduler;
         this.schedulerConfigRepository = schedulerConfigRepository;
+        this.trainingConfigRepository = trainingConfigRepository;
         this.dataPipelineFactory = dataPipelineFactory;
     }
 
@@ -45,19 +50,23 @@ public class SchedulerService {
         CronTrigger cronTrigger = new CronTrigger(springCron);
         Runnable task = () -> {
             try {
-                Instant to  = Instant.now();
-                Instant from = to.minusSeconds(config.getWindow());
-                String elasticQuery = config.getQuery()
-                        .replace("$from", ISO.format(from))
-                        .replace("$to",   ISO.format(to));
+                TrainConfig trainConfig = trainingConfigRepository.findByKbId(config.getKbId());
 
-                var pipeline = dataPipelineFactory.createPipeline(pipeMetadata);
-                pipeline.process(elasticQuery);
+                if(trainConfig != null && trainConfig.isTrained()){
+                    Instant to  = Instant.now();
+                    Instant from = to.minusSeconds(config.getWindow());
+                    String elasticQuery = config.getQuery()
+                            .replace("$from", ISO.format(from))
+                            .replace("$to",   ISO.format(to));
 
-                config.setLastRun(Date.from(Instant.now()));
-                schedulerConfigRepository.save(config);
-                log.info("Scheduled task executed for KB ID: {} | from: {} | to: {}",
-                        config.getKbId(), ISO.format(from), ISO.format(to));
+                    var pipeline = dataPipelineFactory.createPipeline(pipeMetadata);
+                    pipeline.process(elasticQuery);
+
+                    config.setLastRun(Date.from(Instant.now()));
+                    schedulerConfigRepository.save(config);
+                    log.info("Scheduled task executed for KB ID: {} | from: {} | to: {}",
+                            config.getKbId(), ISO.format(from), ISO.format(to));
+                }
 
             } catch (Exception ex) {
                 log.error("Error en scheduleStreamingTask({}): {}", config.getKbId(), ex.getMessage(), ex);

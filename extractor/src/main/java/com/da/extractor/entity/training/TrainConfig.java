@@ -32,6 +32,9 @@ public class TrainConfig {
     @Field("created_at")
     private Date createdAt;
 
+    @Field("is_trained")
+    private boolean isTrained = false;
+
     private short mode;
 
     private List<AlgorithmConfig> algorithms;
@@ -40,6 +43,7 @@ public class TrainConfig {
         this.kbId = from.getId();
         this.kbDescription = from.getDescription();
         this.createdAt = Date.from(Instant.now());
+        this.isTrained = false;
         this.mode = (short) Mode.TRAINING.ordinal();
         this.algorithms = new ArrayList<>();
         
