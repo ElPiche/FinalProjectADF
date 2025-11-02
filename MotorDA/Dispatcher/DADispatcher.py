@@ -36,7 +36,7 @@ class ZScore:
 # En la versión actual también consultaría el mongoDB que contiene la data de documentación para leer la metadata y saber si esta entrenando o no jeje.
 
 # conexión a MongoDB KB
-MONGO_KB_URL = "mongodb://admin:1q2w3E%2A@localhost:27017/?authSource=admin"
+MONGO_KB_URL = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin"
 KB_DB_NAME = "logsdb"
 KB_COLLECTION_NAME = "trainingconfig"
 
@@ -47,9 +47,9 @@ DA_COLLECTION_NAME = "series"
 DA_RESULT_COLLECTION_NAME = "seriesResult"
 
 # conexión a elasticSearch
-ES_HOST = "http://localhost:9201"
+ES_HOST = "http://elasticsearch-anomalies:9201"
 ES_INDEX = "test_logs"
-
+mongo_timeout_ms = 10000
 
 elastic_client = Elasticsearch(ES_HOST)
 
@@ -177,7 +177,17 @@ def parse_config(data: dict) -> Config:
 
 def CreateConnectionToKB() -> MongoClient:
     # we establish the connection to the kb mongo db
-    mongo_kb_client = MongoClient(MONGO_KB_URL)
+    mongo_kb_client = client = MongoClient(
+        MONGO_KB_URL,
+        serverSelectionTimeoutMS=mongo_timeout_ms,
+        connectTimeoutMS=mongo_timeout_ms,
+        socketTimeoutMS=mongo_timeout_ms,
+        retryWrites=True,
+        retryReads=True,
+        # Allow reads from secondary if primary unavailable
+        readPreference='primaryPreferred'
+    )
+
     kb_database = mongo_kb_client[KB_DB_NAME]
     kb_collection = kb_database[KB_COLLECTION_NAME]
     mongo_kb_client.admin.command("ping")
@@ -187,7 +197,16 @@ def CreateConnectionToKB() -> MongoClient:
 
 def CreateConnectionToDA() -> MongoClient:
     # we establish the connection to the da mongo db
-    mongo_da_client = MongoClient(MONGO_KB_URL)
+    mongo_da_client = client = MongoClient(
+        MONGO_KB_URL,
+        serverSelectionTimeoutMS=mongo_timeout_ms,
+        connectTimeoutMS=mongo_timeout_ms,
+        socketTimeoutMS=mongo_timeout_ms,
+        retryWrites=True,
+        retryReads=True,
+        # Allow reads from secondary if primary unavailable
+        readPreference='primaryPreferred'
+    )
     da_database = mongo_da_client[DB_NAME_MOTOR_DA]
     da_collection = da_database[DA_COLLECTION_NAME]
     mongo_da_client.admin.command("ping")

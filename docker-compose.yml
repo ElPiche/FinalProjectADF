@@ -4,15 +4,15 @@ services:
     image: elasticsearch:8.19.4
     container_name: elasticsearch-dataset
     environment:
-    - discovery.type=single-node
-    - xpack.security.enabled=false
-    - ES_JAVA_OPTS=-Xms512m -Xmx1g
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx1g
     ports:
-    - 9200:9200
+      - 9200:9200
     networks:
-    - adf-network
+      - adf-network
     volumes:
-    - elastic_data:/usr/share/elasticsearch-dataset/data
+      - elastic_data:/usr/share/elasticsearch-dataset/data
     deploy:
       resources:
         limits:
@@ -21,10 +21,10 @@ services:
           memory: 512m
     healthcheck:
       test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:9200
+        - CMD
+        - curl
+        - -f
+        - http://localhost:9200
       interval: 10s
       timeout: 5s
       retries: 10
@@ -32,17 +32,17 @@ services:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.19.4
     container_name: elasticsearch-anomalies
     environment:
-    - discovery.type=single-node
-    - xpack.security.enabled=false
-    - ES_JAVA_OPTS=-Xms256m -Xmx256m
-    - cluster.name=anomalies-cluster
-    - node.name=anomalies-node
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+      - cluster.name=anomalies-cluster
+      - node.name=anomalies-node
     ports:
-    - 9201:9200
+      - 9201:9200
     networks:
-    - adf-network
+      - adf-network
     volumes:
-    - elastic_anomalies_data:/usr/share/elasticsearch/data
+      - elastic_anomalies_data:/usr/share/elasticsearch/data
     deploy:
       resources:
         limits:
@@ -51,10 +51,10 @@ services:
           memory: 512m
     healthcheck:
       test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:9200
+        - CMD
+        - curl
+        - -f
+        - http://localhost:9200
       interval: 10s
       timeout: 5s
       retries: 10
@@ -63,20 +63,20 @@ services:
     container_name: kibana
     restart: 'no'
     depends_on:
-    - elasticsearch-dataset
+      - elasticsearch-dataset
     environment:
-    - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
-    - XPACK_SAMPLE_DATA_ENABLED=true
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
+      - XPACK_SAMPLE_DATA_ENABLED=true
     ports:
-    - 5601:5601
+      - 5601:5601
     networks:
-    - adf-network
+      - adf-network
     healthcheck:
       test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:5601/api/status
+        - CMD
+        - curl
+        - -f
+        - http://localhost:5601/api/status
       interval: 10s
       timeout: 50s
       retries: 100
@@ -84,19 +84,19 @@ services:
     image: docker.elastic.co/kibana/kibana:8.19.3
     container_name: kibana-anomalies
     depends_on:
-    - elasticsearch-anomalies
+      - elasticsearch-anomalies
     environment:
-    - ELASTICSEARCH_HOSTS=http://elasticsearch-anomalies:9200
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-anomalies:9200
     ports:
-    - 5602:5601
+      - 5602:5601
     networks:
-    - adf-network
+      - adf-network
     healthcheck:
       test:
-      - CMD
-      - curl
-      - -f
-      - http://localhost:5601/api/status
+        - CMD
+        - curl
+        - -f
+        - http://localhost:5601/api/status
       interval: 10s
       timeout: 5s
       retries: 10
@@ -107,15 +107,28 @@ services:
       kibana:
         condition: service_healthy
     volumes:
-    - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
-    - adf-network
-    entrypoint: "sh -c \"\n  echo 'Esperando a Kibana...';\n  apk add --no-cache curl\
-      \ >/dev/null;\n  until curl -sf http://kibana:5601/api/status >/dev/null; do\
-      \ sleep 2; done;\n  echo 'Instalando sample data (logs)...';\n  curl -s -XPOST\
-      \ http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type:\
-      \ application/json';\n  echo 'Sample data instalado. Deteniendo Kibana...';\n\
-      \  docker stop kibana;\n  echo 'Kibana detenido.';\n\"\n"
+      - adf-network
+    entrypoint: "sh -c \"
+
+      \  echo 'Esperando a Kibana...';
+
+      \  apk add --no-cache curl >/dev/null;
+
+      \  until curl -sf http://kibana:5601/api/status >/dev/null; do sleep 2; done;
+
+      \  echo 'Instalando sample data (logs)...';
+
+      \  curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
+
+      \  echo 'Sample data instalado. Deteniendo Kibana...';
+
+      \  docker stop kibana;
+
+      \  echo 'Kibana detenido.';
+
+      \"\n"
 
   mongodb-keygen:
     image: alpine:3.20
@@ -141,7 +154,7 @@ services:
     image: mongo:8.0
     container_name: mongodb
     restart: unless-stopped
-    command: ["--replSet", "rs0", "--bind_ip_all", "--keyFile","/data/key/keyfile"]
+    command: [ "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/data/key/keyfile" ]
     environment:
       - MONGO_INITDB_ROOT_USERNAME=admin
       - MONGO_INITDB_ROOT_PASSWORD=1q2w3E*
@@ -153,7 +166,7 @@ services:
       - mongo_data:/data/db
       - mongo_key:/data/key
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "-u", "admin", "-p", "1q2w3E*", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping').ok"]
+      test: [ "CMD", "mongosh", "--quiet", "-u", "admin", "-p", "1q2w3E*", "--authenticationDatabase", "admin", "--eval", "db.adminCommand('ping').ok" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -193,7 +206,7 @@ services:
         condition: service_healthy
     environment:
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
-      - ES_HOSTS=http://elasticsearch-dataset:9200
+      - ES_HOSTS=http://elasticsearch-dataset:9200,http://elasticsearch-anomalies:9200
     ports:
       - "8000:8000"
     networks:
@@ -204,13 +217,35 @@ services:
     stdin_open: true
     tty: true
     healthcheck:
-      test: ["CMD", "python", "-c", "print('KB-MCP health check: OK')"]
+      test: [ "CMD", "python", "-c", "print('KB-MCP health check: OK')" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
-  
+  dispatcher:
+    build:
+      context: . # change to ./MotorDA if the Dockerfile is inside MotorDA
+      dockerfile: Dockerfile.da-dispatcher # remove or change if your Dockerfile has another path/name
+    container_name: da-dispatcher
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      elasticsearch-anomalies:
+        condition: service_healthy
+    environment:
+      # use the service names (not localhost) so the container can reach them over the bridge network
+      - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
+      - ES_HOSTS=http://elasticsearch-anomalies:9200
+      - PYTHONUNBUFFERED=1
+    networks:
+      - adf-network
+    # optional: mount a log folder or the code for dev
+    # volumes:
+    #   - ./logs/dispatcher:/app/logs
+    #   - ./MotorDA:/app/MotorDA
+
 volumes:
   mongo_data: null
   elastic_data: null
@@ -222,7 +257,7 @@ networks:
   adf-network:
     name: adf-network
     driver: bridge
-    
+
 #  logstash:
 #    build:
 #      context: .

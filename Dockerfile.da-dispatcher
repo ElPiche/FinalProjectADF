@@ -2,9 +2,9 @@
 FROM python:3.11-slim
 
 # Crear carpeta de trabajo
-WORKDIR /MotorDA/
+WORKDIR MotorDA/
 
-COPY requirements.txt .
+COPY MotorDA/Dispatcher/requirements.txt .
 
 # Copiar script
 COPY MotorDA ./MotorDA
@@ -12,5 +12,8 @@ COPY MotorDA ./MotorDA
 # Instalar dependencias necesarias
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copiar todo el contenido de MotorDA (no el resto del proyecto)
+COPY MotorDA ./
+
 # Comando de ejecución por defecto
-CMD ["python", "-m" ,"Dispatcher.DADispatcher"]
+CMD ["python", "-m" ,"Dispatcher.DADispatcher", "--server"]
