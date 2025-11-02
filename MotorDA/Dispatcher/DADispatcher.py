@@ -1,6 +1,6 @@
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from bson import json_util
 from pymongo import MongoClient
@@ -146,10 +146,36 @@ class Config:
 
 
 def parse_iso(date_str: str) -> datetime:
-    """Parses ISO 8601 timestamps with or without 'Z'."""
+    """
+    Parses ISO 8601 timestamps that may include:
+      - a 'Z' suffix (UTC)
+      - a timezone offset like '+00:00'
+      - no timezone info (assumed UTC)
+      - missing milliseconds
+    """
+    if not date_str:
+        raise ValueError("Empty or None date string provided")
+
+    date_str = date_str.strip()
+
+    # Normalize 'Z' to '+00:00' for fromisoformat
     if date_str.endswith("Z"):
-        date_str = date_str.replace("Z", "+00:00")
-    return datetime.fromisoformat(date_str)
+        date_str = date_str[:-1] + "+00:00"
+
+    try:
+        dt = datetime.fromisoformat(date_str)
+    except ValueError:
+        # Fallback for cases missing milliseconds
+        try:
+            dt = datetime.fromisoformat(date_str.split(".")[0] + "+00:00")
+        except Exception as e:
+            raise ValueError(f"Unrecognized date format: {date_str}") from e
+
+    # If no timezone info, assume UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+
+    return dt
 
 
 def parse_config(data: dict) -> Config:
