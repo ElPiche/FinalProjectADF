@@ -1,0 +1,21 @@
+# MCP SDK - Model Context Protocol server framework
+git+https://github.com/modelcontextprotocol/python-sdk.git
+
+# MongoDB driver
+pymongo==4.6.1
+
+# Elasticsearch client
+elasticsearch==8.15.0
+
+# Data validation and parsing (compatible with MCP SDK)
+pydantic>=2.11.0
+
+# CRON expression parsing
+croniter==2.0.1
+
+# JSON schema validation
+jsonschema==4.20.0
+
+# FastAPI and ASGI server for HTTP transport
+fastapi>=0.104.0
+uvicorn>=0.24.0
