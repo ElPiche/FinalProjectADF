@@ -17,6 +17,7 @@ import json
 from models import AlgorithmConfig
 from utils import log_message as _utils_log_message
 from instrumentation import timed
+from description_utils import ALGORITHM_CONFIG_DESCRIPTION, AVAILABLE_ALGORITHMS_DESCRIPTION, SUPPORTED_ALGORITHMS, SUPPORTED_ALGORITHMS_INLINE, SUPPORTED_ALGORITHMS_QUOTED, generate_tool_list_for_describe_mcp, get_tool_count, generate_kb_config_template_description, generate_kb_config_fields_description, generate_kb_config_description, generate_kb_config_example, generate_kb_config_description, generate_kb_config_example, generate_algorithm_config_example
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
@@ -51,22 +52,17 @@ def ping_elasticsearch_debug():
     return False
 
 
-@mcp.tool()
-def create_da_config(
-    name: str = Field(description="Configuration name"),
-    description: str = Field(description="Human-readable description"),
-    training_query: str = Field(description="SQL query for training data"),
-    detection_query: str = Field(description="SQL query for detection"),
-    training_from: str = Field(description="Training start timestamp (ISO format)"),
-    training_to: str = Field(description="Training end timestamp (ISO format)"),
-    detection_frequency: str = Field(description="Detection frequency (CRON format)"),
-    detection_start: str = Field(description="Detection start timestamp (ISO format)"),
-    algorithms: List[AlgorithmConfig] = Field(description="List of algorithm configurations")
-) -> str:
-    """
+def _create_da_config_docstring():
+    template_description = generate_kb_config_description()
+    fields_description = generate_kb_config_fields_description()
+
+    return f"""
     Create a new anomaly-detection configuration for monitoring data streams.
 
     This tool creates and stores a complete anomaly detection configuration in MongoDB, including training and detection queries, scheduling parameters, and algorithm specifications. The configuration will be used by the anomaly detection engine to train models and detect anomalies in real-time.
+
+    **Configuration Structure Overview** (automatically generated from KBConfig Pydantic model):
+    {template_description}
 
     BEFORE USING THIS TOOL:
     **It is Required to first validate your training_query and detection_query using the `elasticsearch_sql` tool. This ensures that your queries are syntactically correct and return the expected columns, which is crucial for the algorithms to function properly.**
@@ -75,21 +71,42 @@ def create_da_config(
     **and ensure that the dimension names specified in the algorithm configurations exactly match the column names returned by your queries.**
     For more info, use the `describe_mcp_server` tool.
 
-    Required Inputs:
-    - name (string): A unique, descriptive name for the configuration (e.g., "Web Traffic Anomaly Detection")
-    - description (string): Human-readable description of what this configuration monitors (e.g., "Monitor HTTP response codes and detect unusual patterns")
-    - training_query (string): Elasticsearch SQL query for training data. Must return the columns you want to monitor. Use placeholders like $from and $to for time ranges.
-    - detection_query (string): Elasticsearch SQL query for detection runs. Should match the structure of training_query but for real-time data.
-    - training_from (string): ISO 8601 timestamp for training data start (e.g., "2025-10-01T00:00:00Z")
-    - training_to (string): ISO 8601 timestamp for training data end (e.g., "2025-10-09T23:59:59Z")
-    - detection_frequency (string): CRON expression for how often to run detection (e.g., "*/15 * * * *" for every 15 minutes)
-    - detection_start (string): ISO 8601 timestamp when detection should begin (e.g., "2025-10-10T00:00:00Z")
-    - algorithms (array): List of algorithm configurations. Currently supports 'zscore' algorithm.
+    {fields_description}
 
-    Algorithm Format:
-    Each algorithm object must have:
-    - alg_name: "zscore" (currently the only supported algorithm)
-    - alg_parameters: Array of objects with 'dimension' field naming columns from your query output
+    **Algorithm Configuration Structure**:
+    {ALGORITHM_CONFIG_DESCRIPTION}
+
+    **Example AlgorithmConfig Structure** (dynamically generated from actual class):
+    ```json
+    {{
+      "alg_name": "zscore",
+      "alg_parameters": [
+        {{
+          "dimension": "response_time"
+        }},
+        {{
+          "dimension": "error_count"
+        }}
+      ]
+    }}
+    ```
+
+    **Complete algorithms Array Example**:
+    ```json
+    [
+      {{
+        "alg_name": "zscore",
+        "alg_parameters": [
+          {{
+            "dimension": "response_time"
+          }},
+          {{
+            "dimension": "error_count"
+          }}
+        ]
+      }}
+    ]
+    ```
 
     The algorithms parameter accepts a list of algorithm configuration objects in the exact format that will be stored in the database, following the KBConfigTemplate.json specification. No complex parsing or legacy format conversion is performed.
 
@@ -103,70 +120,39 @@ def create_da_config(
     - Dimension names not found in query output columns
     - Missing required fields
 
-    Example Usage:
-    {
-      "name": "Geographic Traffic Pattern Analysis",
-      "description": "Monitor hourly status code counts and detect spikes in 5xx errors",
-      "training_query": "SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
-      "detection_query": "SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
-      "training_from": "2025-10-01T00:00:00Z",
-      "training_to": "2025-10-09T23:59:59Z",
-      "detection_frequency": "*/15 * * * *",
-      "detection_start": "2025-10-10T00:00:00Z",
-      "algorithms": [
-        {
-          "alg_name": "zscore",
-          "alg_parameters": [
-            {"dimension": "status_code_200_counter"},
-            {"dimension": "status_code_5xx_counter"}
-          ]
-        }
-      ]
-    }
+    **Complete Configuration Example** (dynamically generated from KBConfig model):
+    ```json
+    {generate_kb_config_example()}
+    ```
 
     Tips:
     - Use elasticsearch_sql tool first to validate your queries and see available columns
     - Ensure dimension names exactly match column names from your query output
     - Training data should be historical data for model training
     - Detection query should be for real-time or recent data
+    - The configuration structure automatically reflects any changes made to the KBConfig Pydantic model
     """
-    pkg = _lazy_import_pkg()
-    if pkg and hasattr(pkg, "create_da_config"):
-        return pkg.create_da_config(name, description, training_query, detection_query,
-                                     training_from, training_to, detection_frequency,
-                                     detection_start, algorithms)
-    raise ToolError("create_da_config is not implemented in the migration package yet")
 
 
-@mcp.tool()
-def modify_kb_config(
-    config_id: str,
-    description: str = Field(description="Human-readable description", default=None),
-    training_query: str = Field(description="SQL query for training data", default=None),
-    detection_query: str = Field(description="SQL query for detection", default=None),
-    training_from: str = Field(description="Training start timestamp (ISO format)", default=None),
-    training_to: str = Field(description="Training end timestamp (ISO format)", default=None),
-    detection_frequency: str = Field(description="Detection frequency (CRON format)", default=None),
-    detection_start: str = Field(description="Detection start timestamp (ISO format)", default=None),
-    algorithms: List[AlgorithmConfig] = Field(description="List of algorithm configurations", default=None)
-) -> str:
-    """
+def _modify_kb_config_docstring():
+    template_description = generate_kb_config_description()
+    fields_description = generate_kb_config_fields_description()
+
+    return f"""
     Update an existing anomaly-detection configuration.
 
     This tool allows you to modify any aspect of an existing configuration by providing its config_id and the fields you want to update. Only the specified fields will be changed; others remain unchanged.
 
+    **Configuration Structure Overview** (automatically generated from KBConfigTemplate.json):
+    {template_description}
+
     Required Input:
     - config_id (string): The unique identifier of the configuration to update (e.g., "507f1f77bcf86cd799439011")
 
-    Optional Inputs (provide only what you want to change):
-    - description (string): Update the human-readable description
-    - training_query (string): Update the Elasticsearch SQL query for training data
-    - detection_query (string): Update the Elasticsearch SQL query for detection runs
-    - training_from (string): Update the training start timestamp (ISO 8601 format)
-    - training_to (string): Update the training end timestamp (ISO 8601 format)
-    - detection_frequency (string): Update the CRON expression for detection frequency
-    - detection_start (string): Update the detection start timestamp (ISO 8601 format)
-    - algorithms (dict): Update the algorithm configurations
+    {fields_description}
+
+    **Algorithm Configuration Structure**:
+    {ALGORITHM_CONFIG_DESCRIPTION}
 
     Returns:
     - Success: Confirmation message indicating what was updated
@@ -180,41 +166,33 @@ def modify_kb_config(
 
     Example Usage:
     To update just the description and detection frequency:
-    {
+    {{
       "config_id": "507f1f77bcf86cd799439011",
       "description": "Updated monitoring for web traffic anomalies",
       "detection_frequency": "*/30 * * * *"
-    }
+    }}
 
     To change the algorithms:
-    {
+    {{
       "config_id": "507f1f77bcf86cd799439011",
       "algorithms": [
-        {
-          "alg_name": "zscore",
-          "alg_parameters": [
-            {"dimension": "new_metric_column"}
-          ]
-        }
+        {{
+          "algorithm": "zscore",
+          "dimensions": ["new_metric_column"]
+        }}
       ]
-    }
+    }}
 
     Tips:
     - Use list_kb_configurations first to see current configuration details
     - Only include fields you want to change
     - Changes take effect immediately for future detection runs
+    - The configuration structure automatically reflects any changes made to KBConfigTemplate.json
     """
-    pkg = _lazy_import_pkg()
-    if pkg and hasattr(pkg, "modify_kb_config"):
-        return pkg.modify_kb_config(config_id, description, training_query, detection_query,
-                                     training_from, training_to, detection_frequency,
-                                     detection_start, algorithms)
-    raise ToolError("modify_kb_config is not implemented in the migration package yet")
 
 
-@mcp.tool()
-def list_kb_configurations() -> str:
-    """
+def _list_kb_configurations_docstring():
+    return f"""
     List all saved anomaly-detection configurations.
 
     This tool retrieves and displays all stored configurations from the knowledge base in a human-readable format. Each configuration shows its name, unique ID, scheduling information, and configured algorithms.
@@ -248,18 +226,16 @@ def list_kb_configurations() -> str:
     - Review algorithm dimensions to ensure they match your data
     - Check scheduling to understand when detections run
     """
-    pkg = _lazy_import_pkg()
-    if pkg and hasattr(pkg, "list_kb_configurations"):
-        return pkg.list_kb_configurations()
-    raise ToolError("list_kb_configurations is not implemented in the migration package yet")
 
 
-@mcp.tool()
-def describe_mcp_server() -> str:
-    """
+def _describe_mcp_server_docstring():
+    tool_count = get_tool_count()
+    tool_list = generate_tool_list_for_describe_mcp()
+
+    return f"""
     Get comprehensive usage guide and examples for all KB-MCP tools.
 
-    This tool provides detailed documentation for using the KB-MCP (Knowledge Base - Model Context Protocol) server. It includes descriptions of all available tools, their inputs, outputs, common usage patterns, and copy-pasteable examples.
+    This tool provides detailed documentation for using the KB-MCP (Knowledge Base - Model Context Protocol) server. It includes descriptions of all {tool_count} available tools, their inputs, outputs, common usage patterns, and copy-pasteable examples.
 
     Inputs: None
 
@@ -281,13 +257,8 @@ def describe_mcp_server() -> str:
     [Overview text]
 
     Tools
-    1) create_da_config
-    - Inputs: [detailed list]
-    - Return: [description]
-    [Examples and tips]
-
-    2) modify_kb_config
-    [Similar detailed format]
+    {tool_list}
+    [Each tool with detailed description, inputs, outputs, and examples]
 
     Common notes for callers
     [General tips and best practices]
@@ -303,15 +274,10 @@ def describe_mcp_server() -> str:
     - Use the examples as templates for your own configurations
     - Refer back to this guide when encountering validation errors
     """
-    pkg = _lazy_import_pkg()
-    if pkg and hasattr(pkg, "describe_mcp_server"):
-        return pkg.describe_mcp_server()
-    raise ToolError("describe_mcp_server is not implemented in the migration package yet")
 
 
-@mcp.tool()
-def list_available_algorithms() -> str:
-    """
+def _list_available_algorithms_docstring():
+    return f"""
     List all available anomaly detection algorithms with configuration details.
 
     This tool provides information about all implemented algorithms that can be used in anomaly detection configurations. It shows algorithm names, descriptions, required parameters, and example configurations.
@@ -325,58 +291,12 @@ def list_available_algorithms() -> str:
     - Example configuration objects
     - Current implementation status
 
-    Currently Available Algorithms:
-
-    1) zscore
-    - Description: Z-score based anomaly detection using standard deviation thresholds
-    - Parameters:
-      - dimensions: Array of column names from your query output to monitor
-    - Example:
-      {
-        "alg_name": "zscore",
-        "alg_parameters": [
-          {"dimension": "response_time"},
-          {"dimension": "error_count"}
-        ]
-      }
-
-    Future Algorithms (planned):
-    - kmeans: Clustering-based anomaly detection
-
-    Example Output:
-    # Available Anomaly Detection Algorithms
-
-    ## zscore
-    **Description:** Detects anomalies based on standard deviation from the mean. Values that fall outside a threshold (typically 3 standard deviations) are flagged as anomalies.
-
-    **Parameters:**
-    - `dimensions`: List of numeric columns to monitor for anomalies
-
-    **Example Configuration:**
-    ```json
-    {
-      "alg_name": "zscore",
-      "alg_parameters": [
-        {"dimension": "cpu_usage"},
-        {"dimension": "memory_usage"}
-      ]
-    }
-    ```
-
-    Tips:
-    - Use this tool before creating configurations to understand available algorithms
-    - Ensure your query outputs numeric columns for the specified dimensions
-    - Start with zscore for most use cases as it's the most mature implementation
+    {AVAILABLE_ALGORITHMS_DESCRIPTION}
     """
-    pkg = _lazy_import_pkg()
-    if pkg and hasattr(pkg, "list_available_algorithms"):
-        return pkg.list_available_algorithms()
-    raise ToolError("list_available_algorithms is not implemented in the migration package yet")
 
 
-@mcp.tool()
-def ping_elasticsearch() -> str:
-    """
+def _ping_elasticsearch_docstring():
+    return f"""
     Test connectivity to the Elasticsearch cluster.
 
     This tool checks if the KB-MCP server can successfully connect to the configured Elasticsearch hosts. It's useful for diagnosing connectivity issues before running queries or creating configurations.
@@ -390,10 +310,10 @@ def ping_elasticsearch() -> str:
     - error (string, optional): Error message if ping failed
 
     Example Success Response:
-    {"ping_success": true, "duration_ms": 45.2}
+    {{"ping_success": true, "duration_ms": 45.2}}
 
     Example Failure Response:
-    {"ping_success": false, "error": "Connection timeout", "duration_ms": 30000.0}
+    {{"ping_success": false, "error": "Connection timeout", "duration_ms": 30000.0}}
 
     Common Issues:
     - Network connectivity problems
@@ -406,6 +326,120 @@ def ping_elasticsearch() -> str:
     - Use the duration_ms to monitor Elasticsearch response times
     - Check error messages for specific connectivity problems
     """
+
+
+def _elasticsearch_sql_docstring():
+    return f"""
+    Execute an Elasticsearch SQL query and return results.
+
+    This tool runs SQL queries against Elasticsearch data and returns the column structure and sample rows. It's essential for validating queries before using them in anomaly detection configurations.
+
+    Important: always query the available indices BEFORE attempting a query, this will increase your chances of success.
+    YOU WILL NOT ASSUME AN INDEX EXISTS
+for more info, use the `describe_mcp_server` tool.
+
+    Required Input:
+    - query (string): The Elasticsearch SQL query to execute
+
+    Returns:
+    A JSON object with:
+    - columns: Array of column objects with 'name' and 'type' fields
+    - rows: Array of data rows (limited to prevent large responses)
+
+    Example Query (SQL):
+    "SELECT @timestamp, response, COUNT(*) as request_count FROM \".ds-kibana_sample_data_logs-*\" WHERE @timestamp >= '2025-10-01T00:00:00Z' GROUP BY @timestamp, response LIMIT 10"
+
+    Example Response:
+    {{
+      "columns": [
+        {{"name": "@timestamp", "type": "datetime"}},
+        {{"name": "response", "type": "keyword"}},
+        {{"name": "request_count", "type": "long"}}
+      ],
+      "rows": [
+        ["2025-10-01T00:00:00Z", "200", 150],
+        ["2025-10-01T00:01:00Z", "404", 5]
+      ]
+    }}
+
+    Common Query Patterns:
+    - SELECT ... FROM index WHERE conditions GROUP BY columns
+    - Use LIMIT to prevent large result sets
+    - Use $from and $to placeholders for time ranges in configurations
+
+    Validation Tips:
+    - Check column names match what you'll use in algorithms
+    - Ensure numeric columns for zscore algorithm dimensions
+    - Test with LIMIT 0 first to validate syntax without data
+    - Use this tool before create_da_config to verify your queries work
+
+    Error Handling:
+    - Syntax errors return descriptive error messages
+    - Index not found errors specify which index failed
+    - Permission errors indicate authentication issues
+    """
+
+
+def create_da_config(
+    name: str = Field(description="Configuration name"),
+    description: str = Field(description="Human-readable description"),
+    training_query: str = Field(description="SQL query for training data"),
+    detection_query: str = Field(description="SQL query for detection"),
+    training_from: str = Field(description="Training start timestamp (ISO format)"),
+    training_to: str = Field(description="Training end timestamp (ISO format)"),
+    detection_frequency: str = Field(description="Detection frequency (CRON format)"),
+    detection_start: str = Field(description="Detection start timestamp (ISO format)"),
+    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION)
+) -> str:
+    pkg = _lazy_import_pkg()
+    if pkg and hasattr(pkg, "create_da_config"):
+        return pkg.create_da_config(name, description, training_query, detection_query,
+                                     training_from, training_to, detection_frequency,
+                                     detection_start, algorithms)
+    raise ToolError("create_da_config is not implemented in the migration package yet")
+
+
+def modify_kb_config(
+    config_id: str,
+    description: str = Field(description="Human-readable description", default=None),
+    training_query: str = Field(description="SQL query for training data", default=None),
+    detection_query: str = Field(description="SQL query for detection", default=None),
+    training_from: str = Field(description="Training start timestamp (ISO format)", default=None),
+    training_to: str = Field(description="Training end timestamp (ISO format)", default=None),
+    detection_frequency: str = Field(description="Detection frequency (CRON format)", default=None),
+    detection_start: str = Field(description="Detection start timestamp (ISO format)", default=None),
+    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION, default=None)
+) -> str:
+    pkg = _lazy_import_pkg()
+    if pkg and hasattr(pkg, "modify_kb_config"):
+        return pkg.modify_kb_config(config_id, description, training_query, detection_query,
+                                     training_from, training_to, detection_frequency,
+                                     detection_start, algorithms)
+    raise ToolError("modify_kb_config is not implemented in the migration package yet")
+
+
+def list_kb_configurations() -> str:
+    pkg = _lazy_import_pkg()
+    if pkg and hasattr(pkg, "list_kb_configurations"):
+        return pkg.list_kb_configurations()
+    raise ToolError("list_kb_configurations is not implemented in the migration package yet")
+
+
+def describe_mcp_server() -> str:
+    pkg = _lazy_import_pkg()
+    if pkg and hasattr(pkg, "describe_mcp_server"):
+        return pkg.describe_mcp_server()
+    raise ToolError("describe_mcp_server is not implemented in the migration package yet")
+
+
+def list_available_algorithms() -> str:
+    pkg = _lazy_import_pkg()
+    if pkg and hasattr(pkg, "list_available_algorithms"):
+        return pkg.list_available_algorithms()
+    raise ToolError("list_available_algorithms is not implemented in the migration package yet")
+
+
+def ping_elasticsearch() -> str:
     request_id = str(uuid.uuid4())[:8]
     start = time.time()
     try:
@@ -429,61 +463,47 @@ def ping_elasticsearch() -> str:
         return json.dumps({"ping_success": False, "error": str(e), "duration_ms": duration_ms})
 
 
-@mcp.tool()
 @timed
 def elasticsearch_sql(query: str) -> str:
-    """
-    Execute an Elasticsearch SQL query and return results.
-
-    This tool runs SQL queries against Elasticsearch data and returns the column structure and sample rows. It's essential for validating queries before using them in anomaly detection configurations.
-
-    Important: always query the available indices BEFORE attempting a query, this will increase your chances of success.
-    YOU WILL NOT ASSUME AN INDEX EXISTS
-for more info, use the `describe_mcp_server` tool.
-
-    Required Input:
-    - query (string): The Elasticsearch SQL query to execute
-
-    Returns:
-    A JSON object with:
-    - columns: Array of column objects with 'name' and 'type' fields
-    - rows: Array of data rows (limited to prevent large responses)
-
-    Example Query (SQL):
-    "SELECT @timestamp, response, COUNT(*) as request_count FROM \".ds-kibana_sample_data_logs-*\" WHERE @timestamp >= '2025-10-01T00:00:00Z' GROUP BY @timestamp, response LIMIT 10"
-
-    Example Response:
-    {
-      "columns": [
-        {"name": "@timestamp", "type": "datetime"},
-        {"name": "response", "type": "keyword"},
-        {"name": "request_count", "type": "long"}
-      ],
-      "rows": [
-        ["2025-10-01T00:00:00Z", "200", 150],
-        ["2025-10-01T00:01:00Z", "404", 5]
-      ]
-    }
-
-    Common Query Patterns:
-    - SELECT ... FROM index WHERE conditions GROUP BY columns
-    - Use LIMIT to prevent large result sets
-    - Use $from and $to placeholders for time ranges in configurations
-
-    Validation Tips:
-    - Check column names match what you'll use in algorithms
-    - Ensure numeric columns for zscore algorithm dimensions
-    - Test with LIMIT 0 first to validate syntax without data
-    - Use this tool before create_da_config to verify your queries work
-
-    Error Handling:
-    - Syntax errors return descriptive error messages
-    - Index not found errors specify which index failed
-    - Permission errors indicate authentication issues
-    """
     request_id = str(uuid.uuid4())[:8]
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "elasticsearch_sql"):
         return pkg.elasticsearch_sql(query)
     raise ToolError("elasticsearch_sql is not implemented in the migration package yet")
+
+
+# Register tools programmatically with dynamic descriptions
+mcp.add_tool(
+    create_da_config,
+    description=_create_da_config_docstring()
+)
+mcp.add_tool(
+    modify_kb_config,
+    description=_modify_kb_config_docstring()
+)
+
+mcp.add_tool(
+    list_kb_configurations,
+    description=_list_kb_configurations_docstring()
+)
+
+mcp.add_tool(
+    describe_mcp_server,
+    description=_describe_mcp_server_docstring()
+)
+
+mcp.add_tool(
+    list_available_algorithms,
+    description=_list_available_algorithms_docstring()
+)
+
+mcp.add_tool(
+    ping_elasticsearch,
+    description=_ping_elasticsearch_docstring()
+)
+
+mcp.add_tool(
+    elasticsearch_sql,
+    description=_elasticsearch_sql_docstring()
+)
 

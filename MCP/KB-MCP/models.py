@@ -3,15 +3,43 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import re
+
+# Knowledge Base Configuration Models
+class TrainingConfig(BaseModel):
+    training_query: str = Field(description="Elasticsearch SQL query for training data")
+    from_: str = Field(alias="from", description="Training data start timestamp (ISO 8601)")
+    to: str = Field(description="Training data end timestamp (ISO 8601)")
+    training_window: int = Field(description="Training window in seconds")
+    is_active: bool = Field(description="Whether training is active")
+
+class DetectionConfig(BaseModel):
+    detection_query: str = Field(description="Elasticsearch SQL query for detection")
+    from_: str = Field(alias="from", description="Detection start timestamp (ISO 8601)")
+    frequency: str = Field(description="Detection frequency (CRON expression)")
+    detection_window: int = Field(description="Detection window in seconds")
+    is_active: bool = Field(description="Whether detection is active")
+
+class SchedulingConfig(BaseModel):
+    training_config: TrainingConfig = Field(description="Training configuration")
+    detection_config: DetectionConfig = Field(description="Detection configuration")
+
+class AlgorithmParameter(BaseModel):
+    dimension: str = Field(description="Column name to monitor for anomalies")
+    alg_metadata: Optional[List[Dict[str, str]]] = Field(default=None, description="Algorithm-specific metadata")
+
+class AlgorithmConfigItem(BaseModel):
+    alg_name: str = Field(description="Algorithm name (e.g., 'zscore', 'kmeans')")
+    alg_parameters: List[AlgorithmParameter] = Field(description="Algorithm parameters")
 
 # Knowledge Base Configuration
 class KBConfig(BaseModel):
     # No id field - MongoDB will auto-generate _id
-    name: str
-    description: str
+    name: str = Field(description="Configuration name")
+    description: str = Field(description="Human-readable description")
     change_flag: int = Field(default=0, description="Change flag for triggering change streams")
-    scheduling: dict
-    algorithms: List[Dict[str, Any]]  # Simple list of algorithm dicts
+    scheduling: SchedulingConfig = Field(description="Scheduling configuration")
+    algorithms: List[AlgorithmConfigItem] = Field(description="List of algorithm configurations")
 
     def __init__(self, **data):
         super().__init__(**data)
