@@ -62,6 +62,11 @@ def create_da_config(
     detection_start: str = Field(description="Detection start timestamp (ISO format)"),
     algorithms: List[dict] = Field(description="List of algorithm configurations")
 ) -> str:
+    """Create a new anomaly-detection configuration.
+
+    Provide name, optional description, scheduling (training_query/detection_query and timestamps),
+    and an 'algorithms' array. Returns the saved configuration ID or validation errors.
+    """
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "create_da_config"):
         return pkg.create_da_config(name, description, training_query, detection_query,
@@ -82,6 +87,11 @@ def modify_kb_config(
     detection_start: str = None,
     algorithms: dict = None
 ) -> str:
+    """Update an existing configuration by config_id.
+
+    Supply any fields from creation to update them (description, queries, scheduling, algorithms).
+    Returns confirmation or validation errors.
+    """
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "modify_kb_config"):
         return pkg.modify_kb_config(config_id, description, training_query, detection_query,
@@ -92,6 +102,7 @@ def modify_kb_config(
 
 @mcp.tool()
 def list_kb_configurations() -> str:
+    """Return a human-readable listing of saved KB configurations (name, id, scheduling summary, algorithms)."""
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "list_kb_configurations"):
         return pkg.list_kb_configurations()
@@ -100,6 +111,7 @@ def list_kb_configurations() -> str:
 
 @mcp.tool()
 def describe_mcp_server() -> str:
+    """Return human-readable instructions for using KB-MCP tools, including required inputs and examples."""
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "describe_mcp_server"):
         return pkg.describe_mcp_server()
@@ -108,6 +120,7 @@ def describe_mcp_server() -> str:
 
 @mcp.tool()
 def list_available_algorithms() -> str:
+    """Return a Markdown listing of implemented algorithms and a JSON example showing how to populate the 'algorithms' field."""
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "list_available_algorithms"):
         return pkg.list_available_algorithms()
@@ -116,6 +129,7 @@ def list_available_algorithms() -> str:
 
 @mcp.tool()
 def ping_elasticsearch() -> str:
+    """Check connectivity to Elasticsearch hosts. Returns ping_success (boolean) and duration_ms (float)."""
     request_id = str(uuid.uuid4())[:8]
     start = time.time()
     try:
@@ -142,6 +156,7 @@ def ping_elasticsearch() -> str:
 @mcp.tool()
 @timed
 def elasticsearch_sql(query: str) -> str:
+    """Run an Elasticsearch SQL/ES-SQL query and return 'columns' and 'rows' in JSON to verify query output columns."""
     request_id = str(uuid.uuid4())[:8]
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "elasticsearch_sql"):

@@ -11,6 +11,9 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
     return _utils_log_message(message, level, component, method, **kwargs)
 
 
+__tool_description__ = "Update an existing configuration by config_id. Supply any fields from creation to update them (description, queries, scheduling, algorithms). Returns confirmation or validation errors."
+
+
 def modify_kb_config(
     config_id: str,
     description: str = None,

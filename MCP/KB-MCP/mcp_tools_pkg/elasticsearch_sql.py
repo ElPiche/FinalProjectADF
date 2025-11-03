@@ -9,6 +9,9 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
     return _utils_log_message(message, level, component, method, **kwargs)
 
 
+__tool_description__ = "Run an Elasticsearch SQL/ES-SQL query and return 'columns' and 'rows' in JSON. Use this to verify which columns your query produces."
+
+
 def elasticsearch_sql(query: str) -> str:
     request_id = str(uuid.uuid4())[:8]
 

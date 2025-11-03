@@ -16,6 +16,9 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
     return _utils_log_message(message, level, component, method, **kwargs)
 
 
+__tool_description__ = "Create a new anomaly-detection configuration. Provide name, optional description, scheduling (training_query/detection_query and timestamps), and an 'algorithms' array. Returns success with the saved configuration ID or validation errors."
+
+
 def create_da_config(
     name: str = Field(description="Configuration name"),
     description: str = Field(description="Human-readable description"),
