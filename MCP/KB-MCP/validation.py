@@ -324,5 +324,20 @@ def validate_algorithms(algorithms: list[dict]) -> list[str]:
                 continue
             if "dimension" not in param:
                 errors.append(f"algorithm {i}, parameter {j}: missing dimension")
+            
+            # Validate optional alg_metadata
+            if "alg_metadata" in param:
+                metadata = param["alg_metadata"]
+                if not isinstance(metadata, list):
+                    errors.append(f"algorithm {i}, parameter {j}: alg_metadata must be a list")
+                    continue
+                for k, meta in enumerate(metadata):
+                    if not isinstance(meta, dict):
+                        errors.append(f"algorithm {i}, parameter {j}, metadata {k}: must be a dictionary")
+                        continue
+                    if "key" not in meta:
+                        errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing key")
+                    if "values" not in meta:
+                        errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing values")
 
     return errors

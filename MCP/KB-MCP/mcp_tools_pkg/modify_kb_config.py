@@ -1,7 +1,10 @@
 import time
 import uuid
+from typing import List
 from mcp.server.fastmcp.exceptions import ToolError
+from models import AlgorithmConfig
 from validation import validate_algorithms
+from .algorithms import parse_algorithms_to_internal_format
 
 from utils import log_message as _utils_log_message
 from db import connect_mongodb
@@ -20,7 +23,7 @@ def modify_kb_config(
     training_to: str = None,
     detection_frequency: str = None,
     detection_start: str = None,
-    algorithms: dict = None
+    algorithms: List[AlgorithmConfig] = None
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
     start_time = time.time()
@@ -86,15 +89,14 @@ def modify_kb_config(
             updates["scheduling.detection_config.from"] = detection_start
 
         if algorithms is not None:
-            # Accept dict/list inputs from MCP client; coerce into storage format used by validate_algorithms
-            algs_to_validate = algorithms
-            if isinstance(algorithms, dict):
-                algs_to_validate = [algorithms]
-            algorithm_errors = validate_algorithms(algs_to_validate)
+            # Parse algorithms to internal format
+            internal_algorithms = parse_algorithms_to_internal_format(algorithms)
+            
+            algorithm_errors = validate_algorithms(internal_algorithms)
             if algorithm_errors:
                 error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
                 raise ToolError(error_msg)
-            updates["algorithms"] = algs_to_validate
+            updates["algorithms"] = internal_algorithms
 
         if not updates:
             log_message("No valid updates provided", "warning", "modify_kb_config", "validation",

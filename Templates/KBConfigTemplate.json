@@ -11,7 +11,7 @@
       "is_active": true
     },
     "detection_config": {
-      "detection_query": "FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | STATS status_code_200_counter = COUNT(*) WHERE response == \"200\", status_code_5xx_counter = COUNT(*) WHERE response >= \"500\" AND response < \"600\" BY es_timestamp | SORT es_timestamp",
+      "detection_query": "SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
       "from": "2025-10-10T00:00:00Z",
       "frequency": "*/15 * * * *",
       "detection_window": 3600,

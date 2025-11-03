@@ -41,8 +41,8 @@ Tools
 - Inputs:
   - name (string) — configuration name (required)
   - description (string) — short human description (optional)
-  - scheduling.training_query (string) — SQL or ES-SQL that returns the columns you will monitor (required)
-  - scheduling.detection_query (string) — SQL/ES-SQL for detection runs (required)
+  - scheduling.training_query (string) — SQL query that returns the columns you will monitor (required)
+  - scheduling.detection_query (string) — SQL query for detection runs (required)
   - scheduling.training_from, scheduling.training_to (ISO timestamps)
   - scheduling.detection_frequency (cron string)
   - algorithms (array) — list of algorithm objects; each must include:
@@ -68,7 +68,7 @@ Tools
 - Return: JSON with ping_success (boolean) and duration_ms (float).
 
 6) elasticsearch_sql
-- Inputs: query (string) — the SQL/ES-SQL to run
+- Inputs: query (string) — the SQL query to run
 - Return: JSON with columns and rows so you can confirm which column names your queries produce.
 
 Common notes for callers
@@ -82,7 +82,7 @@ Description: Monitor hourly status code counts and detect spikes in 5xx errors.
 scheduling.training_query: SELECT DATE_TRUNC('HOUR', "@timestamp") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM ".ds-kibana_sample_data_logs-*" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp
 scheduling.training_from: 2025-10-01T00:00:00Z
 scheduling.training_to: 2025-10-09T23:59:59Z
-scheduling.detection_query: FROM .ds-kibana_sample_data_logs-* | WHERE @timestamp >= $from AND @timestamp < $to | STATS status_code_200_counter = COUNT(*) WHERE response == "200", status_code_5xx_counter = COUNT(*) WHERE response >= "500" AND response < "600" BY es_timestamp | SORT es_timestamp
+scheduling.detection_query: SELECT DATE_TRUNC('HOUR', "@timestamp") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM ".ds-kibana_sample_data_logs-*" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp
 scheduling.detection_frequency: */15 * * * *
 algorithms:
   - alg_name: zscore
