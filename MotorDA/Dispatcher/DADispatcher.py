@@ -646,7 +646,7 @@ def watch_detection_changes(kb_client):
                 anomalies = detectar_anomalias_df(
                     df, training_result, 60)
 
-                if anomalies.get(0)["is_anomaly"]:
+                if anomalies[0].get("is_anomaly"):
 
                     print(f"anomaly detected: {anomalies}")
                     doc = {
