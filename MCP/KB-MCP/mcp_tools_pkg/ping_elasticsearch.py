@@ -108,6 +108,3 @@ def ping_elasticsearch() -> str:
         import json
         return json.dumps({"ping_success": False, "error": str(e), "duration_ms": duration_ms})
 
-
-__tool_description__ = "Check connectivity to Elasticsearch hosts. Returns ping_success (boolean) and duration_ms (float), plus an optional error message on failure."
-

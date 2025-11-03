@@ -8,9 +8,6 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
     return _utils_log_message(message, level, component, method, **kwargs)
 
 
-__tool_description__ = "List available DA algorithms with canonical parameter names, short descriptions, example configs that match the KBConfigTemplate.json. Current implementation: only 'zscore' is implemented; 'kmeans' is planned." 
-
-
 def list_available_algorithms() -> str:
     request_id = str(uuid.uuid4())[:8]
     start_time = time.time()

@@ -10,9 +10,6 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
     return _utils_log_message(message, level, component, method, **kwargs)
 
 
-__tool_description__ = "Return a human-readable listing of saved KB configurations (name, id, scheduling summary, algorithms)."
-
-
 def list_kb_configurations() -> str:
     request_id = str(uuid.uuid4())[:8]
     start_time = time.time()
