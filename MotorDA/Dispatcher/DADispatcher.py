@@ -609,9 +609,6 @@ def watch_detection_changes(kb_client):
 
                 print(f"I am printing serie_to_detect: {serie_to_detect}")
 
-                print(
-                    f"I am printing get metadata kbId: {serie_to_detect.get('metadata.kbId')}")
-
                 pipeline = [{'$match':
                             {'kb_id': serie_to_detect["metadata"]["kbId"],
                              'field': serie_to_detect["metadata"]["dim"]}
@@ -623,7 +620,6 @@ def watch_detection_changes(kb_client):
                 training_result = next(result, None)
                 print(
                     f"I am priting the result of training:  {training_result}")
-                print(f"I am priting the result:  {result}")
 
                 # 2) flatten nested fields (metadata -> metadata.kbId etc.)
                 df = pd.json_normalize(serie_to_detect)
@@ -647,8 +643,10 @@ def watch_detection_changes(kb_client):
                     df, training_result, 60)
 
                 if anomalies[0].get("is_anomaly"):
-
+                    print("=========================================================================================================================")
                     print(f"anomaly detected: {anomalies}")
+                    print(
+                        "=========================================================================================================================")
                     doc = {
                         'algorithm': 'ZScore',
                         # optional — store which metric the anomaly belongs to
