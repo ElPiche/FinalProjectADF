@@ -30,7 +30,7 @@ FLUSH_INTERVAL = 1.0  # seconds
 @dataclass
 class LogEntry:
     """Structured log entry matching original MongoDB schema."""
-    timestamp: str
+    timestamp: datetime
     session_id: str
     level: str
     component: str
@@ -43,6 +43,9 @@ class LogEntry:
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         data = asdict(self)
+        # Convert timestamp to ISO for file storage
+        if isinstance(self.timestamp, datetime):
+            data['timestamp'] = self.timestamp.isoformat()
         if data['extra_data'] is None:
             data['extra_data'] = {}
         return data
@@ -50,6 +53,21 @@ class LogEntry:
     def to_json(self) -> str:
         """Convert to JSON string."""
         return json.dumps(self.to_dict())
+
+    def to_mongo_document(self) -> Dict[str, Any]:
+        """Convert to a MongoDB document, keeping timestamp as a datetime object."""
+        doc = asdict(self)
+        # Ensure timestamp is a datetime object for Mongo
+        if isinstance(self.timestamp, str):
+            try:
+                doc['timestamp'] = datetime.fromisoformat(self.timestamp)
+            except Exception:
+                doc['timestamp'] = datetime.utcnow()
+        else:
+            doc['timestamp'] = self.timestamp
+        if doc.get('extra_data') is None:
+            doc['extra_data'] = {}
+        return doc
 
 
 class FileLogger:
@@ -115,6 +133,22 @@ class MongoLogger:
                 self.client = MongoClient(connection_string)
             db = self.client["kb-mcp-logs"]
             self.collection = db["logs"]
+            # Ensure compound indexes exist for fast 'latest N' queries and per-session queries
+            try:
+                from pymongo import DESCENDING, ASCENDING
+                # Index for global latest documents: sort by timestamp desc then _id desc
+                self.collection.create_index([("timestamp", DESCENDING), ("_id", DESCENDING)], background=True)
+                # Index for session-scoped latest documents: session_id asc, timestamp desc, _id desc
+                self.collection.create_index([("session_id", ASCENDING), ("timestamp", DESCENDING), ("_id", DESCENDING)], background=True)
+                print(f"[MONGO_CONNECT_DEBUG] Ensured compound indexes on 'timestamp' and ('session_id','timestamp')", file=sys.stderr)
+            except Exception as e:
+                try:
+                    # Fallback to numeric directions if constants not available
+                    self.collection.create_index([("timestamp", -1), ("_id", -1)])
+                    self.collection.create_index([("session_id", 1), ("timestamp", -1), ("_id", -1)])
+                    print(f"[MONGO_CONNECT_DEBUG] Ensured compound indexes (fallback)", file=sys.stderr)
+                except Exception as e2:
+                    print(f"[MONGO_CONNECT_DEBUG] Failed to create compound indexes: {e2}", file=sys.stderr)
             # Test connection
             self.client.admin.command('ping')
             self.connected = True
@@ -137,7 +171,9 @@ class MongoLogger:
             return False
         
         try:
-            result = self.collection.insert_one(entry.to_dict())
+            # Insert a document with a native datetime 'timestamp' field
+            doc = entry.to_mongo_document()
+            result = self.collection.insert_one(doc)
             print(f"[MONGO_DEBUG] Inserted entry with ID: {result.inserted_id}", file=sys.stderr)
             return True
         except Exception as e:
@@ -159,7 +195,8 @@ class MongoLogger:
             return 0
 
         try:
-            documents = [entry.to_dict() for entry in entries]
+            # Convert each entry to a Mongo document (preserving datetime type for timestamp)
+            documents = [entry.to_mongo_document() for entry in entries]
             result = self.collection.insert_many(documents)
             return len(result.inserted_ids)
         except Exception as e:
@@ -393,7 +430,7 @@ def log_message(message: str, level: str = "info", component: str = None, method
     
     # Create log entry
     entry = LogEntry(
-        timestamp=datetime.utcnow().isoformat(),
+        timestamp=datetime.now(),
         session_id=_log_queue.session_id,
         level=level.upper(),
         component=component,
