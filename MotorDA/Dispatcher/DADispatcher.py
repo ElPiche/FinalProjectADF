@@ -49,7 +49,7 @@ DA_RESULT_COLLECTION_NAME = "series_result"
 # conexión a elasticSearch
 ES_HOST = "http://elasticsearch-anomalies:9201"
 ES_INDEX = "test_logs"
-mongo_timeout_ms = 10000
+mongo_timeout_ms = 2000
 
 elastic_client = Elasticsearch(ES_HOST)
 
@@ -649,52 +649,18 @@ def watch_detection_changes(kb_client):
                 anomalies = detectar_anomalias_df(
                     df, training_result, 60)
 
-                print(f"I AM PRINTING ANOMALIES: {anomalies}")
-                # print("I am printing the result of bringing series result:", result)
-                # training_result = next(result, None)
+                if(anomalies.get('is_anomaly')):
 
-                doc = {
-                    'algorithm': 'ZScore',
-                    # optional — store which metric the anomaly belongs to
-                    'metric': training_result.get('field'),
-                    'text': 'Anomaly detected',
-                    'timestamp': anomalies[0].get("timestamp"),
-                    'value': anomalies[0].get("value")
-                }
-                elastic_client.index(index="anomaly", document=doc)
-
-                """
-                anomalies_dict: Dict[str, List] = {}
-                for key, value in observed_values.items():
-
-                    anomalies = detectar_anomalias_df(
-                        value, results, self.parameters.train_window)
-                    anomalies_dict[key] = anomalies
-
-                # print(anomalies_dict)
-
-                filtered_anomalies = {
-                    key: [item for item in value if item.get('is_anomaly')]
-                    for key, value in anomalies_dict.items()
-                }
-
-                print(f"Found {len(filtered_anomalies)} anomalies")
-                anomalies_for_elastic = []
-
-                for key, anomalies in filtered_anomalies.items():
-                    for item in anomalies:
-                        doc = {
-                            'algorithm': 'ZScore',
-                            'metric': key,  # optional — store which metric the anomaly belongs to
-                            'text': 'Anomaly detected',
-                            'timestamp': item["timestamp"],
-                            'value': item["value"],
-                            '_index': "anomaly"
-                        }
-                        anomalies_for_elastic.append(doc)
-
-                helpers.bulk(elastic_client, anomalies_for_elastic)
-                """
+                    print(f"anomaly detected: {anomalies}")
+                    doc = {
+                        'algorithm': 'ZScore',
+                        # optional — store which metric the anomaly belongs to
+                        'metric': training_result.get('field'),
+                        'text': 'Anomaly detected',
+                        'timestamp': anomalies[0].get("timestamp"),
+                        'value': anomalies[0].get("value")
+                    }
+                    elastic_client.index(index="anomaly", document=doc)
 
 
 def main():
