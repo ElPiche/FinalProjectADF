@@ -89,6 +89,16 @@ def create_da_config(
                     request_id=request_id)
         raise ToolError(f"Input validation failed: {str(e)}")
 
+    # Validate time range logic
+    from datetime import datetime
+    try:
+        training_from_dt = datetime.fromisoformat(training_from.replace('Z', '+00:00'))
+        training_to_dt = datetime.fromisoformat(training_to.replace('Z', '+00:00'))
+        if training_to_dt <= training_from_dt:
+            raise ToolError("training_to must be after training_from")
+    except ValueError as e:
+        raise ToolError(f"Invalid timestamp format: {str(e)}")
+
     # Parse algorithms to internal format (using validated config)
     internal_algorithms = parse_algorithms_to_internal_format(config.algorithms)
 

@@ -78,95 +78,102 @@ def modify_kb_config(
         training_query_updated = False
         detection_query_updated = False
 
-        config_payload = existing_config.model_dump()
-
-        # Description updates
+        # Build updated configuration values, using existing as defaults
+        updated_name = existing_config.name
         if description is not None:
             if not isinstance(description, str) or not description.strip():
                 raise ToolError("description must be a non-empty string")
             cleaned_description = description.strip()
             if cleaned_description != existing_config.description:
-                config_payload["description"] = cleaned_description
+                updated_description = cleaned_description
                 updates_applied = True
+            else:
+                updated_description = existing_config.description
+        else:
+            updated_description = existing_config.description
+        updated_change_flag = existing_config.change_flag + 1
 
-        training_payload = dict(config_payload["scheduling"]["training_config"])
-        detection_payload = dict(config_payload["scheduling"]["detection_config"])
-        training_modified = False
-        detection_modified = False
-
+        # Build training config updates
+        training_config_updates = {}
         if training_query is not None:
             if not isinstance(training_query, str) or not training_query.strip():
                 raise ToolError("training_query must be a non-empty string")
             cleaned_training_query = training_query.strip()
-            if cleaned_training_query != training_payload["training_query"]:
-                training_payload["training_query"] = cleaned_training_query
-                training_modified = True
+            if cleaned_training_query != existing_config.scheduling.training_config.training_query:
+                training_config_updates["training_query"] = cleaned_training_query
                 updates_applied = True
                 training_query_updated = True
 
         if training_from is not None:
             if not isinstance(training_from, str) or not training_from.strip():
                 raise ToolError("training_from must be a non-empty ISO timestamp string")
-            if training_from != training_payload["from_"]:
-                training_payload["from_"] = training_from
-                training_modified = True
+            if training_from != existing_config.scheduling.training_config.from_:
+                training_config_updates["from_"] = training_from
                 updates_applied = True
 
         if training_to is not None:
             if not isinstance(training_to, str) or not training_to.strip():
                 raise ToolError("training_to must be a non-empty ISO timestamp string")
-            if training_to != training_payload["to"]:
-                training_payload["to"] = training_to
-                training_modified = True
+            if training_to != existing_config.scheduling.training_config.to:
+                training_config_updates["to"] = training_to
                 updates_applied = True
 
+        # Build detection config updates
+        detection_config_updates = {}
         if detection_query is not None:
             if not isinstance(detection_query, str) or not detection_query.strip():
                 raise ToolError("detection_query must be a non-empty string")
             cleaned_detection_query = detection_query.strip()
-            if cleaned_detection_query != detection_payload["detection_query"]:
-                detection_payload["detection_query"] = cleaned_detection_query
-                detection_modified = True
+            if cleaned_detection_query != existing_config.scheduling.detection_config.detection_query:
+                detection_config_updates["detection_query"] = cleaned_detection_query
                 updates_applied = True
                 detection_query_updated = True
 
         if detection_start is not None:
             if not isinstance(detection_start, str) or not detection_start.strip():
                 raise ToolError("detection_start must be a non-empty ISO timestamp string")
-            if detection_start != detection_payload["from_"]:
-                detection_payload["from_"] = detection_start
-                detection_modified = True
+            if detection_start != existing_config.scheduling.detection_config.from_:
+                detection_config_updates["from_"] = detection_start
                 updates_applied = True
 
         if detection_frequency is not None:
             if not isinstance(detection_frequency, str) or not detection_frequency.strip():
                 raise ToolError("detection_frequency must be a non-empty CRON expression")
             cleaned_detection_frequency = detection_frequency.strip()
-            if cleaned_detection_frequency != detection_payload["frequency"]:
-                detection_payload["frequency"] = cleaned_detection_frequency
-                detection_modified = True
+            if cleaned_detection_frequency != existing_config.scheduling.detection_config.frequency:
+                detection_config_updates["frequency"] = cleaned_detection_frequency
                 updates_applied = True
 
-        if training_modified:
+        # Apply training config updates with validation
+        if training_config_updates:
             try:
-                validated_training = TrainingConfig.model_validate(training_payload)
+                updated_training_payload = existing_config.scheduling.training_config.model_dump()
+                updated_training_payload.update(training_config_updates)
+                updated_training_config = TrainingConfig.model_validate(updated_training_payload)
             except ValidationError as exc:
                 raise ToolError(f"Invalid training configuration: {exc}")
-            config_payload["scheduling"]["training_config"] = validated_training.model_dump()
+        else:
+            updated_training_config = existing_config.scheduling.training_config
 
-        if detection_modified:
+        # Apply detection config updates with validation
+        if detection_config_updates:
             try:
-                validated_detection = DetectionConfig.model_validate(detection_payload)
+                updated_detection_payload = existing_config.scheduling.detection_config.model_dump()
+                updated_detection_payload.update(detection_config_updates)
+                updated_detection_config = DetectionConfig.model_validate(updated_detection_payload)
             except ValidationError as exc:
                 raise ToolError(f"Invalid detection configuration: {exc}")
-            config_payload["scheduling"]["detection_config"] = validated_detection.model_dump()
+        else:
+            updated_detection_config = existing_config.scheduling.detection_config
 
-        if training_modified or detection_modified:
-            try:
-                scheduling_model = SchedulingConfig.model_validate(config_payload["scheduling"])
-            except ValidationError as exc:
-                raise ToolError(f"Invalid scheduling configuration: {exc}")
-            config_payload["scheduling"] = scheduling_model.model_dump()
+        # Build scheduling config
+        try:
+            updated_scheduling_config = SchedulingConfig(
+                training_config=updated_training_config,
+                detection_config=updated_detection_config
+            )
+        except ValidationError as exc:
+            raise ToolError(f"Invalid scheduling configuration: {exc}")
 
         # Algorithm updates
         if algorithms is not None:
@@ -187,9 +194,13 @@ def modify_kb_config(
             existing_algorithms_dump = [alg.model_dump() for alg in existing_config.algorithms]
             new_algorithms_dump = [alg.model_dump() for alg in validated_algorithm_items]
             if new_algorithms_dump != existing_algorithms_dump:
-                config_payload["algorithms"] = new_algorithms_dump
+                updated_algorithms = validated_algorithm_items
                 updates_applied = True
                 algorithms_updated = True
+            else:
+                updated_algorithms = existing_config.algorithms
+        else:
+            updated_algorithms = existing_config.algorithms
 
         if not updates_applied:
             log_message(
@@ -202,12 +213,28 @@ def modify_kb_config(
             )
             raise ToolError("No valid updates provided")
 
-        config_payload["change_flag"] = existing_config.change_flag + 1
-
+        # Build final configuration with validation
         try:
-            new_config = KBConfig.model_validate(config_payload)
+            new_config = KBConfig(
+                name=updated_name,
+                description=updated_description,
+                change_flag=updated_change_flag,
+                scheduling=updated_scheduling_config,
+                algorithms=updated_algorithms
+            )
         except ValidationError as exc:
             raise ToolError(f"Input validation failed: {exc}")
+
+        # Validate time range logic if training times were updated
+        if "from_" in training_config_updates or "to" in training_config_updates:
+            from datetime import datetime
+            try:
+                training_from_dt = datetime.fromisoformat(new_config.scheduling.training_config.from_.replace('Z', '+00:00'))
+                training_to_dt = datetime.fromisoformat(new_config.scheduling.training_config.to.replace('Z', '+00:00'))
+                if training_to_dt <= training_from_dt:
+                    raise ToolError("training_to must be after training_from")
+            except ValueError as e:
+                raise ToolError(f"Invalid timestamp format: {str(e)}")
 
         internal_algorithms = parse_algorithms_to_internal_format(new_config.algorithms)
         algorithm_errors = validate_algorithms(internal_algorithms)
