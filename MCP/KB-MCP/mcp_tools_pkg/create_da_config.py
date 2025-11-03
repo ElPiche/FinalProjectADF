@@ -18,15 +18,19 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
 
 
 def create_da_config(
-    name: str = Field(description="Configuration name"),
-    description: str = Field(description="Human-readable description"),
-    training_query: str = Field(description="SQL query for training data"),
-    detection_query: str = Field(description="SQL query for detection"),
-    training_from: str = Field(description="Training start timestamp (ISO format)"),
-    training_to: str = Field(description="Training end timestamp (ISO format)"),
-    detection_frequency: str = Field(description="Detection frequency (CRON format)"),
-    detection_start: str = Field(description="Detection start timestamp (ISO format)"),
-    algorithms: List[AlgorithmConfig] = Field(description="List of algorithm configurations")
+    name: str,
+    description: str,
+    training_query: str,
+    detection_query: str,
+    training_from: str,
+    training_to: str,
+    training_is_active: bool,
+    detection_is_active: bool,
+    training_window: int,
+    detection_window: int,
+    detection_frequency: str,
+    detection_start: str,
+    algorithms: List[AlgorithmConfig]
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
     start_time = time.time()
@@ -67,15 +71,15 @@ def create_da_config(
                     training_query=training_query,
                     **{"from": training_from},
                     to=training_to,
-                    training_window=3600,
-                    is_active=True
+                    training_window=training_window,
+                    is_active=training_is_active
                 ),
                 detection_config=DetectionConfig(
                     detection_query=detection_query,
                     **{"from": detection_start},
                     frequency=detection_frequency,
-                    detection_window=3600,
-                    is_active=False
+                    detection_window=detection_window,
+                    is_active=detection_is_active
                 )
             ),
             algorithms=algorithm_items
