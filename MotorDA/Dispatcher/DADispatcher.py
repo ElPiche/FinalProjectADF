@@ -655,7 +655,8 @@ def watch_detection_changes(kb_client):
                         'metric': training_result.get('field'),
                         'text': 'Anomaly detected',
                         'timestamp': anomalies[0].get("timestamp"),
-                        'value': anomalies[0].get("value")
+                        'value': anomalies[0].get("value"),
+                        'created_at' : datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
                     elastic_client.index(index="anomaly", document=doc)
 
