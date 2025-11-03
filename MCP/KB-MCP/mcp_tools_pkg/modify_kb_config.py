@@ -49,60 +49,139 @@ def modify_kb_config(
         if not config_doc:
             raise ToolError(f"Configuration with ID '{config_id}' not found")
 
-        updates = {}
+        # Validate provided fields using Pydantic models
+        validated_updates = {}
 
+        # Validate description if provided
         if description is not None:
-            updates["description"] = description
+            if not isinstance(description, str) or not description.strip():
+                raise ToolError("description must be a non-empty string")
+            validated_updates["description"] = description
 
+        # Validate training_query if provided
         if training_query is not None:
-            # Use lightweight validation helper to extract output fields instead of requiring SQL class
+            if not isinstance(training_query, str) or not training_query.strip():
+                raise ToolError("training_query must be a non-empty string")
+            # Use lightweight validation helper to extract output fields
             try:
                 from validation import extract_sql_output_fields
                 _ = extract_sql_output_fields(training_query)
-                updates["scheduling.training_config.training_query"] = training_query
+                validated_updates["scheduling.training_config.training_query"] = training_query
             except Exception as e:
                 raise ToolError(f"Invalid training query: {str(e)}")
 
+        # Validate detection_query if provided
         if detection_query is not None:
+            if not isinstance(detection_query, str) or not detection_query.strip():
+                raise ToolError("detection_query must be a non-empty string")
             try:
                 from validation import extract_sql_output_fields
                 _ = extract_sql_output_fields(detection_query)
-                updates["scheduling.detection_config.detection_query"] = detection_query
+                validated_updates["scheduling.detection_config.detection_query"] = detection_query
             except Exception as e:
                 raise ToolError(f"Invalid detection query: {str(e)}")
 
+        # Validate timestamps using Pydantic field validation
         if training_from is not None:
-            updates["scheduling.training_config.from"] = training_from
+            try:
+                from models import TrainingConfig
+                # Create a minimal instance to validate the timestamp
+                TrainingConfig(training_query="dummy", **{"from": training_from}, to="2025-01-01T00:00:00Z", training_window=3600, is_active=True)
+                validated_updates["scheduling.training_config.from"] = training_from
+            except Exception as e:
+                raise ToolError(f"Invalid training_from: {str(e)}")
 
         if training_to is not None:
-            updates["scheduling.training_config.to"] = training_to
-
-        if detection_frequency is not None:
             try:
-                from models import CRON
-                CRON(detection_frequency)
-                updates["scheduling.detection_config.frequency"] = detection_frequency
-            except ValueError as e:
-                raise ToolError(f"Invalid detection frequency: {str(e)}")
+                from models import TrainingConfig
+                TrainingConfig(training_query="dummy", **{"from": "2025-01-01T00:00:00Z"}, to=training_to, training_window=3600, is_active=True)
+                validated_updates["scheduling.training_config.to"] = training_to
+            except Exception as e:
+                raise ToolError(f"Invalid training_to: {str(e)}")
 
         if detection_start is not None:
-            updates["scheduling.detection_config.from"] = detection_start
+            try:
+                from models import DetectionConfig
+                DetectionConfig(detection_query="dummy", **{"from": detection_start}, frequency="* * * * *", detection_window=3600, is_active=True)
+                validated_updates["scheduling.detection_config.from"] = detection_start
+            except Exception as e:
+                raise ToolError(f"Invalid detection_start: {str(e)}")
 
+        # Validate detection_frequency using CRON model
+        if detection_frequency is not None:
+            try:
+                from models import CRON, DetectionConfig
+                DetectionConfig(detection_query="dummy", **{"from": "2025-01-01T00:00:00Z"}, frequency=detection_frequency, detection_window=3600, is_active=True)
+                validated_updates["scheduling.detection_config.frequency"] = detection_frequency
+            except Exception as e:
+                raise ToolError(f"Invalid detection_frequency: {str(e)}")
+
+        # Validate algorithms using Pydantic models
         if algorithms is not None:
-            # Parse algorithms to internal format
-            internal_algorithms = parse_algorithms_to_internal_format(algorithms)
-            
-            algorithm_errors = validate_algorithms(internal_algorithms)
-            if algorithm_errors:
-                error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
-                raise ToolError(error_msg)
-            updates["algorithms"] = internal_algorithms
+            try:
+                from models import AlgorithmConfigItem, AlgorithmParameter
 
-        if not updates:
+                # Convert and validate algorithms
+                validated_algorithms = []
+                for alg in algorithms:
+                    if hasattr(alg, 'alg_name') and hasattr(alg, 'alg_parameters'):
+                        # Already in AlgorithmConfigItem format
+                        validated_alg = AlgorithmConfigItem(
+                            alg_name=alg.alg_name,
+                            alg_parameters=[AlgorithmParameter(dimension=param.dimension) for param in alg.alg_parameters]
+                        )
+                    elif hasattr(alg, 'algorithm') and hasattr(alg, 'dimensions'):
+                        # ZScoreConfig format: {"algorithm": "zscore", "dimensions": ["dim1", "dim2"]}
+                        alg_name = alg.algorithm
+                        dimensions = alg.dimensions
+                        
+                        alg_params = [AlgorithmParameter(dimension=dim) for dim in dimensions]
+                        validated_alg = AlgorithmConfigItem(
+                            alg_name=alg_name,
+                            alg_parameters=alg_params
+                        )
+                    elif isinstance(alg, dict):
+                        # Dictionary format: {"algorithm": "zscore", "dimensions": ["dim1", "dim2"]}
+                        alg_name = alg.get('algorithm') or alg.get('alg_name', 'zscore')
+                        dimensions = alg.get('dimensions', [])
+                        
+                        alg_params = [AlgorithmParameter(dimension=dim) for dim in dimensions]
+                        validated_alg = AlgorithmConfigItem(
+                            alg_name=alg_name,
+                            alg_parameters=alg_params
+                        )
+                    else:
+                        # Try to convert from other formats
+                        alg_params = []
+                        if hasattr(alg, 'alg_parameters'):
+                            for param in alg.alg_parameters:
+                                if hasattr(param, 'dimension'):
+                                    alg_params.append(AlgorithmParameter(dimension=param.dimension))
+                        validated_alg = AlgorithmConfigItem(
+                            alg_name=getattr(alg, 'alg_name', getattr(alg, 'algorithm', 'zscore')),
+                            alg_parameters=alg_params
+                        )
+                    validated_algorithms.append(validated_alg)
+
+                # Parse algorithms to internal format
+                internal_algorithms = parse_algorithms_to_internal_format(validated_algorithms)
+
+                algorithm_errors = validate_algorithms(internal_algorithms)
+                if algorithm_errors:
+                    error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
+                    raise ToolError(error_msg)
+                validated_updates["algorithms"] = internal_algorithms
+
+            except Exception as e:
+                raise ToolError(f"Algorithm validation failed: {str(e)}")
+
+        if not validated_updates:
             log_message("No valid updates provided", "warning", "modify_kb_config", "validation",
                         request_id=request_id, extra_data={"config_id": config_id})
             raise ToolError("No valid updates provided")
 
+        # Apply updates
+        updates = validated_updates.copy()
         updates["change_flag"] = config_doc.get("change_flag", 0) + 1
 
         result = collection.update_one(

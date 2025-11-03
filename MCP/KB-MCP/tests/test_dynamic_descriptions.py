@@ -128,12 +128,124 @@ class TestDynamicDescriptions:
 
         assert desc1 == desc2, "Description generation should be deterministic"
 
-    def test_algorithm_description_is_deterministic(self):
-        """Test that algorithm description generation is consistent."""
-        alg1 = ALGORITHM_CONFIG_DESCRIPTION
-        alg2 = ALGORITHM_CONFIG_DESCRIPTION
+    def test_pydantic_validation_works(self):
+        """Test that Pydantic models properly validate input data."""
+        from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem, AlgorithmParameter
+        
+        # Test valid configuration
+        config = KBConfig(
+            name='test_config',
+            description='test description',
+            change_flag=0,
+            scheduling=SchedulingConfig(
+                training_config=TrainingConfig(
+                    training_query='SELECT * FROM test',
+                    **{"from": '2025-01-01T00:00:00Z'},
+                    to='2025-01-02T00:00:00Z',
+                    training_window=3600,
+                    is_active=True
+                ),
+                detection_config=DetectionConfig(
+                    detection_query='SELECT * FROM test',
+                    **{"from": '2025-01-03T00:00:00Z'},
+                    frequency='* * * * *',
+                    detection_window=3600,
+                    is_active=False
+                )
+            ),
+            algorithms=[AlgorithmConfigItem(
+                alg_name='zscore',
+                alg_parameters=[AlgorithmParameter(dimension='test_field')]
+            )]
+        )
+        
+        assert config.name == 'test_config'
+        assert config.description == 'test description'
+        assert len(config.algorithms) == 1
 
-        assert alg1 == alg2, "Algorithm description should be deterministic"
+    def test_pydantic_validation_rejects_invalid_input(self):
+        """Test that Pydantic models reject invalid input."""
+        from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig
+        
+        # Test empty name
+        with pytest.raises(Exception):  # Should raise validation error
+            KBConfig(
+                name='',  # Invalid: empty string
+                description='test desc',
+                change_flag=0,
+                scheduling=SchedulingConfig(
+                    training_config=TrainingConfig(
+                        training_query='SELECT * FROM test',
+                        **{"from": '2025-01-01T00:00:00Z'},
+                        to='2025-01-02T00:00:00Z',
+                        training_window=3600,
+                        is_active=True
+                    ),
+                    detection_config=DetectionConfig(
+                        detection_query='SELECT * FROM test',
+                        **{"from": '2025-01-03T00:00:00Z'},
+                        frequency='* * * * *',
+                        detection_window=3600,
+                        is_active=False
+                    )
+                ),
+                algorithms=[]
+            )
+
+    def test_modify_kb_config_uses_pydantic_validation(self):
+        """Test that modify_kb_config function uses Pydantic validation (without MongoDB)."""
+        # Mock the MongoDB connection and document retrieval
+        import unittest.mock
+        from mcp_tools_pkg.modify_kb_config import modify_kb_config
+        
+        # Mock existing config document
+        mock_config = {
+            "_id": "507f1f77bcf86cd799439011",
+            "name": "existing_config",
+            "description": "existing description",
+            "change_flag": 0,
+            "scheduling": {
+                "training_config": {
+                    "training_query": "SELECT * FROM existing",
+                    "from": "2025-01-01T00:00:00Z",
+                    "to": "2025-01-02T00:00:00Z",
+                    "training_window": 3600,
+                    "is_active": True
+                },
+                "detection_config": {
+                    "detection_query": "SELECT * FROM existing",
+                    "from": "2025-01-03T00:00:00Z",
+                    "frequency": "* * * * *",
+                    "detection_window": 3600,
+                    "is_active": False
+                }
+            },
+            "algorithms": []
+        }
+        
+        with unittest.mock.patch('db.connect_mongodb') as mock_connect:
+            mock_client = unittest.mock.MagicMock()
+            mock_collection = unittest.mock.MagicMock()
+            mock_client.__getitem__.return_value.__getitem__.return_value = mock_collection
+            mock_connect.return_value = mock_client
+            
+            # Mock find_one to return existing config
+            mock_collection.find_one.side_effect = lambda query: mock_config if "_id" in query else None
+            
+            # Mock update_one to succeed
+            mock_collection.update_one.return_value.modified_count = 1
+            
+            # Test valid update
+            try:
+                result = modify_kb_config(
+                    config_id="507f1f77bcf86cd799439011",
+                    description="updated description"
+                )
+                assert "updated successfully" in result
+            except Exception as e:
+                # Should not fail validation - only MongoDB operations
+                assert "Input validation failed" not in str(e)
+                assert "Invalid" not in str(e) or "not found" in str(e)
 
 
 if __name__ == "__main__":

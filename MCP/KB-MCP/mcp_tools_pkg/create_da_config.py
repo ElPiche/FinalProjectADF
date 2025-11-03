@@ -37,19 +37,82 @@ def create_da_config(
                     "algorithm_count": len(algorithms) if algorithms else 0
                 })
 
-    if not name or not isinstance(name, str):
-        raise ToolError("name must be a non-empty string")
-    if not description or not isinstance(description, str):
-        raise ToolError("description must be a non-empty string")
-
+    # Validate input using Pydantic models
     try:
-        from models import CRON
-        CRON(detection_frequency)
-    except ValueError as e:
-        raise ToolError(f"Invalid detection frequency CRON: {str(e)}")
+        from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem, AlgorithmParameter
 
-    # Parse algorithms to internal format
-    internal_algorithms = parse_algorithms_to_internal_format(algorithms or [])
+        # Convert algorithms to AlgorithmConfigItem format
+        algorithm_items = []
+        for alg in algorithms or []:
+            if hasattr(alg, 'alg_name') and hasattr(alg, 'alg_parameters'):
+                # Already in AlgorithmConfigItem format
+                algorithm_items.append(alg)
+            elif hasattr(alg, 'algorithm') and hasattr(alg, 'dimensions'):
+                # ZScoreConfig format: {"algorithm": "zscore", "dimensions": ["dim1", "dim2"]}
+                alg_name = alg.algorithm
+                dimensions = alg.dimensions
+                
+                alg_params = [AlgorithmParameter(dimension=dim) for dim in dimensions]
+                algorithm_items.append(AlgorithmConfigItem(
+                    alg_name=alg_name,
+                    alg_parameters=alg_params
+                ))
+            elif isinstance(alg, dict):
+                # Dictionary format: {"algorithm": "zscore", "dimensions": ["dim1", "dim2"]}
+                alg_name = alg.get('algorithm') or alg.get('alg_name', 'zscore')
+                dimensions = alg.get('dimensions', [])
+                
+                alg_params = [AlgorithmParameter(dimension=dim) for dim in dimensions]
+                algorithm_items.append(AlgorithmConfigItem(
+                    alg_name=alg_name,
+                    alg_parameters=alg_params
+                ))
+            else:
+                # Try to convert from other formats
+                alg_params = []
+                if hasattr(alg, 'alg_parameters'):
+                    for param in alg.alg_parameters:
+                        if hasattr(param, 'dimension'):
+                            alg_params.append(AlgorithmParameter(dimension=param.dimension))
+                algorithm_items.append(AlgorithmConfigItem(
+                    alg_name=getattr(alg, 'alg_name', getattr(alg, 'algorithm', 'zscore')),
+                    alg_parameters=alg_params
+                ))
+
+        # Create and validate KBConfig instance
+        config = KBConfig(
+            name=name,
+            description=description,
+            change_flag=0,
+            scheduling=SchedulingConfig(
+                training_config=TrainingConfig(
+                    training_query=training_query,
+                    **{"from": training_from},
+                    to=training_to,
+                    training_window=3600,
+                    is_active=True
+                ),
+                detection_config=DetectionConfig(
+                    detection_query=detection_query,
+                    **{"from": detection_start},
+                    frequency=detection_frequency,
+                    detection_window=3600,
+                    is_active=False
+                )
+            ),
+            algorithms=algorithm_items
+        )
+
+        log_message("Pydantic validation successful", "info", "create_da_config", "validation",
+                    request_id=request_id)
+
+    except Exception as e:
+        log_message(f"Pydantic validation failed: {str(e)}", "error", "create_da_config", "validation",
+                    request_id=request_id)
+        raise ToolError(f"Input validation failed: {str(e)}")
+
+    # Parse algorithms to internal format (using validated config)
+    internal_algorithms = parse_algorithms_to_internal_format(config.algorithms)
 
     algorithm_errors = validate_algorithms(internal_algorithms)
     if algorithm_errors:
@@ -61,8 +124,8 @@ def create_da_config(
     # Cross-validate algorithms against SQL queries
     from .elasticsearch_sql import elasticsearch_sql
 
-    if training_query:
-        validation_result = elasticsearch_sql(training_query + " LIMIT 0")
+    if config.scheduling.training_config.training_query:
+        validation_result = elasticsearch_sql(config.scheduling.training_config.training_query + " LIMIT 0")
         if "ERROR" in validation_result:
             raise ToolError(f"Training SQL query validation failed: {validation_result}")
         else:
@@ -70,12 +133,12 @@ def create_da_config(
                 result_data = json.loads(validation_result)
                 available_fields = [col['name'] for col in result_data.get('columns', [])]
 
-                validate_algorithm_dimensions(algorithms, available_fields, "training")
+                validate_algorithm_dimensions(config.algorithms, available_fields, "training")
             except json.JSONDecodeError:
                 raise ToolError("Could not parse training SQL validation response")
 
-    if detection_query:
-        validation_result = elasticsearch_sql(detection_query + " LIMIT 0")
+    if config.scheduling.detection_config.detection_query:
+        validation_result = elasticsearch_sql(config.scheduling.detection_config.detection_query + " LIMIT 0")
         if "ERROR" in validation_result:
             raise ToolError(f"Detection SQL query validation failed: {validation_result}")
         else:
@@ -83,34 +146,14 @@ def create_da_config(
                 result_data = json.loads(validation_result)
                 available_fields = [col['name'] for col in result_data.get('columns', [])]
 
-                validate_algorithm_dimensions(algorithms, available_fields, "detection")
+                validate_algorithm_dimensions(config.algorithms, available_fields, "detection")
             except json.JSONDecodeError:
                 raise ToolError("Could not parse detection SQL validation response")
 
-    config_to_store = {
-        "name": name,
-        "description": description,
-        "change_flag": 0,
-        "scheduling": {
-            "training_config": {
-                "training_query": training_query,
-                "from": training_from,
-                "to": training_to,
-                "training_window": 3600,
-                "is_active": True
-            },
-            "detection_config": {
-                "detection_query": detection_query,
-                "from": detection_start,
-                "frequency": detection_frequency,
-                "detection_window": 3600,
-                "is_active": False
-            }
-        },
-        "algorithms": internal_algorithms
-    }
+    # Convert validated config to dict for storage
+    config_to_store = config.model_dump(by_alias=True)
 
-    log_message(f"Configuration validation successful for: {name}", "info",
+    log_message(f"Configuration validation successful for: {config.name}", "info",
                 "create_da_config", "validation", request_id=request_id)
 
     print("\nConfiguration Preview:")
