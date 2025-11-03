@@ -39,12 +39,35 @@ Tools
 
 1) create_da_config
 - Inputs:
-  - name (string) — configuration name (required)
-  - description (string) — short human description (optional)
-  - scheduling.training_query (string) — SQL query that returns the columns you will monitor (required)
-  - scheduling.detection_query (string) — SQL query for detection runs (required)
-  - scheduling.training_from, scheduling.training_to (ISO timestamps)
-  - scheduling.detection_frequency (cron string)
+  - name (string) — Unique configuration name (required)
+  - description (string) — Human-readable description of what this monitors (optional)
+  - scheduling.training_query (string) — SQL query for training data.
+      This query should return historical data used to train the anomaly detection models.
+      Timestamp values in the query should be filtered using placeholders `$from` and `$to` to define the training period.
+      The query result must always include countable integer numeric columns for the algorithms to monitor which going to be the dimensions. (required)
+  - scheduling.detection_query (string) — SQL query for detection
+      This query should return recent or real-time data used for anomaly detection.
+      Timestamp values in the query should be filtered using placeholders `$from` and `$to` and the extractor process will be the one to set these values based on the detection schedule. (required)
+  - scheduling.training_from (ISO format) — Training start timestamp.
+      Defines the beginning of the historical data period used for training the models.
+      Will be substituted for `$from` in the training_query during model training. (required)
+  - scheduling.training_to (ISO format) — Training end timestamp.
+      Defines the end of the historical data period used for training the models.
+      Will be substituted for `$to` in the training_query during model training. (required)
+  - scheduling.training_is_active (boolean) — Flag to indicate if training is active.
+      If training is not active, the extractor process will skip the training phase. (required)
+  - scheduling.detection_is_active (boolean) — Flag to indicate if detection is active.
+      If detection is not active, the extractor process will skip the detection phase. (required)
+  - scheduling.training_window (integer, seconds) — Training window in seconds.
+      Defines the time window size for training data aggregation.
+      This value helps the algorithms to process data points within the specified window. (required)
+  - scheduling.detection_window (integer, seconds) — Detection window in seconds.
+      Defines the time window size for detection data aggregation.
+      The extractor process will take this value to extract the last N seconds of data for anomaly detection. (required)
+  - scheduling.detection_frequency (cron string) — Detection frequency (CRON format)
+      Defines how often the anomaly detection process should run.
+      The extractor process will use this CRON expression to schedule detection runs.
+      Make sure to provide a valid CRON expression to ensure proper scheduling.
   - algorithms (array) — list of algorithm objects; each must include:
     - alg_name (string)
     - alg_parameters (array of objects) where each object includes at least a 'dimension' field naming a column from your query output
@@ -82,6 +105,10 @@ Description: Monitor hourly status code counts and detect spikes in 5xx errors.
 scheduling.training_query: SELECT DATE_TRUNC('HOUR', "@timestamp") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM ".ds-kibana_sample_data_logs-*" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp
 scheduling.training_from: 2025-10-01T00:00:00Z
 scheduling.training_to: 2025-10-09T23:59:59Z
+scheduling.training_is_active: true
+scheduling.detection_is_active: true
+scheduling.training_window: 3600
+scheduling.detection_window: 3600
 scheduling.detection_query: SELECT DATE_TRUNC('HOUR', "@timestamp") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM ".ds-kibana_sample_data_logs-*" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp
 scheduling.detection_frequency: */15 * * * *
 algorithms:

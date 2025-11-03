@@ -264,12 +264,48 @@ def generate_kb_config_fields_description() -> str:
 **Required Fields**:
 - name (string): Unique configuration name
 - description (string): Human-readable description of what this monitors
-- training_query (string): Elasticsearch SQL query for training data
-- detection_query (string): Elasticsearch SQL query for detection runs
-- training_from (string): ISO 8601 timestamp for training start
-- training_to (string): ISO 8601 timestamp for training end
-- detection_frequency (string): CRON expression for detection frequency
-- detection_start (string): ISO 8601 timestamp when detection begins
+- training_query (string): 
+    SQL query for training data.
+    This query should return historical data used to train the anomaly detection models.
+    Timestamp values in the query should be filtered using placeholders `$from` and `$to` to define the training period.
+    The query result must always include countable integer numeric columns for the algorithms to monitor which going to be the dimensions.
+- detection_query (string):
+    SQL query for detection
+    This query should return recent or real-time data used for anomaly detection.
+    Timestamp values in the query should be filtered using placeholders `$from` and `$to` and the extractor process will be the one to set these values based on the detection schedule.
+- training_from (string): 
+    Training start timestamp (ISO format),
+    Defines the beginning of the historical data period used for training the models.
+    Will be substituted for `$from` in the training_query during model training.
+- training_to (string): 
+    Training end timestamp (ISO format).
+    Defines the end of the historical data period used for training the models.
+    Will be substituted for `$to` in the training_query during model training.
+- training_is_active (boolean):
+    Flag to indicate if training is active.
+    If training is not active, the extractor process will skip the training phase.
+- detection_is_active (boolean):
+    Flag to indicate if detection is active.
+    If detection is not active, the extractor process will skip the detection phase.
+- training_window (integer):
+    Training window in seconds.
+    Defines the time window size for training data aggregation.
+    This value helps the algorithms to process data points within the specified window.
+- detection_window (integer):
+    Detection window in seconds.
+    Defines the time window size for detection data aggregation.
+    The extractor process will take this value to extract the last N seconds of data for anomaly detection.
+- detection_frequency (string): 
+    Detection frequency (CRON format)
+    Defines how often the anomaly detection process should run.
+    The extractor process will use this CRON expression to schedule detection runs.
+    Make sure to provide a valid CRON expression to ensure proper scheduling.
+- detection_start (string):
+    Detection start timestamp (ISO format).
+    Is a configurable value that defines the beginning of the time range for training data.
+    Extractor process will not start training if this value is greater than the current time.
+    This field depends on user input and should be set according to the desired training period.
+    If the value is not provided, the system will start training from the earliest available data.
 - algorithms (List[AlgorithmConfig]): Algorithm configurations
 
 **Optional Fields**:
@@ -359,7 +395,7 @@ def generate_kb_config_example() -> str:
                     detection_query="SELECT * FROM index WHERE timestamp >= '$from'",
                     **{"from": "2025-01-08T00:00:00Z"},
                     frequency="*/15 * * * *",
-                    detection_window=3600,
+                    detectaon_window=3600,
                     is_active=True
                 )
             ),

@@ -51,6 +51,14 @@ def ping_elasticsearch_debug():
     log_message("ping_elasticsearch_debug not implemented in migration package", "warning", "ping_elasticsearch_debug", "fallback")
     return False
 
+def etl_docstring():
+    return"""
+    This configuration will be consumed by an ETL process that runs the training configuration to build training series data, and then applies the detection configuration on new incoming data to identify anomalies based on the trained models.
+
+    CRITICAL: ETL will run on every modification of this configuration, so anytime you change this configuration, the ETL process will be triggered. (e.g., if you change the detection query, the ETL will reprocess data using the new query).
+    If you need to make changes without triggering ETL, just set the training_is_active and detection_is_active flags to False.
+    If you need to run ETL without changing the configuration, you use the `change_flag` to make a lightweight update.
+    """
 
 def _create_da_config_docstring():
     template_description = generate_kb_config_description()
@@ -60,6 +68,8 @@ def _create_da_config_docstring():
     Create a new anomaly-detection configuration for monitoring data streams.
 
     This tool creates and stores a complete anomaly detection configuration in MongoDB, including training and detection queries, scheduling parameters, and algorithm specifications. The configuration will be used by the anomaly detection engine to train models and detect anomalies in real-time.
+
+    {etl_docstring()}
 
     **Configuration Structure Overview** (automatically generated from KBConfig Pydantic model):
     {template_description}
@@ -143,6 +153,8 @@ def _modify_kb_config_docstring():
 
     This tool allows you to modify any aspect of an existing configuration by providing its config_id and the fields you want to update. Only the specified fields will be changed; others remain unchanged.
 
+    {etl_docstring()}
+    
     **Configuration Structure Overview** (automatically generated from KBConfigTemplate.json):
     {template_description}
 
@@ -385,40 +397,67 @@ for more info, use the `describe_mcp_server` tool.
 
 
 def create_da_config(
-    name: str = Field(description="Configuration name"),
-    description: str = Field(description="Human-readable description"),
-    training_query: str = Field(description="SQL query for training data"),
-    detection_query: str = Field(description="SQL query for detection"),
-    training_from: str = Field(description="Training start timestamp (ISO format)"),
-    training_to: str = Field(description="Training end timestamp (ISO format)"),
-    detection_frequency: str = Field(description="Detection frequency (CRON format)"),
-    detection_start: str = Field(description="Detection start timestamp (ISO format)"),
+    name: str,
+    description: str,
+    training_query: str,
+    detection_query: str,
+    training_from: str,
+    training_to: str,
+    training_is_active: bool,
+    detection_is_active: bool,
+    training_window: int,
+    detection_window: int,
+    detection_frequency: str,
+    detection_start: str,
     algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION)
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "create_da_config"):
-        return pkg.create_da_config(name, description, training_query, detection_query,
-                                     training_from, training_to, detection_frequency,
-                                     detection_start, algorithms)
+        return pkg.create_da_config(name, 
+                                    description, 
+                                    training_query, 
+                                    detection_query,
+                                    training_from, 
+                                    training_to, 
+                                    training_is_active, 
+                                    detection_is_active,
+                                    training_window, 
+                                    detection_window, detection_frequency,
+                                    detection_start, 
+                                    algorithms)
     raise ToolError("create_da_config is not implemented in the migration package yet")
 
 
 def modify_kb_config(
     config_id: str,
-    description: str = Field(description="Human-readable description", default=None),
-    training_query: str = Field(description="SQL query for training data", default=None),
-    detection_query: str = Field(description="SQL query for detection", default=None),
-    training_from: str = Field(description="Training start timestamp (ISO format)", default=None),
-    training_to: str = Field(description="Training end timestamp (ISO format)", default=None),
-    detection_frequency: str = Field(description="Detection frequency (CRON format)", default=None),
-    detection_start: str = Field(description="Detection start timestamp (ISO format)", default=None),
-    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION, default=None)
+    description: str,
+    training_query: str,
+    detection_query: str,
+    training_from: str,
+    training_to: str,
+    training_is_active: bool,
+    detection_is_active: bool,
+    training_window: int,
+    detection_window: int,
+    detection_frequency: str,
+    detection_start: str,
+    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION)
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "modify_kb_config"):
-        return pkg.modify_kb_config(config_id, description, training_query, detection_query,
-                                     training_from, training_to, detection_frequency,
-                                     detection_start, algorithms)
+        return pkg.modify_kb_config(config_id, 
+                                    description, 
+                                    training_query, 
+                                    detection_query,
+                                    training_from, 
+                                    training_to, 
+                                    training_is_active,
+                                    detection_is_active, 
+                                    training_window, 
+                                    detection_window,
+                                    detection_frequency, 
+                                    detection_start, 
+                                    algorithms)
     raise ToolError("modify_kb_config is not implemented in the migration package yet")
 
 
