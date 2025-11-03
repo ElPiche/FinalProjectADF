@@ -35,21 +35,18 @@ class ZScore:
 # pasándole los parámetros necesarios. Y guardar los resultados en ElasticSearch.
 # En la versión actual también consultaría el mongoDB que contiene la data de documentación para leer la metadata y saber si esta entrenando o no jeje.
 
-# conexión a MongoDB KB
+# conexión a MongoDB
 MONGO_KB_URL = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin"
-KB_DB_NAME = "anomaly_detection"
-KB_COLLECTION_NAME = "training_config"
-
-# conexión a MongoDB MotorDA pendiente
-DB_NAME_MOTOR_DA = "anomaly_detection"
-DA_COLLECTION_NAME = "series"
-
-DA_RESULT_COLLECTION_NAME = "series_result"
+MONGO_DB_NAME = "anomaly_detection"
+TRAINING_COLLECTION_NAME = "training_config"
+SERIES_COLLECTION_NAME = "series"
+SERIES_RESULT_COLLECTION_NAME = "series_result"
+MONGO_TIMEOUT_MS = 2000
 
 # conexión a elasticSearch
 ES_HOST = "http://elasticsearch-anomalies:9200"
 ES_INDEX = "test_logs"
-mongo_timeout_ms = 2000
+
 
 elastic_client = Elasticsearch(ES_HOST)
 
@@ -209,17 +206,17 @@ def CreateConnectionToKB() -> MongoClient:
     # we establish the connection to the kb mongo db
     mongo_kb_client = client = MongoClient(
         MONGO_KB_URL,
-        serverSelectionTimeoutMS=mongo_timeout_ms,
-        connectTimeoutMS=mongo_timeout_ms,
-        socketTimeoutMS=mongo_timeout_ms,
+        serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
+        connectTimeoutMS=MONGO_TIMEOUT_MS,
+        socketTimeoutMS=MONGO_TIMEOUT_MS,
         retryWrites=True,
         retryReads=True,
         # Allow reads from secondary if primary unavailable
         readPreference='primaryPreferred'
     )
 
-    kb_database = mongo_kb_client[KB_DB_NAME]
-    kb_collection = kb_database[KB_COLLECTION_NAME]
+    kb_database = mongo_kb_client[MONGO_DB_NAME]
+    kb_collection = kb_database[TRAINING_COLLECTION_NAME]
     mongo_kb_client.admin.command("ping")
     print("Nos conectamos al Mongo de entrenamiento")
     return mongo_kb_client
@@ -229,16 +226,16 @@ def CreateConnectionToDA() -> MongoClient:
     # we establish the connection to the da mongo db
     mongo_da_client = client = MongoClient(
         MONGO_KB_URL,
-        serverSelectionTimeoutMS=mongo_timeout_ms,
-        connectTimeoutMS=mongo_timeout_ms,
-        socketTimeoutMS=mongo_timeout_ms,
+        serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
+        connectTimeoutMS=MONGO_TIMEOUT_MS,
+        socketTimeoutMS=MONGO_TIMEOUT_MS,
         retryWrites=True,
         retryReads=True,
         # Allow reads from secondary if primary unavailable
         readPreference='primaryPreferred'
     )
-    da_database = mongo_da_client[DB_NAME_MOTOR_DA]
-    da_collection = da_database[DA_COLLECTION_NAME]
+    da_database = mongo_da_client[MONGO_DB_NAME]
+    da_collection = da_database[SERIES_COLLECTION_NAME]
     mongo_da_client.admin.command("ping")
     print("Nos conectamos a la DA")
     return mongo_da_client
@@ -249,7 +246,7 @@ def ExtractLatestConfigurationKB(client: MongoClient):
     # as of right now, we get only one document, the idea would be to get the latest one when mongo change stream
     # calls us
     # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
-    result = client[DB_NAME_MOTOR_DA][KB_COLLECTION_NAME].find().sort(
+    result = client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].find().sort(
         '_id', -1).limit(1).next()
 
     print(result)
@@ -277,7 +274,7 @@ def run_zscore_batch_training(config: Config, observed_values):
 
     # {'train_window': 60, 'dimensions': ['5xx_status_code', '4xx_status_code', '2xx_status_code'], 'from': '2025-10-01T00:00:00.000Z', 'to': '2025-11-10T00:00:00.000Z'}
     #     # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
-    da_client = CreateConnectionToDA()
+    da_client: MongoClient = CreateConnectionToDA()
 
     print(f"I am printing kb_id: " + config.kb_id)
     # iterating both key and values
@@ -288,17 +285,17 @@ def run_zscore_batch_training(config: Config, observed_values):
             print(f"printing the key of the observed_values: {value}")
 
             results = train_baseline(config.kb_id, key, value, "value")
-            da_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].insert_one(
+            da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(
                 results)
 # is_trained
-    kb_id = config.kb_id
+    kb_id: str = config.kb_id
 
     query_filter = {'kb_id': kb_id}
     update_operation = {'$set':
                         {'is_trained': 'true'}
                         }
 
-    da_client[KB_DB_NAME][KB_COLLECTION_NAME].update_one(
+    da_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].update_one(
         query_filter, update_operation)
     return results
 
@@ -343,9 +340,9 @@ def fetch_series_data_with_aggregation(
         Dictionary mapping dimension names to their respective DataFrames
     """
 
-    da_client = CreateConnectionToDA()
+    da_client: MongoClient = CreateConnectionToDA()
 
-    series_collection = da_client[DB_NAME_MOTOR_DA][DA_COLLECTION_NAME]
+    series_collection = da_client[MONGO_DB_NAME][SERIES_COLLECTION_NAME]
 
     dimensions = list(algorithm_to_execute.parameters.observed_values.keys())
     kb_id = config.kb_id
@@ -577,13 +574,13 @@ def fetch_series_data_batch(
 
 
 def watch_kb_changes(kb_client):
-    with kb_client[KB_DB_NAME][KB_COLLECTION_NAME].watch() as stream:
+    with kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].watch() as stream:
         for change in stream:
-            print(f"something happened on: {KB_COLLECTION_NAME}")
+            print(f"something happened on: {TRAINING_COLLECTION_NAME}")
 
             if change.get("operationType") == "insert":
                 print(
-                    f"\033[31m Someone inserted data into: {KB_COLLECTION_NAME} \033[0m")
+                    f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
 
                 # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
                 latest_series_config = ExtractLatestConfigurationKB(kb_client)
@@ -597,16 +594,16 @@ def watch_kb_changes(kb_client):
 
 def watch_detection_changes(kb_client):
 
-    with kb_client[KB_DB_NAME][DA_COLLECTION_NAME].watch([
+    with kb_client[MONGO_DB_NAME][SERIES_COLLECTION_NAME].watch([
         {"$match": {"fullDocument.metadata.mode": 1}}
     ]) as stream:
 
         for change in stream:
-            print(f"something happened on: {DA_COLLECTION_NAME}")
+            print(f"something happened on: {SERIES_COLLECTION_NAME}")
 
             if change.get("operationType") == "insert":
                 print(
-                    f"\033[31m Someone inserted data into: {DA_COLLECTION_NAME} \033[0m")
+                    f"\033[31m Someone inserted data into: {SERIES_COLLECTION_NAME} \033[0m")
 
                 serie_to_detect = change.get("fullDocument")
 
@@ -620,7 +617,7 @@ def watch_detection_changes(kb_client):
                              'field': serie_to_detect["metadata"]["dim"]}
                              }]
 
-                result = kb_client[KB_DB_NAME][DA_RESULT_COLLECTION_NAME].aggregate(
+                result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
                     pipeline)
 
                 training_result = next(result, None)
@@ -649,7 +646,7 @@ def watch_detection_changes(kb_client):
                 anomalies = detectar_anomalias_df(
                     df, training_result, 60)
 
-                if(anomalies.get('is_anomaly')):
+                if anomalies.get(0)["is_anomaly"]:
 
                     print(f"anomaly detected: {anomalies}")
                     doc = {
