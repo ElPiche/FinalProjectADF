@@ -108,7 +108,7 @@ def modify_kb_config(
             if not isinstance(training_from, str) or not training_from.strip():
                 raise ToolError("training_from must be a non-empty ISO timestamp string")
             if training_from != existing_config.scheduling.training_config.from_:
-                training_config_updates["from_"] = training_from
+                training_config_updates["from"] = training_from
                 updates_applied = True
 
         if training_to is not None:
@@ -133,7 +133,7 @@ def modify_kb_config(
             if not isinstance(detection_start, str) or not detection_start.strip():
                 raise ToolError("detection_start must be a non-empty ISO timestamp string")
             if detection_start != existing_config.scheduling.detection_config.from_:
-                detection_config_updates["from_"] = detection_start
+                detection_config_updates["from"] = detection_start
                 updates_applied = True
 
         if detection_frequency is not None:
@@ -147,7 +147,7 @@ def modify_kb_config(
         # Apply training config updates with validation
         if training_config_updates:
             try:
-                updated_training_payload = existing_config.scheduling.training_config.model_dump()
+                updated_training_payload = existing_config.scheduling.training_config.model_dump(by_alias=True)
                 updated_training_payload.update(training_config_updates)
                 updated_training_config = TrainingConfig.model_validate(updated_training_payload)
             except ValidationError as exc:
@@ -158,7 +158,7 @@ def modify_kb_config(
         # Apply detection config updates with validation
         if detection_config_updates:
             try:
-                updated_detection_payload = existing_config.scheduling.detection_config.model_dump()
+                updated_detection_payload = existing_config.scheduling.detection_config.model_dump(by_alias=True)
                 updated_detection_payload.update(detection_config_updates)
                 updated_detection_config = DetectionConfig.model_validate(updated_detection_payload)
             except ValidationError as exc:
