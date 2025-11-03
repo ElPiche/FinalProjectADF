@@ -7,6 +7,7 @@ and Pydantic models, ensuring descriptions stay in sync with code changes.
 import inspect
 from typing import List, Union, get_origin, get_args, Any
 from pydantic import BaseModel
+from pydantic_core import PydanticUndefined
 
 
 def generate_algorithm_config_description() -> str:
@@ -17,41 +18,22 @@ def generate_algorithm_config_description() -> str:
     a comprehensive description that stays in sync with code changes.
     """
     try:
-        from models import AlgorithmConfig
+        from models import SUPPORTED_ALGORITHMS
 
-        # Get the actual type that AlgorithmConfig refers to
-        actual_type = AlgorithmConfig
+        supported_algorithms = sorted(str(alg) for alg in SUPPORTED_ALGORITHMS if alg)
+        if not supported_algorithms:
+            supported_algorithms = ["zscore"]
 
-        # Handle type aliases and unions
-        if hasattr(actual_type, '__origin__') or hasattr(actual_type, '__class__'):
-            # It's a Union or other complex type
-            if hasattr(actual_type, '__args__'):
-                algorithm_types = actual_type.__args__
-            else:
-                algorithm_types = [actual_type]
-        else:
-            # It's a direct class
-            algorithm_types = [actual_type]
-
-        descriptions = []
-        supported_algorithms = []
-
-        for alg_type in algorithm_types:
-            if inspect.isclass(alg_type) and issubclass(alg_type, BaseModel):
-                alg_info = _extract_algorithm_info(alg_type)
-                descriptions.append(alg_info['description'])
-                supported_algorithms.append(alg_info['name'])
-
-        if not descriptions:
-            return "List of algorithm configurations"
-
-        # Create the main description
         main_desc = f"List of algorithm configurations. Currently supports: {', '.join(supported_algorithms)}."
 
-        # Add detailed format information
-        format_details = "\n\n".join(descriptions)
+        format_details = []
+        for alg in supported_algorithms:
+            format_details.append(
+                f"**{alg}** algorithm format:\n- alg_parameters: List of parameter objects. "
+                "Each parameter requires a 'dimension' key and may include optional 'alg_metadata'."
+            )
 
-        return f"{main_desc}\n\n{format_details}"
+        return f"{main_desc}\n\n" + "\n\n".join(format_details)
 
     except Exception as e:
         # Fallback to static description if introspection fails
@@ -64,21 +46,37 @@ def _extract_algorithm_info(alg_class: type) -> dict:
     """
     name = getattr(alg_class, '__name__', 'UnknownAlgorithm')
 
-    # Get the algorithm field default value
-    algorithm_field = getattr(alg_class, 'model_fields', {}).get('algorithm')
-    if algorithm_field and hasattr(algorithm_field, 'default'):
-        alg_name = algorithm_field.default
+    model_fields = getattr(alg_class, 'model_fields', {})
+    alg_name_field = model_fields.get('alg_name')
+    if (
+        alg_name_field
+        and hasattr(alg_name_field, 'default')
+        and alg_name_field.default is not None
+        and alg_name_field.default is not PydanticUndefined
+    ):
+        alg_name = alg_name_field.default
     else:
         alg_name = name.lower().replace('config', '')
 
     # Build field descriptions
     fields_info = []
-    for field_name, field_info in alg_class.model_fields.items():
-        if field_name != 'algorithm':  # Skip the algorithm type field
-            field_desc = field_info.description or f"Field: {field_name}"
-            fields_info.append(f"- {field_name}: {field_desc}")
+    for field_name, field_info in model_fields.items():
+        if field_name == 'alg_name':
+            continue
 
-    description = f"**{alg_name}** algorithm format:\n" + "\n".join(fields_info)
+        field_desc = field_info.description or f"Field: {field_name}"
+
+        if field_name == 'alg_parameters':
+            field_desc = (
+                "List of parameter objects. Each parameter requires a 'dimension' key and may "
+                "include optional 'alg_metadata'."
+            )
+
+        fields_info.append(f"- {field_name}: {field_desc}")
+
+    description = f"**{alg_name}** algorithm format"
+    if fields_info:
+        description += ":\n" + "\n".join(fields_info)
 
     return {
         'name': alg_name,
@@ -91,25 +89,10 @@ def get_supported_algorithms_list() -> List[str]:
     Get a list of supported algorithm names for use in other descriptions.
     """
     try:
-        from models import AlgorithmConfig
+        from models import SUPPORTED_ALGORITHMS
 
-        actual_type = AlgorithmConfig
-
-        if hasattr(actual_type, '__args__'):
-            algorithm_types = actual_type.__args__
-        else:
-            algorithm_types = [actual_type]
-
-        supported = []
-        for alg_type in algorithm_types:
-            if inspect.isclass(alg_type) and issubclass(alg_type, BaseModel):
-                algorithm_field = getattr(alg_type, 'model_fields', {}).get('algorithm')
-                if algorithm_field and hasattr(algorithm_field, 'default'):
-                    supported.append(algorithm_field.default)
-                else:
-                    supported.append(alg_type.__name__.lower().replace('config', ''))
-
-        return supported
+        # Ensure we always return a list of strings, even if the source set changes type
+        return sorted(str(alg) for alg in SUPPORTED_ALGORITHMS if alg)
 
     except Exception:
         return ['zscore']  # Fallback
@@ -138,11 +121,11 @@ def generate_available_algorithms_description() -> str:
         if descriptions:
             return "\n\n".join(descriptions)
         else:
-            return "1) zscore\n- Description: Z-score based anomaly detection using standard deviation thresholds\n- Parameters:\n  - dimensions: Array of column names from your query output to monitor\n- Example:\n  {\n    \"alg_name\": \"zscore\",\n    \"alg_parameters\": [\n      {\"dimension\": \"response_time\"}\n    ]\n  }"
+            return "1) zscore\n- Description: Z-score based anomaly detection using standard deviation thresholds\n- Parameters:\n  - alg_parameters: List of parameter objects containing a 'dimension' key\n- Example:\n  {\n    \"alg_name\": \"zscore\",\n    \"alg_parameters\": [\n      {\"dimension\": \"response_time\"}\n    ]\n  }"
 
     except Exception as e:
         # Fallback
-        return "1) zscore\n- Description: Z-score based anomaly detection using standard deviation thresholds\n- Parameters:\n  - dimensions: Array of column names from your query output to monitor\n- Example:\n  {\n    \"alg_name\": \"zscore\",\n    \"alg_parameters\": [\n      {\"dimension\": \"response_time\"}\n    ]\n  }"
+        return "1) zscore\n- Description: Z-score based anomaly detection using standard deviation thresholds\n- Parameters:\n  - alg_parameters: List of parameter objects containing a 'dimension' key\n- Example:\n  {\n    \"alg_name\": \"zscore\",\n    \"alg_parameters\": [\n      {\"dimension\": \"response_time\"}\n    ]\n  }"
 
 
 def _extract_detailed_algorithm_info(alg_class: type) -> str:
@@ -152,8 +135,8 @@ def _extract_detailed_algorithm_info(alg_class: type) -> str:
     name = getattr(alg_class, '__name__', 'UnknownAlgorithm')
 
     # Get the algorithm field default value
-    algorithm_field = getattr(alg_class, 'model_fields', {}).get('algorithm')
-    if algorithm_field and hasattr(algorithm_field, 'default'):
+    algorithm_field = getattr(alg_class, 'model_fields', {}).get('alg_name')
+    if algorithm_field and hasattr(algorithm_field, 'default') and algorithm_field.default is not None:
         alg_name = algorithm_field.default
     else:
         alg_name = name.lower().replace('config', '')
@@ -166,15 +149,15 @@ def _extract_detailed_algorithm_info(alg_class: type) -> str:
     example_params = []
 
     for field_name, field_info in alg_class.model_fields.items():
-        if field_name != 'algorithm':  # Skip the algorithm type field
-            field_desc = field_info.description or f"Field: {field_name}"
-            params.append(f"  - {field_name}: {field_desc}")
+        if field_name == 'alg_name':  # Skip the algorithm identifier field
+            continue
 
-            # Generate example values
-            if field_name == 'dimensions':
-                example_params.append("      {\"dimension\": \"response_time\"}")
-            elif field_name == 'clusters':
-                example_params.append("      {\"dimension\": \"response_time\", \"alg_metadata\": [{\"key\": \"clusters\", \"values\": \"3\"}]}")
+        field_desc = field_info.description or f"Field: {field_name}"
+        params.append(f"  - {field_name}: {field_desc}")
+
+        # Generate example values
+        if field_name == 'alg_parameters':
+            example_params.append("      {\"dimension\": \"response_time\"}")
 
     # Build the full description
     result = f"{alg_name}\n- Description: {description}\n- Parameters:"
@@ -444,19 +427,28 @@ def generate_algorithm_config_example() -> str:
     Generate example JSON for AlgorithmConfig based on the actual class structure.
     """
     try:
-        from models import AlgorithmConfig
+        from models import AlgorithmConfig, AlgorithmParameter
         import json
 
-        # Create an example instance with default values
-        example = AlgorithmConfig()
+        # Create an example instance that mirrors the canonical schema
+        example = AlgorithmConfig(
+            alg_name="zscore",
+            alg_parameters=[
+                AlgorithmParameter(dimension="status_code_200_counter"),
+                AlgorithmParameter(dimension="status_code_5xx_counter")
+            ]
+        )
 
         # Convert to dict and then to JSON string
         example_dict = example.model_dump()
         return json.dumps(example_dict, indent=2)
 
-    except Exception as e:
-        # Fallback example
+    except Exception:
+        # Fallback example that still uses the canonical schema
         return '''{
-  "algorithm": "zscore",
-  "dimensions": ["status_code_200_counter", "status_code_5xx_counter"]
+  "alg_name": "zscore",
+  "alg_parameters": [
+    {"dimension": "status_code_200_counter"},
+    {"dimension": "status_code_5xx_counter"}
+  ]
 }'''

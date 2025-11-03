@@ -172,16 +172,20 @@ def _modify_kb_config_docstring():
       "detection_frequency": "*/30 * * * *"
     }}
 
-    To change the algorithms:
-    {{
-      "config_id": "507f1f77bcf86cd799439011",
-      "algorithms": [
+        To change the algorithms:
         {{
-          "algorithm": "zscore",
-          "dimensions": ["new_metric_column"]
+            "config_id": "507f1f77bcf86cd799439011",
+            "algorithms": [
+                {{
+                    "alg_name": "zscore",
+                    "alg_parameters": [
+                        {{
+                            "dimension": "new_metric_column"
+                        }}
+                    ]
+                }}
+            ]
         }}
-      ]
-    }}
 
     Tips:
     - Use list_kb_configurations first to see current configuration details

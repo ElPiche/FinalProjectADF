@@ -247,6 +247,140 @@ class TestDynamicDescriptions:
                 assert "Input validation failed" not in str(e)
                 assert "Invalid" not in str(e) or "not found" in str(e)
 
+    def test_create_da_config_rejects_invalid_cron_expression(self):
+        """Test that create_da_config rejects invalid CRON expressions."""
+        from mcp_tools_pkg.create_da_config import create_da_config
+        
+        with pytest.raises(Exception) as exc_info:
+            create_da_config(
+                name="test",
+                description="test",
+                training_query="SELECT * FROM test",
+                detection_query="SELECT * FROM test",
+                training_from="2025-01-01T00:00:00Z",
+                training_to="2025-01-02T00:00:00Z",
+                detection_frequency="invalid cron expression",
+                detection_start="2025-01-03T00:00:00Z",
+                algorithms=[{"alg_name": "zscore", "alg_parameters": [{"dimension": "field"}]}]
+            )
+        
+        assert "Invalid CRON expression" in str(exc_info.value)
+
+    def test_create_da_config_rejects_invalid_timestamp(self):
+        """Test that create_da_config rejects invalid ISO 8601 timestamps."""
+        from mcp_tools_pkg.create_da_config import create_da_config
+        
+        with pytest.raises(Exception) as exc_info:
+            create_da_config(
+                name="test",
+                description="test",
+                training_query="SELECT * FROM test",
+                detection_query="SELECT * FROM test",
+                training_from="invalid timestamp",
+                training_to="2025-01-02T00:00:00Z",
+                detection_frequency="* * * * *",
+                detection_start="2025-01-03T00:00:00Z",
+                algorithms=[{"alg_name": "zscore", "alg_parameters": [{"dimension": "field"}]}]
+            )
+        
+        assert "Invalid ISO 8601 timestamp" in str(exc_info.value)
+
+    def test_create_da_config_rejects_incorrect_algorithm_format(self):
+        """Test that create_da_config rejects incorrect algorithm field names."""
+        from mcp_tools_pkg.create_da_config import create_da_config
+        from models import ZScoreConfig
+        
+        # Test with old/incorrect ZScoreConfig format (this test is now obsolete since we fixed the model)
+        # The ZScoreConfig now uses the correct format, so this test should be removed or updated
+        # For now, let's test with a manually constructed incorrect object
+        class OldZScoreConfig:
+            def __init__(self):
+                self.algorithm = "zscore"
+                self.dimensions = ["field"]
+        
+        algorithms = [OldZScoreConfig()]
+        
+        with pytest.raises(Exception) as exc_info:
+            create_da_config(
+                name="test",
+                description="test",
+                training_query="SELECT field FROM test",
+                detection_query="SELECT field FROM test",
+                training_from="2025-01-01T00:00:00Z",
+                training_to="2025-01-02T00:00:00Z",
+                detection_frequency="* * * * *",
+                detection_start="2025-01-03T00:00:00Z",
+                algorithms=algorithms
+            )
+        
+        assert "Unsupported algorithm format" in str(exc_info.value)
+        
+        with pytest.raises(Exception) as exc_info:
+            create_da_config(
+                name="test",
+                description="test",
+                training_query="SELECT field FROM test",
+                detection_query="SELECT field FROM test",
+                training_from="2025-01-01T00:00:00Z",
+                training_to="2025-01-02T00:00:00Z",
+                detection_frequency="* * * * *",
+                detection_start="2025-01-03T00:00:00Z",
+                algorithms=algorithms
+            )
+        
+        assert "Unsupported algorithm format" in str(exc_info.value)
+
+    def test_create_da_config_rejects_incorrect_algorithm_dict_format(self):
+        """Test that create_da_config rejects incorrect algorithm dictionary structure."""
+        from mcp_tools_pkg.create_da_config import create_da_config
+        
+        # Test with incorrect dictionary format
+        algorithms = [{"algorithm": "zscore", "dimensions": ["field"]}]
+        
+        with pytest.raises(Exception) as exc_info:
+            create_da_config(
+                name="test",
+                description="test",
+                training_query="SELECT field FROM test",
+                detection_query="SELECT field FROM test",
+                training_from="2025-01-01T00:00:00Z",
+                training_to="2025-01-02T00:00:00Z",
+                detection_frequency="* * * * *",
+                detection_start="2025-01-03T00:00:00Z",
+                algorithms=algorithms
+            )
+        
+        assert "Algorithm validation error" in str(exc_info.value)
+
+    def test_create_da_config_accepts_correct_algorithm_format(self):
+        """Test that create_da_config accepts the correct algorithm format."""
+        from mcp_tools_pkg.create_da_config import create_da_config
+        from models import ZScoreConfig
+        
+        # Test with ZScoreConfig object (correct format)
+        algorithms = [ZScoreConfig(alg_name="zscore", alg_parameters=[{"dimension": "field"}])]
+        
+        # Should pass validation and only fail at MongoDB connection
+        with pytest.raises(Exception) as exc_info:
+            create_da_config(
+                name="test",
+                description="test",
+                training_query="SELECT field FROM test",
+                detection_query="SELECT field FROM test",
+                training_from="2025-01-01T00:00:00Z",
+                training_to="2025-01-02T00:00:00Z",
+                detection_frequency="* * * * *",
+                detection_start="2025-01-03T00:00:00Z",
+                algorithms=algorithms
+            )
+        
+        # Should fail at MongoDB/Elasticsearch, not validation
+        error_str = str(exc_info.value)
+        assert "Input validation failed" not in error_str
+        assert "Algorithm validation error" not in error_str
+        assert "Invalid CRON expression" not in error_str
+        assert "Invalid ISO 8601 timestamp" not in error_str
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

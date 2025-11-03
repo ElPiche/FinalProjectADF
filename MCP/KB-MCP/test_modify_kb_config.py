@@ -9,7 +9,7 @@ import db
 db.mongo_connection_string = "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin&replicaSet=rs0&directConnection=true"
 
 # Create test algorithm config using ZScoreConfig model
-zscore_config = ZScoreConfig(dimensions=["bytes"])
+zscore_config = ZScoreConfig(alg_parameters=[{"dimension": "bytes"}])
 
 # Test config ID (from previously created config)
 test_config_id = "69080ca0fa82d20eb549daec"

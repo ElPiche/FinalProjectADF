@@ -85,18 +85,18 @@ def test_invalid_kb_config_empty_description():
 def test_valid_zscore_config():
     """Test creating a valid ZScoreConfig."""
     config = ZScoreConfig(
-        algorithm="zscore",
-        dimensions=["field1", "field2"]
+        alg_name="zscore",
+        alg_parameters=[{"dimension": "field1"}, {"dimension": "field2"}]
     )
-    assert config.algorithm == "zscore"
-    assert config.dimensions == ["field1", "field2"]
+    assert config.alg_name == "zscore"
+    assert config.alg_parameters == [{"dimension": "field1"}, {"dimension": "field2"}]
     print("PASS: test_valid_zscore_config")
 
 
 def test_zscore_config_single_dimension():
     """Test ZScoreConfig with single dimension."""
-    config = ZScoreConfig(dimensions=["field1"])
-    assert config.dimensions == ["field1"]
+    config = ZScoreConfig(alg_parameters=[{"dimension": "field1"}])
+    assert config.alg_parameters == [{"dimension": "field1"}]
     print("PASS: test_zscore_config_single_dimension")
 
 

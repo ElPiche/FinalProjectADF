@@ -39,45 +39,23 @@ def create_da_config(
 
     # Validate input using Pydantic models
     try:
-        from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem, AlgorithmParameter
+        from pydantic import ValidationError
+        from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem
 
         # Convert algorithms to AlgorithmConfigItem format
         algorithm_items = []
         for alg in algorithms or []:
-            if hasattr(alg, 'alg_name') and hasattr(alg, 'alg_parameters'):
-                # Already in AlgorithmConfigItem format
-                algorithm_items.append(alg)
-            elif hasattr(alg, 'algorithm') and hasattr(alg, 'dimensions'):
-                # ZScoreConfig format: {"algorithm": "zscore", "dimensions": ["dim1", "dim2"]}
-                alg_name = alg.algorithm
-                dimensions = alg.dimensions
-                
-                alg_params = [AlgorithmParameter(dimension=dim) for dim in dimensions]
-                algorithm_items.append(AlgorithmConfigItem(
-                    alg_name=alg_name,
-                    alg_parameters=alg_params
-                ))
-            elif isinstance(alg, dict):
-                # Dictionary format: {"algorithm": "zscore", "dimensions": ["dim1", "dim2"]}
-                alg_name = alg.get('algorithm') or alg.get('alg_name', 'zscore')
-                dimensions = alg.get('dimensions', [])
-                
-                alg_params = [AlgorithmParameter(dimension=dim) for dim in dimensions]
-                algorithm_items.append(AlgorithmConfigItem(
-                    alg_name=alg_name,
-                    alg_parameters=alg_params
-                ))
-            else:
-                # Try to convert from other formats
-                alg_params = []
-                if hasattr(alg, 'alg_parameters'):
-                    for param in alg.alg_parameters:
-                        if hasattr(param, 'dimension'):
-                            alg_params.append(AlgorithmParameter(dimension=param.dimension))
-                algorithm_items.append(AlgorithmConfigItem(
-                    alg_name=getattr(alg, 'alg_name', getattr(alg, 'algorithm', 'zscore')),
-                    alg_parameters=alg_params
-                ))
+            try:
+                if isinstance(alg, AlgorithmConfigItem):
+                    algorithm_items.append(AlgorithmConfigItem.model_validate(alg.model_dump()))
+                elif isinstance(alg, dict):
+                    algorithm_items.append(AlgorithmConfigItem.model_validate(alg))
+                else:
+                    raise ToolError(
+                        f"Unsupported algorithm format: {type(alg)}. Expected AlgorithmConfigItem or dict with 'alg_name' and 'alg_parameters'."
+                    )
+            except ValidationError as exc:
+                raise ToolError(f"Algorithm validation error: {exc}") from exc
 
         # Create and validate KBConfig instance
         config = KBConfig(

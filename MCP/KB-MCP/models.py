@@ -1,6 +1,6 @@
 # models.py - Pydantic models and data structures for KB-MCP
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import re
@@ -13,12 +13,37 @@ class TrainingConfig(BaseModel):
     training_window: int = Field(description="Training window in seconds")
     is_active: bool = Field(description="Whether training is active")
 
+    @field_validator('from_', 'to')
+    @classmethod
+    def validate_timestamps(cls, v):
+        try:
+            datetime.fromisoformat(v.replace('Z', '+00:00'))
+            return v
+        except ValueError:
+            raise ValueError(f"Invalid ISO 8601 timestamp: {v}")
+
 class DetectionConfig(BaseModel):
     detection_query: str = Field(description="Elasticsearch SQL query for detection")
     from_: str = Field(alias="from", description="Detection start timestamp (ISO 8601)")
     frequency: str = Field(description="Detection frequency (CRON expression)")
     detection_window: int = Field(description="Detection window in seconds")
     is_active: bool = Field(description="Whether detection is active")
+
+    @field_validator('frequency')
+    @classmethod
+    def validate_frequency(cls, v):
+        if not CRON._is_valid_cron(v):
+            raise ValueError(f"Invalid CRON expression: {v}")
+        return v
+
+    @field_validator('from_')
+    @classmethod
+    def validate_from_timestamp(cls, v):
+        try:
+            datetime.fromisoformat(v.replace('Z', '+00:00'))
+            return v
+        except ValueError:
+            raise ValueError(f"Invalid ISO 8601 timestamp: {v}")
 
 class SchedulingConfig(BaseModel):
     training_config: TrainingConfig = Field(description="Training configuration")
@@ -101,12 +126,14 @@ class schedulingDetectionConfig(BaseModel):
 SUPPORTED_ALGORITHMS = {"zscore"}
 
 # Algorithm configuration models for FastMCP tool parameters
-class ZScoreConfig(BaseModel):
-    algorithm: str = Field(default="zscore", description="Algorithm type")
-    dimensions: List[str] = Field(description="List of field names to monitor for anomalies")
+class ZScoreConfig(AlgorithmConfigItem):
+    """Z-score algorithm configuration used by FastMCP tool schemas."""
+
+    alg_name: str = Field(default="zscore", description="Algorithm name (must be 'zscore')")
+
 
 # Union type for all supported algorithms (expand when more algorithms are added)
-AlgorithmConfig = ZScoreConfig  # Add KMeansConfig, ARMAConfig, etc. when implemented
+AlgorithmConfig = AlgorithmConfigItem  # Add KMeansConfig, ARMAConfig, etc. when implemented
 
 # SQL class for validating SQL queries
 class SQL:

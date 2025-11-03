@@ -14,7 +14,7 @@ from mcp_tools_pkg.create_da_config import create_da_config
 from models import ZScoreConfig
 
 # Create a proper ZScoreConfig object
-zscore_config = ZScoreConfig(algorithm='zscore', dimensions=['bytes'])
+zscore_config = ZScoreConfig(alg_name='zscore', alg_parameters=[{'dimension': 'bytes'}])
 
 # Define queries
 training_q = 'SELECT timestamp, bytes FROM ".ds-kibana_sample_data_logs-2025.11.02-000001" WHERE timestamp >= "2025-10-01" AND timestamp < "2025-11-01"'
