@@ -47,7 +47,7 @@ DA_COLLECTION_NAME = "series"
 DA_RESULT_COLLECTION_NAME = "series_result"
 
 # conexión a elasticSearch
-ES_HOST = "http://elasticsearch-anomalies:9201"
+ES_HOST = "http://elasticsearch-anomalies:9200"
 ES_INDEX = "test_logs"
 mongo_timeout_ms = 2000
 
@@ -183,7 +183,7 @@ def parse_config(data: dict) -> Config:
         _id=data["_id"],
         kb_id=data["kb_id"],
         kb_description=data["kb_description"],
-        created_at=parse_iso(data["created_at"]),
+        created_at=data["created_at"],
         mode=data["mode"],
 
         algorithms=[
@@ -196,8 +196,8 @@ def parse_config(data: dict) -> Config:
                                           for am in ov["algorithm_metadata"]}
                         for ov in a["parameters"]["observed_values"]
                     },
-                    from_=parse_iso(a["parameters"]["from"]),
-                    to=parse_iso(a["parameters"]["to"]),
+                    from_=a["parameters"]["from"],
+                    to=a["parameters"]["to"],
                 ),
             )
             for a in data["algorithms"]

@@ -7,6 +7,7 @@ import jakarta.validation.constraints.Null;
 import lombok.*;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -40,12 +41,11 @@ public class AlgorithmParameters {
         private String dimension;
 
         @Field("algorithm_metadata")
-        @Nullable
         private List<KeyValuePair> algorithmMetadata;
 
         public ObservedValue(AlgorithmParameter from){
             this.dimension = from.getDimension();
-            this.algorithmMetadata = from.getAlgMetadata();
+            this.algorithmMetadata = from.getAlgMetadata() != null ? from.getAlgMetadata() : new ArrayList<>();
         }
     }
 
