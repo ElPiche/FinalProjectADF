@@ -4,6 +4,7 @@ import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.entity.serie.Mode;
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -24,6 +25,7 @@ public class TrainConfig {
     private String id;
 
     @Field("kb_id")
+    @Indexed(unique = true)
     private String kbId;
 
     @Field("kb_description")

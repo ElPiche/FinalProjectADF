@@ -48,5 +48,4 @@ public class AlgorithmParameters {
             this.algorithmMetadata = from.getAlgMetadata() != null ? from.getAlgMetadata() : new ArrayList<>();
         }
     }
-
 }

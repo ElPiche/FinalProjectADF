@@ -45,6 +45,10 @@ public class BatchModeService {
             pipeline.process(query);
 
             var trainConfig = new TrainConfig(config);
+
+            trainingConfigRepository.findByKbId(config.getId()).ifPresent(trainingConfig -> {
+                trainConfig.setId(trainingConfig.getId());
+            });
             trainingConfigRepository.save(trainConfig);
 
         }

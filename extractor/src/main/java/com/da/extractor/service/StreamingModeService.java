@@ -60,6 +60,10 @@ public class StreamingModeService {
                     Mode.DETECTION
             );
 
+            schedulerConfigRepository.findByKbId(id).ifPresent(existingConfig -> {
+                schedulerConfig.setId(existingConfig.getId());
+            });
+
             schedulerService.createStreamingTask(
                     schedulerConfigRepository.save(schedulerConfig),
                     pipeMetadata

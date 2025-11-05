@@ -50,9 +50,9 @@ public class SchedulerService {
         CronTrigger cronTrigger = new CronTrigger(springCron);
         Runnable task = () -> {
             try {
-                TrainConfig trainConfig = trainingConfigRepository.findByKbId(config.getKbId());
+                TrainConfig trainConfig = trainingConfigRepository.findByKbId(config.getKbId()).orElseThrow();
 
-                if(trainConfig != null && trainConfig.isTrained()){
+                if(trainConfig.isTrained()){
                     Instant to  = Instant.now();
                     Instant from = to.minusSeconds(config.getWindow());
                     String elasticQuery = config.getQuery()
