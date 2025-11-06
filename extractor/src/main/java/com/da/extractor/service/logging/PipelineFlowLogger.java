@@ -25,6 +25,7 @@ public class PipelineFlowLogger {
         log.info(logEntry.toString());
     }
 
+    //@SuppressWarnings("unused")
     public void warn(String message) {
         var logEntry = createLogEntry(LogLevel.WARN, message);
 

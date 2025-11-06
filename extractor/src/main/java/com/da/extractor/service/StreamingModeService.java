@@ -6,7 +6,6 @@ import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.entity.serie.Mode;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.extractor.SchedulerConfigRepository;
-import com.da.extractor.service.logging.PipeLineFlowLoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
