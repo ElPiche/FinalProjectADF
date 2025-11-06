@@ -100,8 +100,10 @@ public class SchedulerService {
         return (parts.length == 5) ? "0 " + cron : cron;
     }
 
-    public boolean cancelTask(String id) {
+    public void cancelTask(String id) {
         ScheduledFuture<?> f = scheduledTasks.remove(id);
-        return f != null && f.cancel(false);
+        if (f != null) {
+            f.cancel(false);
+        }
     }
 }

@@ -4,7 +4,6 @@ import co.elastic.clients.elasticsearch.sql.Column;
 import co.elastic.clients.elasticsearch.sql.QueryResponse;
 import co.elastic.clients.json.JsonData;
 import com.da.extractor.service.ElasticService;
-import com.da.extractor.service.logging.PipelineFlowLogger;
 import com.da.extractor.utils.Utils;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +27,7 @@ public class ExtractorService {
                             Consumer<List<Map<String, Object>>> pageProcessor) throws Exception {
 
         String cursor = null;
-        String lastCursor = null;
+        String lastCursor;
         List<Column> columns = new ArrayList<>();
 
         do{

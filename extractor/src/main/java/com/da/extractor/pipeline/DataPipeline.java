@@ -1,8 +1,6 @@
 package com.da.extractor.pipeline;
 
 import com.da.extractor.entity.serie.SeriesElement;
-import com.da.extractor.entity.training.TrainConfig;
-import com.da.extractor.service.logging.PipelineFlowLogger;
 
 import java.util.List;
 import java.util.Map;

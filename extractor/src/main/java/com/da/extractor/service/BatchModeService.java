@@ -11,8 +11,6 @@ import com.da.extractor.service.logging.PipeLineFlowLoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.util.Date;
 import java.util.List;
 
 @Service
@@ -59,9 +57,8 @@ public class BatchModeService {
                 pipeline.process(query);
                 var trainConfig = new TrainConfig(config);
 
-                trainingConfigRepository.findByKbId(config.getId()).ifPresent(trainingConfig -> {
-                    trainConfig.setId(trainingConfig.getId());
-                });
+                trainingConfigRepository.findByKbId(config.getId()).ifPresent(trainingConfig ->
+                        trainConfig.setId(trainingConfig.getId()));
                 trainingConfigRepository.save(trainConfig);
 
                 logger.info("Batch training completed for KB: " + config.getId() + " at " + DateTime.of(Instant.now()));
