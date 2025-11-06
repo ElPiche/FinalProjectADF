@@ -5,7 +5,7 @@ import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
-import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
+import com.da.extractor.repository.extractor.SchedulerConfigRepository;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
 import org.springframework.scheduling.support.CronTrigger;
@@ -100,8 +100,10 @@ public class SchedulerService {
         return (parts.length == 5) ? "0 " + cron : cron;
     }
 
-    public boolean cancelTask(String id) {
+    public void cancelTask(String id) {
         ScheduledFuture<?> f = scheduledTasks.remove(id);
-        return f != null && f.cancel(false);
+        if (f != null) {
+            f.cancel(false);
+        }
     }
 }

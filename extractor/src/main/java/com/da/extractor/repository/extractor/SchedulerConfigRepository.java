@@ -1,4 +1,4 @@
-package com.da.extractor.repository.scheduler;
+package com.da.extractor.repository.extractor;
 
 import com.da.extractor.entity.SchedulerConfig;
 import org.springframework.data.mongodb.repository.MongoRepository;

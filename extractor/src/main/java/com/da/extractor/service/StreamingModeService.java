@@ -4,10 +4,8 @@ package com.da.extractor.service;
 import com.da.extractor.entity.SchedulerConfig;
 import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.entity.serie.Mode;
-import com.da.extractor.pipeline.ExtractorService;
 import com.da.extractor.pipeline.PipeMetadata;
-import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.da.extractor.repository.extractor.SchedulerConfigRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
@@ -16,26 +14,23 @@ import java.util.List;
 @Service
 public class StreamingModeService {
 
-    @Autowired
-    ExtractorService extractorService;
-
     private final SchedulerConfigRepository schedulerConfigRepository;
 
     private final SchedulerService schedulerService;
 
-    public StreamingModeService(SchedulerConfigRepository schedulerConfigRepository, SchedulerService schedulerService) {
+    public StreamingModeService(SchedulerConfigRepository schedulerConfigRepository,
+                                SchedulerService schedulerService) {
         this.schedulerConfigRepository = schedulerConfigRepository;
         this.schedulerService = schedulerService;
     }
 
-    public void executeConfiguration(KbMongo config) throws Exception {
+    public void executeConfiguration(KbMongo config) {
 
         var kbStreamingConfig = config
                 .getScheduling()
                 .getDetectionConfig();
 
         if(kbStreamingConfig != null && kbStreamingConfig.isActive()) {
-
             var queryElastic = kbStreamingConfig.getQueryElastic();
             var window = kbStreamingConfig.getWindow();
             var streamingConfigs = kbStreamingConfig.getFrequency();
@@ -60,9 +55,8 @@ public class StreamingModeService {
                     Mode.DETECTION
             );
 
-            schedulerConfigRepository.findByKbId(id).ifPresent(existingConfig -> {
-                schedulerConfig.setId(existingConfig.getId());
-            });
+            schedulerConfigRepository.findByKbId(id).ifPresent(existingConfig ->
+                    schedulerConfig.setId(existingConfig.getId()));
 
             schedulerService.createStreamingTask(
                     schedulerConfigRepository.save(schedulerConfig),
