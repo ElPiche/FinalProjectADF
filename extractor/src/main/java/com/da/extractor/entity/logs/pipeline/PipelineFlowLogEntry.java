@@ -9,6 +9,8 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import java.util.Date;
+
 @Document("pipeline_flow_logs")
 @NoArgsConstructor
 @AllArgsConstructor
@@ -26,4 +28,9 @@ public class PipelineFlowLogEntry {
     public LogLevel logLevel;
 
     public String message;
+
+    @Override
+    public String toString() {
+        return String.format("[KB ID: %s] - %s", kbId, message);
+    }
 }

@@ -23,10 +23,4 @@ public class LoaderService {
 
         System.out.println("Loaded " + savedSeries.size() + " series into the database.");
     }
-
-    public void loadTrainingConfig(TrainConfig trainConfig){
-        var savedConfig = trainingConfigRepository.save(trainConfig);
-
-        System.out.println("Loaded training config with id: " + savedConfig.getId());
-    }
 }
