@@ -1,4 +1,6 @@
 import json
+from datetime import timedelta
+
 import numpy as np
 import pandas as pd
 from pymongo import MongoClient
@@ -44,16 +46,60 @@ def fetch_logs_from_mongo(connection_string: str, database: str, collection: str
         df[field] = pd.to_numeric(df[field], errors="coerce").fillna(0)
     return df
 
-
+# TODO: this might get resource intensive if time_window is small and df_train is too big.
 # === TRAIN BASELINE ==========================================================
-def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, percentile: float = 99.5):
+def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, time_window: int = 60, percentile: float = 99.5):
     """Compute mean, std, and dynamic threshold from training data."""
-    vals = df_train[field].astype(float).values
-    mean = np.mean(vals)
-    std = np.std(vals) if np.std(vals) > 0 else 1e-6
-    z_scores = np.abs((vals - mean) / std)
-    threshold = np.percentile(z_scores, percentile)
-    return {"kb_id": kb_id, "field": dimension, "mean": mean, "std": std, "threshold": threshold}
+
+
+    # this picks up the hours of the timestamp, turns it into minutes, sum the current minute and divide by time_window
+    # which creates a lil logical division exactly the way we want to bucket
+    df_train["train_window"] = (
+            (df_train["timestamp"].dt.hour * 60 + df_train["timestamp"].dt.seconds)
+            // time_window
+    )
+    
+    baselines = {}
+
+    # 1. Show how many rows per bucket
+    print(df_train["train_window"].value_counts().sort_index())
+
+    # 2. Inspect bucket 0 specifically
+    b0 = df_train[df_train["train_window"] == 0]
+    print("bucket 0 size:", len(b0))
+    print(b0[field].head(20))  # see example values
+    print(b0[field].describe())  # count, mean, std, min, max
+
+    # 3. Check for non-numeric / NaN / inf values in bucket 0
+    print("isnull:", b0[field].isnull().sum())
+    print("nunique:", b0[field].nunique())
+    print("unique samples (first 20):", b0[field].unique()[:20])
+
+    # 4. Global check: are values mostly constant?
+    print(df_train[field].value_counts().head(10))
+
+    grouped = df_train.groupby("train_window")
+    for window, data in grouped:
+
+        vals = data[field].astype(float).values
+        mean = np.mean(vals)
+        std = np.std(vals) if np.std(vals) > 0 else 1e-6
+        z_scores = np.abs((vals - mean) / std)
+        threshold = np.percentile(z_scores, percentile)
+
+        baselines[window] = {
+            "mean": mean,
+            "std": std,
+            "threshold": threshold,
+        }
+
+    baselines_str_keys = {str(k): v for k, v in baselines.items()}
+    return {
+        "kb_id": kb_id,
+        "field": dimension,
+        "time_window": time_window,
+        "buckets": baselines_str_keys
+    }
 
 
 # === ANOMALY DETECTION ======================================================

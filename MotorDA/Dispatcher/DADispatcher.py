@@ -76,7 +76,7 @@ class Algorithm:
                     config, self)
 
                 print(observed_values)
-                results = run_zscore_batch_training(config, observed_values)
+                results = run_zscore_batch_training(config, observed_values, self.parameters.train_window)
                 # ----------------------------ENDING OF TRAINING ZSCORE----------------------------------------------------------------------------
 
                 # --------------------------- START OF DETECTION ZSCORE----------------------------------------------------------------------------
@@ -270,7 +270,7 @@ def get_kb_id(doc: Dict[str, Any]) -> Optional[str]:
     return kb.get("id") or kb.get("Id")
 
 
-def run_zscore_batch_training(config: Config, observed_values):
+def run_zscore_batch_training(config: Config, observed_values, time_window: int = 60):
 
     # {'train_window': 60, 'dimensions': ['5xx_status_code', '4xx_status_code', '2xx_status_code'], 'from': '2025-10-01T00:00:00.000Z', 'to': '2025-11-10T00:00:00.000Z'}
     #     # query = {"metadata.dim": "2xx", "metadata.kbid": "A1"}
@@ -284,7 +284,8 @@ def run_zscore_batch_training(config: Config, observed_values):
             print(f"printing the key of the observed_values: {key}")
             print(f"printing the key of the observed_values: {value}")
 
-            results = train_baseline(config.kb_id, key, value, "value")
+            results = train_baseline(config.kb_id, key, value, "value", time_window)
+
             da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(
                 results)
 # is_trained
@@ -578,7 +579,7 @@ def watch_kb_changes(kb_client):
         for change in stream:
             print(f"something happened on: {TRAINING_COLLECTION_NAME}")
 
-            if change.get("operationType") == "insert":
+            if change.get("operationType") == "insert" or change.get("operationType") == "update":
                 print(
                     f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
 
@@ -590,6 +591,10 @@ def watch_kb_changes(kb_client):
 
                 # now we go thru each algorithm call we extracted, and try to execute training on them
                 config.execute_algos()
+
+                # TODO: delete series once they are trained
+
+
 
 
 def watch_detection_changes(kb_client):
@@ -630,6 +635,7 @@ def watch_detection_changes(kb_client):
                     "metadata.dim": "dim",
                     "metadata.mode": "mode"
                 })
+                # TODO: delete series once they are detected
 
                 # 3) make _id string (pandas doesn't like ObjectId)
                 if "_id" in df.columns:
@@ -644,9 +650,10 @@ def watch_detection_changes(kb_client):
 
                 if anomalies[0].get("is_anomaly"):
                     print("=========================================================================================================================")
-                    print(f"anomaly detected: {anomalies}")
+                    print(f"\033[31m anomaly detected: {anomalies} \033[0m")
                     print(
                         "=========================================================================================================================")
+
                     doc = {
                         'algorithm': 'ZScore',
                         # optional — store which metric the anomaly belongs to
@@ -654,8 +661,9 @@ def watch_detection_changes(kb_client):
                         'text': 'Anomaly detected',
                         'timestamp': anomalies[0].get("timestamp"),
                         'value': anomalies[0].get("value"),
-                        'created_at' : datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        'created_at' : datetime.now()
                     }
+
                     elastic_client.index(index="anomaly", document=doc)
 
 
