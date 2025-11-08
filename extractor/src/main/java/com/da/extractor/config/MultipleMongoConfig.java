@@ -27,8 +27,8 @@ public class MultipleMongoConfig {
     @Value("${app.mongodb.database.knowledge-base-db}")
     private String knowledgeBaseDb;
 
-    @Value("${app.mongodb.database.extractor-db}")
-    private String extractorDb;
+    @Value("${app.mongodb.database.scheduler-db}")
+    private String schedulerDb;
 
     @Bean
     public MongoClient mongoClient(){
@@ -62,7 +62,7 @@ public class MultipleMongoConfig {
     }
 
     @Bean
-    public MongoTemplate extractorMongoTemplate(MongoClient client, @Qualifier("mongoCustomConversions") MongoCustomConversions conversions) {
-        return buildTemplate(extractorDb, client, conversions);
+    public MongoTemplate schedulerMongoTemplate(MongoClient client, @Qualifier("mongoCustomConversions") MongoCustomConversions conversions) {
+        return buildTemplate(schedulerDb, client, conversions);
     }
 }

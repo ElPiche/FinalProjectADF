@@ -10,26 +10,15 @@ import java.util.*;
 public class FilterService {
 
 
-    public List<SeriesElement> applyFilter(List<Map<String, Object>> data, PipeMetadata metadata) throws IllegalArgumentException{
+    public List<SeriesElement> applyFilter(List<Map<String, Object>> data, PipeMetadata metadata) {
 
         List<SeriesElement> seriesElements = new ArrayList<>();
-
-        if(!data.stream().allMatch(res ->
-                res.containsKey("timestamp") || res.containsKey("es_timestamp"))){
-
-            throw new IllegalArgumentException("Query result has one or more rows without the required " +
-                    "\"timestamp\" field");
-        }
 
         for(Map<String, Object> row : data){
             for(String observedValue : metadata.getObservedValues()){
                 if(row.containsKey(observedValue)){
-                    Date ts =(Date) row.getOrDefault("es_timestamp", row.get("timestamp"));
-
-                    Long val = Optional.of((Long) row.get(observedValue))
-                            .orElseThrow(() -> new IllegalArgumentException("Observed value " + observedValue +
-                                    "didn't provided for series at timestamp: " + ts.toString()));
-
+                    Long val = row.get(observedValue) != null ? (Long) row.get(observedValue) : 0;
+                    Date ts = (Date) row.getOrDefault("es_timestamp", row.get("timestamp"));
                     seriesElements.add(new SeriesElement(null,
                             val,
                             ts,
