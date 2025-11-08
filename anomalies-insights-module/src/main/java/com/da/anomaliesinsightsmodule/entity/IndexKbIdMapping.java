@@ -18,8 +18,20 @@ public class IndexKbIdMapping {
     @Id
     private String kbId;
 
-    @Field("index_name")
+    @Field(name = "indexName")
     private String indexName;
+
+    @Field(name = "dataViewId")
+    private String dataViewId;
+
+    @Field(name = "savedSearchId")
+    private String savedSearchId;
+
+    @Field(name = "lensId")
+    private String lensId;
+
+    @Field(name = "dashboardId")
+    private String dashboardId;
 
    // @Field("kb_id")
     // Unique field
