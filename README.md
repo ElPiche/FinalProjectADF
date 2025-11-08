@@ -1,4 +1,4 @@
-# FinalProjectADF
+# Detector de Anomalías 
 Proyecto final tecnólogo en informática Framework de detección de anomalías
 [Parking Lot](https://docs.google.com/document/d/1zOSzxRsrPZe7DSr-DHhbfsDFXiPR3SI07RYdtVkiDpQ/edit?tab=t.0#heading=h.yzf6b27f5gn7)
 
@@ -10,10 +10,60 @@ Proyecto final tecnólogo en informática Framework de detección de anomalías
 ## Setup 
 
 ### Infraestructura principal
-docker-compose up -d
+Utilizando Docker: En la raiz del proyecto ejecutar: `docker-compose up --b -d`
 
-### Servicio extractor
-docker-compose -f extractor/docker-compose.yml up -d
+### Configuración de MCP's para Claude Desktop
+El framework funciona mediante conversaciones con un modelo LLM que tenga capacidades 
+de utilizar MCP's.
+Recomendamos utilizar Claude Desktop para este proposito que puede ser descargado desde su 
+[pagina oficial](https://www.claude.com/download).
+Una vez instalado Claude Desktop y levantada la infraestructura principal deberemos dirigimos al archivo `claude_desktop_config.json` al cual accedemos desde Claude Dekstop yendo a Ajustes > Desarrollador > Editar configuración.
 
-### Toda le infraestructura junta __(no funciona por el momento)__
-~~docker-compose -f docker-compose.yml -f extractor/docker-compose.yml up -d~~
+En Windows tipicamente este archivo se encuentra en `C:\Users\<USUARIO>\AppData\Roaming\Claude`.
+
+Una vez alli agregamos la siguiente configuración:
+```json
+{
+  "mcpServers": {
+    "elasticsearch": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ES_URL",
+        "mcp/elasticsearch",
+        "stdio"
+      ],
+      "env": {
+        "ES_URL": "http://host.docker.internal:9200"
+      }
+    },
+    "kb-mcp": {
+      "command": "docker",
+      "args": [
+        "exec",
+        "-i",
+        "kb-mcp",
+        "python",
+        "kb-mcp.py",
+        "--server"
+      ],
+      "env": {},
+      "alwaysAllow": [
+        "create_da_config",
+        "elasticsearch_sql",
+        "list_available_algorithms",
+        "modify_kb_config",
+        "list_kb_configurations",
+        "describe_mcp_server"
+      ]
+    }
+  }
+}
+```
+
+Una vez completado estos pasos solo bastaria con empezar a conversar con Claude. Se recomienda utilizar el modelo de Sonnet en sus versiones 4.1 o 4.5.
+
+En caso de que falle a la hora de conectarse con los MCP's, cerrar Claude Desktop, volverlo a abrir y reintentar.
