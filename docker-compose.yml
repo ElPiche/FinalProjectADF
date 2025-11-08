@@ -231,8 +231,10 @@ services:
     container_name: etl-app
     # restart: unless-stopped
     depends_on:
-      - elasticsearch-dataset
-      - mongodb
+      elasticsearch-dataset:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
     environment:
     - SPRING_DATA_MONGODB_DATABASE=anomaly_detection
     - SPRING_ELASTICSEARCH_URIS=http://elasticsearch-dataset:9200
