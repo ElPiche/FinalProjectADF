@@ -19,11 +19,6 @@ public class ValidatorController {
         this.extractorService = extractorService;
     }
 
-    @GetMapping("/ping")
-    public ResponseEntity ping() {
-        return ResponseEntity.noContent().build();
-    }
-
     @PostMapping(value = "/query")
     public ResponseEntity<ValidateQueryResponseDto> validateQuery(@RequestBody ValidateQueryRequestDto validateQueryRequestDto) {
         List<String> validationErrors = new ArrayList<>();

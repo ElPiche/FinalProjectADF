@@ -2,7 +2,6 @@ package com.da.extractor.pipeline;
 
 import com.da.extractor.entity.serie.SeriesElement;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
