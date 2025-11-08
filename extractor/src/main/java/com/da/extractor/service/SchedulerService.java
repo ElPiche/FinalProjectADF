@@ -5,7 +5,7 @@ import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
-import com.da.extractor.repository.extractor.SchedulerConfigRepository;
+import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
 import org.springframework.scheduling.support.CronTrigger;

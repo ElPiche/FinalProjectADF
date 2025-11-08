@@ -20,7 +20,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # Etapa de ejecución
-FROM openjdk:25-jdk
+FROM eclipse-temurin:25-jdk
 
 # Crear usuario no root para seguridad
 RUN groupadd -r appuser && useradd -r -g appuser appuser

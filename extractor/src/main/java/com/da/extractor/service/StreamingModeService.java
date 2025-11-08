@@ -5,7 +5,7 @@ import com.da.extractor.entity.SchedulerConfig;
 import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.entity.serie.Mode;
 import com.da.extractor.pipeline.PipeMetadata;
-import com.da.extractor.repository.extractor.SchedulerConfigRepository;
+import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
@@ -31,6 +31,7 @@ public class StreamingModeService {
                 .getDetectionConfig();
 
         if(kbStreamingConfig != null && kbStreamingConfig.isActive()) {
+
             var queryElastic = kbStreamingConfig.getQueryElastic();
             var window = kbStreamingConfig.getWindow();
             var streamingConfigs = kbStreamingConfig.getFrequency();
