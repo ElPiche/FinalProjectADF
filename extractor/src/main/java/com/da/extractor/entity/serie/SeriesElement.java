@@ -20,7 +20,7 @@ public class SeriesElement {
     private String id;
 
     @Field("value")
-    private Long value;
+    private double value;
 
     @Field("timestamp")
     private Date timestamp;
