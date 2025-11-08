@@ -7,6 +7,7 @@ import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
 import org.springframework.stereotype.Service;
+import java.util.regex.*;
 
 import java.util.List;
 
@@ -42,17 +43,28 @@ public class BatchModeService {
                     .replace("$from", kbTrainingConfig.getFrom())
                     .replace("$to", kbTrainingConfig.getTo());
 
+                
             pipeline.process(query);
-
             var trainConfig = new TrainConfig(config);
 
-            trainingConfigRepository.findByKbId(config.getId()).ifPresent(trainingConfig -> {
-                trainConfig.setId(trainingConfig.getId());
-            });
-            trainingConfigRepository.save(trainConfig);
+            //trainConfig.setIndexName(extractIndexName(query));
+            //TODO: llamar modulo de anomalías.
 
+            trainingConfigRepository.findByKbId(config.getId()).ifPresent(trainingConfig ->
+                    trainConfig.setId(trainingConfig.getId()));
+            trainingConfigRepository.save(trainConfig);
         }
 
+    }
+
+    //Obtener nombre del indice de la query
+    public static String extractIndexName(String query) {
+        Pattern pattern = Pattern.compile("FROM\\s+\"?([^\"]+)\"?", Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(query);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
     }
 
 }
