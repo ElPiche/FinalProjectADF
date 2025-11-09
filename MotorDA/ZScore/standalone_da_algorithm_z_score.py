@@ -54,7 +54,6 @@ def fetch_logs_from_mongo(connection_string: str, database: str, collection: str
         df[field] = pd.to_numeric(df[field], errors="coerce").fillna(0)
     return df
 
-
 # TODO: this might get resource intensive if time_window is small and df_train is too big.
 # === TRAIN BASELINE ==========================================================
 def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, time_window: int = 3600, percentile: float = 99.5):
@@ -72,6 +71,7 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
 
     baselines = {}
 
+    """
     #--------------------------DEBUG PRINTS---------------------------------------------------------------------
     # 1. Show how many rows per bucket
     print(df_train["train_window"].value_counts().sort_index())
@@ -90,20 +90,44 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
     # 4. Global check: are values mostly constant?
     print(df_train[field].value_counts().head(10))
     # --------------------------DEBUG PRINTS---------------------------------------------------------------------
-
+    """
     grouped = df_train.groupby("train_window")
     for window, data in grouped:
 
+
         vals = data[field].astype(float).values
-        mean = np.mean(vals)
-        std = np.std(vals) if np.std(vals) > 0 else 1e-6
-        z_scores = np.abs((vals - mean) / std)
-        threshold = np.percentile(z_scores, percentile)
+
+        if len(vals) < 3: #if our bucket has less than 3 values
+
+            print("\033[95m -----------------------------------------------------------------  \033[0m")
+
+            print("\033[95m TRAINING Z_SCORE WITH GLOBAL DISTRIBUTION DUE TO LOW DATA AMOUNT  \033[0m")
+
+            mean = np.mean(df_train[field]) #global mean
+            std = np.std(df_train[field]) if np.std(df_train[field]) > 0 else 1e-6 #global std
+            z_scores = np.abs((vals - mean) / std)
+            threshold = np.percentile(z_scores, percentile)
+
+            print("\033[95m -----------------------------------------------------------------  \033[0m")
+
+        else:
+
+            print("\033[92m -----------------------------------------------------------------  \033[0m")
+
+            print("\033[92m TRAINING Z_SCORE WITH ENOUGH BUCKETED DATA  \033[0m")
+
+            mean = np.mean(vals)
+            std = np.std(vals) if np.std(vals) > 0 else 1e-6
+            z_scores = np.abs((vals - mean) / std)
+            threshold = np.percentile(z_scores, percentile)
+
+            print("\033[92m -----------------------------------------------------------------  \033[0m")
+
 
         baselines[window] = {
             "mean": mean,
             "std": std,
-            "threshold": threshold,            
+            "threshold": threshold,
             "timestamp_mean": data["timestamp"].mean().isoformat(),
             "is_workday": bool(data["is_workday"].mode()[0])  # True if mostly weekdays
         }
