@@ -3,7 +3,6 @@ package com.da.anomaliesinsightsmodule.controller;
 import com.da.anomaliesinsightsmodule.dto.DocumentDto;
 import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
 import com.da.anomaliesinsightsmodule.service.InsightsService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,8 +10,11 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/insights")
 public class InsightsController {
 
-    @Autowired
-    InsightsService insightsService;
+    private final InsightsService insightsService;
+
+    public InsightsController(InsightsService insightsService) {
+        this.insightsService = insightsService;
+    }
 
     @GetMapping("/test")
     public ResponseEntity<String> getTest(){
