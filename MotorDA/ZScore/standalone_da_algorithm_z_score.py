@@ -145,62 +145,70 @@ def detectar_anomalias_df(df: pd.DataFrame, baseline: dict, ventana_minutos: int
 
 
 
-def train_baseline_advanced(
+def train_baseline(
     kb_id: str,
     dimension: str,
     df_train: pd.DataFrame,
     field: str,
-    ventana_minutos: int,
+    ventana_minutos: int = 60,
     percentile: float = 99.5,
-    min_points: int = 10
+    min_points: int = 10,
+    zero_ratio_threshold: float = 0.9
 ):
-    """
-    Train statistical baselines per (is_workday, time_bucket) pair.
-    """
-
-    # Ensure datetime index
     df_train = df_train.copy()
-    df_train["timestamp"] = pd.to_datetime(df_train["timestamp"])
-    df_train.set_index("timestamp", inplace=True)
-    df_train[field] = df_train[field].astype(float)
+    df_train["timestamp"] = pd.to_datetime(df_train["timestamp"], utc=True)
+    df_train = df_train.set_index("timestamp")
 
-    # Derive temporal features
-    df_train["is_workday"] = df_train.index.dayofweek < 5
+    df_train["dayofweek"] = df_train.index.dayofweek
+    df_train["is_workday"] = df_train["dayofweek"] < 5
     df_train["bucket_index"] = (df_train.index.hour * 60 + df_train.index.minute) // ventana_minutos
 
-    buckets = {"workday": {}, "non_workday": {}}
+    baselines = {}
 
-    # Group by (is_workday, bucket)
     for (is_workday, bucket_idx), group in df_train.groupby(["is_workday", "bucket_index"]):
-        vals = group[field].values
+        vals = group[field].astype(float).values
         n = len(vals)
+        key = f"{'WD' if is_workday else 'WE'}:{bucket_idx}"
 
         if n < min_points:
-            buckets["workday" if is_workday else "non_workday"][f"bucket_{bucket_idx}"] = {
+            baselines[key] = {
                 "sufficient_data": False,
-                "data_points": n,
+                "data_points": int(n),
+                "is_workday": bool(is_workday)
             }
             continue
 
-        mean = np.mean(vals)
-        std = np.std(vals) if np.std(vals) > 0 else 1e-6
-        z_scores = np.abs((vals - mean) / std)
-        threshold = np.percentile(z_scores, percentile)
-        timestamp_mean = group.index.mean()
+        zero_ratio = np.mean(vals == 0)
 
-        buckets["workday" if is_workday else "non_workday"][f"bucket_{bucket_idx}"] = {
-            "mean": float(mean),
-            "std": float(std),
-            "threshold": float(threshold),
-            "timestamp_mean": timestamp_mean.isoformat(),
-            "is_workday": bool(is_workday),
-            "data_points": int(n),
-            "sufficient_data": True,
-        }
+        if zero_ratio >= zero_ratio_threshold:
+            # Mostly zero bucket: treat any nonzero as anomaly
+            baselines[key] = {
+                "type": "mostly_zero",
+                "zero_ratio": float(zero_ratio),
+                "nonzero_prob": float(1 - zero_ratio),
+                "sufficient_data": True,
+                "is_workday": bool(is_workday),
+                "data_points": int(n)
+            }
+        else:
+            mean = np.mean(vals)
+            std = np.std(vals) if np.std(vals) > 0 else 1e-6
+            z_scores = np.abs((vals - mean) / std)
+            threshold = np.percentile(z_scores, percentile)
+            baselines[key] = {
+                "type": "normal",
+                "mean": float(mean),
+                "std": float(std),
+                "threshold": float(threshold),
+                "timestamp_mean": group.index.mean().isoformat(),
+                "is_workday": bool(is_workday),
+                "data_points": int(n),
+                "sufficient_data": True,
+            }
 
     return {
         "kb_id": kb_id,
         "dimension": dimension,
         "time_window": ventana_minutos,
-        "buckets": buckets,
+        "buckets": baselines,
     }
