@@ -1,0 +1,20 @@
+package com.da.anomaliesinsightsmodule.dto;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+public class DocumentDto {
+
+    public String algorithm;
+    public String metric;
+    public String text;
+    public String timestamp;
+    public String value;
+    public String created_at;
+}

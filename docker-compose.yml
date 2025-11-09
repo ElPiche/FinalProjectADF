@@ -223,6 +223,44 @@ services:
       retries: 3
       start_period: 40s
 
+  
+  extractor:
+    build:
+      context: ./extractor
+      dockerfile: Dockerfile
+    container_name: etl-app
+    # restart: unless-stopped
+    depends_on:
+      elasticsearch-dataset:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    environment:
+    - SPRING_DATA_MONGODB_DATABASE=anomaly_detection
+    - SPRING_ELASTICSEARCH_URIS=http://elasticsearch-dataset:9200
+    - JAVA_OPTS=-Xmx512m -Xms256m
+    - SPRING_PROFILES_ACTIVE=docker
+    ports:
+    - 8086:8080
+    networks:
+    - adf-network
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8080/actuator/health
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   dispatcher:
     build:
       context: . # change to ./MotorDA if the Dockerfile is inside MotorDA

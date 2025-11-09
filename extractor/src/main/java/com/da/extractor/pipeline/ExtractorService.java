@@ -26,7 +26,7 @@ public class ExtractorService {
                             Consumer<List<Map<String, Object>>> pageProcessor) throws Exception {
 
         String cursor = null;
-        String lastCursor = null;
+        String lastCursor;
         List<Column> columns = new ArrayList<>();
 
         do{
