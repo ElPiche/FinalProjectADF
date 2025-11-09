@@ -1,18 +1,8 @@
 import json
 from datetime import timedelta
-
 import numpy as np
 import pandas as pd
 from pymongo import MongoClient
-
-
-# === CONNECTION ==============================================================
-def get_mongo_client(connection_string: str):
-    """Return a connected MongoDB client."""
-    cli = MongoClient(connection_string, serverSelectionTimeoutMS=5000)
-    cli.admin.command("ping")
-    return cli
-
 
 # === UTILS ===================================================================
 def add_workday_flag(df: pd.DataFrame) -> pd.DataFrame:
@@ -22,37 +12,6 @@ def add_workday_flag(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# === DATA FETCH ==============================================================
-def fetch_logs_from_mongo(connection_string: str, database: str, collection: str,
-                          start_iso: str, end_iso: str, observed_fields: list[str]):
-    """Fetch data from MongoDB within the given ISO date range and fields."""
-    start_dt = pd.to_datetime(start_iso, utc=True)
-    end_dt = pd.to_datetime(end_iso, utc=True)
-
-    # picks up all the values from the observed_fields and assigns them to 0 if the field value is not found
-    projection = {"_id": 0, "timestamp": "$es_timestamp"}
-    for field in observed_fields:
-        projection[field] = {"$ifNull": [f"${field}", 0]}
-
-    pipeline = [
-        {"$match": {"es_timestamp": {
-            "$gte": start_dt.to_pydatetime(), "$lt": end_dt.to_pydatetime()}}},
-        {"$project": projection},
-        {"$sort": {"timestamp": 1}},
-    ]
-
-    # returns a MongoClient connected to connection_string
-    with get_mongo_client(connection_string) as cli:
-        docs = list(cli[database][collection].aggregate(pipeline))
-
-    if not docs:
-        return pd.DataFrame(columns=["timestamp"] + observed_fields)
-
-    df = pd.DataFrame(docs)
-    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-    for field in observed_fields:
-        df[field] = pd.to_numeric(df[field], errors="coerce").fillna(0)
-    return df
 
 # TODO: this might get resource intensive if time_window is small and df_train is too big.
 # === TRAIN BASELINE ==========================================================
@@ -91,53 +50,60 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
     print(df_train[field].value_counts().head(10))
     # --------------------------DEBUG PRINTS---------------------------------------------------------------------
     """
-    grouped = df_train.groupby("train_window")
-    for window, data in grouped:
+    # Global statistics for fallback
+    global_mean = np.mean(df_train[field])
+    global_std = np.std(df_train[field]) if np.std(df_train[field]) > 0 else 1e-6
 
+    # Group by both time bucket and workday/weekend
+    grouped = df_train.groupby(["train_window", "is_workday"])
 
+    for (window, is_workday), data in grouped:
         vals = data[field].astype(float).values
 
-        if len(vals) < 3: #if our bucket has less than 3 values
+        if len(vals) < 3:
+            # ---- INSUFFICIENT DATA ----
+            color = "\033[95m" if is_workday else "\033[96m"
+            label = "WORKDAY" if is_workday else "WEEKEND"
+            print(f"{color} -----------------------------------------------------------------  \033[0m")
+            print(f"{color} TRAINING Z_SCORE WITH GLOBAL DISTRIBUTION DUE TO LOW DATA AMOUNT ({label}) \033[0m")
 
-            print("\033[95m -----------------------------------------------------------------  \033[0m")
-
-            print("\033[95m TRAINING Z_SCORE WITH GLOBAL DISTRIBUTION DUE TO LOW DATA AMOUNT  \033[0m")
-
-            mean = np.mean(df_train[field]) #global mean
-            std = np.std(df_train[field]) if np.std(df_train[field]) > 0 else 1e-6 #global std
+            mean = global_mean
+            std = global_std
             z_scores = np.abs((vals - mean) / std)
             threshold = np.percentile(z_scores, percentile)
 
-            print("\033[95m -----------------------------------------------------------------  \033[0m")
-
+            print(f"{color} -----------------------------------------------------------------  \033[0m")
         else:
-
-            print("\033[92m -----------------------------------------------------------------  \033[0m")
-
-            print("\033[92m TRAINING Z_SCORE WITH ENOUGH BUCKETED DATA  \033[0m")
+            # ---- SUFFICIENT DATA ----
+            color = "\033[92m" if is_workday else "\033[94m"
+            label = "WORKDAY" if is_workday else "WEEKEND"
+            print(f"{color} -----------------------------------------------------------------  \033[0m")
+            print(f"{color} TRAINING Z_SCORE WITH ENOUGH BUCKETED DATA ({label}) \033[0m")
 
             mean = np.mean(vals)
             std = np.std(vals) if np.std(vals) > 0 else 1e-6
             z_scores = np.abs((vals - mean) / std)
             threshold = np.percentile(z_scores, percentile)
 
-            print("\033[92m -----------------------------------------------------------------  \033[0m")
+            print(f"{color} -----------------------------------------------------------------  \033[0m")
 
-
-        baselines[window] = {
+        # Store using composite key: "workday:window"
+        key = f"{is_workday}:{window}"
+        baselines[key] = {
             "mean": mean,
             "std": std,
             "threshold": threshold,
             "timestamp_mean": data["timestamp"].mean().isoformat(),
-            "is_workday": bool(data["is_workday"].mode()[0])  # True if mostly weekdays
+            "is_workday": bool(is_workday),
+            "data_points": len(vals),
+            "sufficient_data": len(vals) >= 3
         }
 
-    baselines_str_keys = {str(k): v for k, v in baselines.items()}
     return {
         "kb_id": kb_id,
         "dimension": dimension,
         "time_window": time_window,
-        "buckets": baselines_str_keys,
+        "buckets": baselines,
     }
 
 
