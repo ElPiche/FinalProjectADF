@@ -1,5 +1,6 @@
 import json
 from datetime import timedelta
+
 import numpy as np
 import pandas as pd
 from pymongo import MongoClient
@@ -8,27 +9,16 @@ from pymongo import MongoClient
 def add_workday_flag(df: pd.DataFrame) -> pd.DataFrame:
     # Add a boolean column 'is_workday' based on the weekday of each timestamp.
     # Monday–Friday = True, Saturday–Sunday = False.
+
     df["is_workday"] = df["timestamp"].dt.dayofweek < 5
     return df
-
-
 
 # TODO: this might get resource intensive if time_window is small and df_train is too big.
 # === TRAIN BASELINE ==========================================================
 def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, time_window: int = 3600, percentile: float = 99.5):
     """Compute mean, std, and dynamic threshold from training data."""
 
-    # Add workday flag
-    df_train = add_workday_flag(df_train)
 
-    # this picks up the hours of the timestamp, turns it into minutes, sum the current minute and divide by time_window
-    # which creates a lil logical division exactly the way we want to bucket
-    df_train["train_window"] = (
-            (df_train["timestamp"].dt.hour * 3600 + df_train["timestamp"].dt.second)
-            // time_window
-    )
-
-    baselines = {}
 
     """
     #--------------------------DEBUG PRINTS---------------------------------------------------------------------
@@ -50,60 +40,78 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
     print(df_train[field].value_counts().head(10))
     # --------------------------DEBUG PRINTS---------------------------------------------------------------------
     """
-    # Global statistics for fallback
+    df_train = add_workday_flag(df_train)
+
+    print("Days of week present:", df_train["is_workday"].unique())
+    print("Workday counts:", df_train["is_workday"].value_counts())
+    print("Timestamps sample:")
+    print(df_train.index[:10])
+
+    # Ensure timestamp is datetime
+    df_train["timestamp"] = pd.to_datetime(df_train["timestamp"])
+
+    # Use full hour-minute-second conversion to seconds, not just seconds
+    df_train["train_window"] = (
+                                       (df_train["timestamp"].dt.hour * 3600)
+                                       + (df_train["timestamp"].dt.minute * 60)
+                                       + df_train["timestamp"].dt.second
+                               ) // time_window
+
+    # Initialize buckets for both workday types
+    buckets = {"workday": {}, "non_workday": {}}
+
+    # Global fallback
     global_mean = np.mean(df_train[field])
     global_std = np.std(df_train[field]) if np.std(df_train[field]) > 0 else 1e-6
 
-    # Group by both time bucket and workday/weekend
-    grouped = df_train.groupby(["train_window", "is_workday"])
+    # Group by is_workday (True/False)
+    grouped_by_workday = df_train.groupby("is_workday")
 
-    for (window, is_workday), data in grouped:
-        vals = data[field].astype(float).values
+    for is_workday, data in grouped_by_workday:
+        grouped_by_time_window = data.groupby("train_window")
 
-        if len(vals) < 3:
-            # ---- INSUFFICIENT DATA ----
-            color = "\033[95m" if is_workday else "\033[96m"
-            label = "WORKDAY" if is_workday else "WEEKEND"
-            print(f"{color} -----------------------------------------------------------------  \033[0m")
-            print(f"{color} TRAINING Z_SCORE WITH GLOBAL DISTRIBUTION DUE TO LOW DATA AMOUNT ({label}) \033[0m")
+        for window_time_window, data_time_window in grouped_by_time_window:
+            vals_time_window = data_time_window[field].astype(float).values
 
-            mean = global_mean
-            std = global_std
-            z_scores = np.abs((vals - mean) / std)
+            # Calculate mean/std logic
+            if len(vals_time_window) < 3:
+                mean = global_mean
+                std = global_std
+            else:
+                mean = np.mean(vals_time_window)
+                std = np.std(vals_time_window) if np.std(vals_time_window) > 0 else 1e-6
+
+            z_scores = np.abs((vals_time_window - mean) / std)
             threshold = np.percentile(z_scores, percentile)
 
-            print(f"{color} -----------------------------------------------------------------  \033[0m")
-        else:
-            # ---- SUFFICIENT DATA ----
-            color = "\033[92m" if is_workday else "\033[94m"
-            label = "WORKDAY" if is_workday else "WEEKEND"
-            print(f"{color} -----------------------------------------------------------------  \033[0m")
-            print(f"{color} TRAINING Z_SCORE WITH ENOUGH BUCKETED DATA ({label}) \033[0m")
+            label = "workday" if is_workday else "non_workday"
+            window_key = str(int(window_time_window))  # force string key for MongoDB
 
-            mean = np.mean(vals)
-            std = np.std(vals) if np.std(vals) > 0 else 1e-6
-            z_scores = np.abs((vals - mean) / std)
-            threshold = np.percentile(z_scores, percentile)
+            buckets[label][window_key] = {
+                "mean": mean,
+                "std": std,
+                "threshold": threshold,
+                #"timestamp_mean": data_time_window["timestamp"].isoformat(),
+                "is_workday": bool(is_workday),
+                "data_points": len(vals_time_window),
+                "sufficient_data": len(vals_time_window) >= 3
+            }
 
-            print(f"{color} -----------------------------------------------------------------  \033[0m")
+    # Convert all keys to strings (for MongoDB safety)
+    def stringify_keys(d):
+        if isinstance(d, dict):
+            return {str(k): stringify_keys(v) for k, v in d.items()}
+        elif isinstance(d, list):
+            return [stringify_keys(i) for i in d]
+        return d
 
-        # Store using composite key: "workday:window"
-        key = f"{is_workday}:{window}"
-        baselines[key] = {
-            "mean": mean,
-            "std": std,
-            "threshold": threshold,
-            "timestamp_mean": data["timestamp"].mean().isoformat(),
-            "is_workday": bool(is_workday),
-            "data_points": len(vals),
-            "sufficient_data": len(vals) >= 3
-        }
+    baselines_str_keys = stringify_keys(buckets)
 
     return {
         "kb_id": kb_id,
         "dimension": dimension,
         "time_window": time_window,
-        "buckets": baselines,
+        "buckets": baselines_str_keys,
     }
 
 
@@ -150,7 +158,7 @@ def train_baseline_advanced(
     dimension: str,
     df_train: pd.DataFrame,
     field: str,
-    ventana_minutos: int,
+    time_window: int,
     percentile: float = 99.5,
     min_points: int = 10
 ):
@@ -166,7 +174,7 @@ def train_baseline_advanced(
 
     # Derive temporal features
     df_train["is_workday"] = df_train.index.dayofweek < 5
-    df_train["bucket_index"] = (df_train.index.hour * 60 + df_train.index.minute) // ventana_minutos
+    df_train["bucket_index"] = (df_train.index.hour * 3600 + df_train.index.second) // time_window
 
     buckets = {"workday": {}, "non_workday": {}}
 
@@ -201,6 +209,6 @@ def train_baseline_advanced(
     return {
         "kb_id": kb_id,
         "dimension": dimension,
-        "time_window": ventana_minutos,
+        "time_window": time_window,
         "buckets": buckets,
     }

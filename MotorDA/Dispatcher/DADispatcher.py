@@ -11,10 +11,9 @@ from dataclasses import dataclass, field
 
 
 from ZScore.standalone_da_algorithm_z_score import (
-    fetch_logs_from_mongo,
     train_baseline,
-    detectar_anomalias_df,
-    save_anomalies_json
+    train_baseline_advanced,
+    detectar_anomalias_df
 )
 
 
@@ -284,8 +283,20 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
             print(f"printing the key of the observed_values: {key}")
             print(f"printing the key of the observed_values: {value}")
 
+            """
+            def train_baseline_advanced(
+    kb_id: str,
+    dimension: str,
+    df_train: pd.DataFrame,
+    field: str,
+    time_window: int,
+    percentile: float = 99.5,
+    min_points: int = 10
+):
+            """
             results = train_baseline(config.kb_id, key, value, "value", time_window)
-
+            print("PRINTING RESULTS:-----------------------------------------------------------------------")
+            print(results)
             da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(
                 results)
 # is_trained
