@@ -14,6 +14,14 @@ def get_mongo_client(connection_string: str):
     return cli
 
 
+# === UTILS ===================================================================
+def add_workday_flag(df: pd.DataFrame) -> pd.DataFrame:
+    # Add a boolean column 'is_workday' based on the weekday of each timestamp.
+    # Monday–Friday = True, Saturday–Sunday = False.
+    df["is_workday"] = df["timestamp"].dt.dayofweek < 5
+    return df
+
+
 # === DATA FETCH ==============================================================
 def fetch_logs_from_mongo(connection_string: str, database: str, collection: str,
                           start_iso: str, end_iso: str, observed_fields: list[str]):
@@ -46,11 +54,14 @@ def fetch_logs_from_mongo(connection_string: str, database: str, collection: str
         df[field] = pd.to_numeric(df[field], errors="coerce").fillna(0)
     return df
 
+
 # TODO: this might get resource intensive if time_window is small and df_train is too big.
 # === TRAIN BASELINE ==========================================================
 def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, time_window: int = 3600, percentile: float = 99.5):
     """Compute mean, std, and dynamic threshold from training data."""
 
+    # Add workday flag
+    df_train = add_workday_flag(df_train)
 
     # this picks up the hours of the timestamp, turns it into minutes, sum the current minute and divide by time_window
     # which creates a lil logical division exactly the way we want to bucket
@@ -92,14 +103,15 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
         baselines[window] = {
             "mean": mean,
             "std": std,
-            "threshold": threshold,
-            "timestamp_aprox": data["timestamp"]
+            "threshold": threshold,            
+            "timestamp_mean": data["timestamp"].mean().isoformat(),
+            "is_workday": bool(data["is_workday"].mode()[0])  # True if mostly weekdays
         }
 
     baselines_str_keys = {str(k): v for k, v in baselines.items()}
     return {
         "kb_id": kb_id,
-        "field": dimension,
+        "dimension": dimension,
         "time_window": time_window,
         "buckets": baselines_str_keys,
     }
@@ -140,19 +152,3 @@ def detectar_anomalias_df(df: pd.DataFrame, baseline: dict, ventana_minutos: int
             "is_anomaly": bool(is_anomaly),
         })
     return anomalies
-
-
-# === SAVE OUTPUT =============================================================
-def save_anomalies_json(anomalies: list, baseline: dict, output_path: str):
-    """Save anomalies and baseline metadata to a JSON file."""
-    output = {
-        "metadata": {
-            "field": baseline["field"],
-            "mean": baseline["mean"],
-            "std": baseline["std"],
-            "threshold": baseline["threshold"]
-        },
-        "anomalies": anomalies
-    }
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2, ensure_ascii=False)
