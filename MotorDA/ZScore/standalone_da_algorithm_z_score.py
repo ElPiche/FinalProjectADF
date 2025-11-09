@@ -48,19 +48,20 @@ def fetch_logs_from_mongo(connection_string: str, database: str, collection: str
 
 # TODO: this might get resource intensive if time_window is small and df_train is too big.
 # === TRAIN BASELINE ==========================================================
-def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, time_window: int = 60, percentile: float = 99.5):
+def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, time_window: int = 3600, percentile: float = 99.5):
     """Compute mean, std, and dynamic threshold from training data."""
 
 
     # this picks up the hours of the timestamp, turns it into minutes, sum the current minute and divide by time_window
     # which creates a lil logical division exactly the way we want to bucket
     df_train["train_window"] = (
-            (df_train["timestamp"].dt.hour * 60 + df_train["timestamp"].dt.seconds)
+            (df_train["timestamp"].dt.hour * 3600 + df_train["timestamp"].dt.second)
             // time_window
     )
-    
+
     baselines = {}
 
+    #--------------------------DEBUG PRINTS---------------------------------------------------------------------
     # 1. Show how many rows per bucket
     print(df_train["train_window"].value_counts().sort_index())
 
@@ -77,6 +78,7 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
 
     # 4. Global check: are values mostly constant?
     print(df_train[field].value_counts().head(10))
+    # --------------------------DEBUG PRINTS---------------------------------------------------------------------
 
     grouped = df_train.groupby("train_window")
     for window, data in grouped:
@@ -91,6 +93,7 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
             "mean": mean,
             "std": std,
             "threshold": threshold,
+            "timestamp_aprox": data["timestamp"]
         }
 
     baselines_str_keys = {str(k): v for k, v in baselines.items()}
@@ -98,7 +101,7 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
         "kb_id": kb_id,
         "field": dimension,
         "time_window": time_window,
-        "buckets": baselines_str_keys
+        "buckets": baselines_str_keys,
     }
 
 
