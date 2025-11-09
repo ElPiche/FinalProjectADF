@@ -142,3 +142,65 @@ def detectar_anomalias_df(df: pd.DataFrame, baseline: dict, ventana_minutos: int
             "is_anomaly": bool(is_anomaly),
         })
     return anomalies
+
+
+
+def train_baseline_advanced(
+    kb_id: str,
+    dimension: str,
+    df_train: pd.DataFrame,
+    field: str,
+    ventana_minutos: int,
+    percentile: float = 99.5,
+    min_points: int = 10
+):
+    """
+    Train statistical baselines per (is_workday, time_bucket) pair.
+    """
+
+    # Ensure datetime index
+    df_train = df_train.copy()
+    df_train["timestamp"] = pd.to_datetime(df_train["timestamp"])
+    df_train.set_index("timestamp", inplace=True)
+    df_train[field] = df_train[field].astype(float)
+
+    # Derive temporal features
+    df_train["is_workday"] = df_train.index.dayofweek < 5
+    df_train["bucket_index"] = (df_train.index.hour * 60 + df_train.index.minute) // ventana_minutos
+
+    buckets = {"workday": {}, "non_workday": {}}
+
+    # Group by (is_workday, bucket)
+    for (is_workday, bucket_idx), group in df_train.groupby(["is_workday", "bucket_index"]):
+        vals = group[field].values
+        n = len(vals)
+
+        if n < min_points:
+            buckets["workday" if is_workday else "non_workday"][f"bucket_{bucket_idx}"] = {
+                "sufficient_data": False,
+                "data_points": n,
+            }
+            continue
+
+        mean = np.mean(vals)
+        std = np.std(vals) if np.std(vals) > 0 else 1e-6
+        z_scores = np.abs((vals - mean) / std)
+        threshold = np.percentile(z_scores, percentile)
+        timestamp_mean = group.index.mean()
+
+        buckets["workday" if is_workday else "non_workday"][f"bucket_{bucket_idx}"] = {
+            "mean": float(mean),
+            "std": float(std),
+            "threshold": float(threshold),
+            "timestamp_mean": timestamp_mean.isoformat(),
+            "is_workday": bool(is_workday),
+            "data_points": int(n),
+            "sufficient_data": True,
+        }
+
+    return {
+        "kb_id": kb_id,
+        "dimension": dimension,
+        "time_window": ventana_minutos,
+        "buckets": buckets,
+    }
