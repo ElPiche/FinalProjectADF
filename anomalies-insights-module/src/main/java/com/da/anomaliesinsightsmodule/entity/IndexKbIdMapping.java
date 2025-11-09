@@ -33,7 +33,4 @@ public class IndexKbIdMapping {
     @Field(name = "dashboardId")
     private String dashboardId;
 
-   // @Field("kb_id")
-    // Unique field
-    //private String kbId;
 }

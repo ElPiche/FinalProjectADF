@@ -31,6 +31,9 @@ public class InsightsService {
 
         //crear dataview
         String dataViewId = kibanaService.createDataView(normalizedIndexName);
+        kbIdMapping.setDataViewId(dataViewId);
+
+        /*
 
         // Crear saved search + lens para dashboard
         String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + normalizedIndexName);
@@ -40,10 +43,10 @@ public class InsightsService {
         String dashId = kibanaService.createDashboard("Dashboard - " + normalizedIndexName, ssId, lensId);
 
         //Cargar mapping
-        kbIdMapping.setDataViewId(dataViewId);
         kbIdMapping.setSavedSearchId(ssId);
         kbIdMapping.setLensId(lensId);
         kbIdMapping.setDashboardId(dashId);
+        */
 
         //Crear mapeo
         elasticsearchService.createKbMapping(kbIdMapping);
