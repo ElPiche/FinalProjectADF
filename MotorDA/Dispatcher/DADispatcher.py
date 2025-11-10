@@ -8,15 +8,19 @@ import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple
 from elasticsearch import Elasticsearch, helpers
 from dataclasses import dataclass, field
+#from pydantic import BaseModel
 
 
 from ZScore.standalone_da_algorithm_z_score import (
     train_baseline,
-    train_baseline_advanced,
-    detectar_anomalias_df
+    train_baseline_workdayless,
+    anomaly_detection_workdayless,
+    anomaly_detection_workdayful,
+    get_closest_bucket
 )
 
 
+@dataclass
 class ZScore:
     def __init__(self, train_window: int, train_from: str, train_to: str, threshold: float, observed_values: Dict[str, pd.DataFrame]):
         self.train_window = train_window  # in minutes
@@ -283,23 +287,22 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
             print(f"printing the key of the observed_values: {key}")
             print(f"printing the key of the observed_values: {value}")
 
-            """
-            def train_baseline_advanced(
-    kb_id: str,
-    dimension: str,
-    df_train: pd.DataFrame,
-    field: str,
-    time_window: int,
-    percentile: float = 99.5,
-    min_points: int = 10
-):
-            """
-            results = train_baseline(config.kb_id, key, value, "value", time_window)
+            results = train_baseline(config.kb_id, key, value, "value", time_window, workday_separation=False)
             print("PRINTING RESULTS:-----------------------------------------------------------------------")
             print(results)
+
+            query = {"kb_id": config.kb_id, "dimension": key}
+            exists_series_result = da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].find_one(query)
+
+            if (exists_series_result):
+                print( " \033[93m  I FOUND A SERIES RESULT AFTER TRAINING, DELETING BEFORE ADDING NEW SERIES RESULT \033[0m " )
+
+                da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].delete_one(query)
+
             da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(
                 results)
-# is_trained
+
+
     kb_id: str = config.kb_id
 
     query_filter = {'kb_id': kb_id}
@@ -587,12 +590,15 @@ def fetch_series_data_batch(
 
 def watch_kb_changes(kb_client):
     with kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].watch() as stream:
+
         for change in stream:
             print(f"something happened on: {TRAINING_COLLECTION_NAME}")
 
             if change.get("operationType") == "insert" or change.get("operationType") == "update":
                 print(
                     f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
+
+                # TODO: add delete if exists for the series result
 
                 # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
                 latest_series_config = ExtractLatestConfigurationKB(kb_client)
@@ -602,10 +608,7 @@ def watch_kb_changes(kb_client):
 
                 # now we go thru each algorithm call we extracted, and try to execute training on them
                 config.execute_algos()
-
                 # TODO: delete series once they are trained
-
-
 
 
 def watch_detection_changes(kb_client):
@@ -627,15 +630,14 @@ def watch_detection_changes(kb_client):
 
                 pipeline = [{'$match':
                             {'kb_id': serie_to_detect["metadata"]["kbId"],
-                             'field': serie_to_detect["metadata"]["dim"]}
+                             'dimension': serie_to_detect["metadata"]["dim"]}
                              }]
 
                 result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
                     pipeline)
 
                 training_result = next(result, None)
-                print(
-                    f"I am priting the result of training:  {training_result}")
+                #print(f"I am priting the result of training:  {training_result}")
 
                 # 2) flatten nested fields (metadata -> metadata.kbId etc.)
                 df = pd.json_normalize(serie_to_detect)
@@ -656,8 +658,24 @@ def watch_detection_changes(kb_client):
                 if "timestamp" in df.columns:
                     df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-                anomalies = detectar_anomalias_df(
-                    df, training_result, 60)
+                if training_result["work_day_enabled?"]:
+
+                    #we add a boolean to know if it's a workday or not
+                    df["is_workday"] = df["timestamp"].dt.dayofweek < 5
+
+                    print("I am detecting Z score with work day enabled")
+                    bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+
+                    anomalies = anomaly_detection_workdayful(
+                        df, training_result, training_result["time_window"], bucket_value)
+
+                else:
+
+                    bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+                    print("I am detecting Z score with work day disabled")
+
+                    anomalies = anomaly_detection_workdayless(
+                        df, training_result, training_result["time_window"], bucket_value)
 
                 if anomalies[0].get("is_anomaly"):
                     print("=========================================================================================================================")
