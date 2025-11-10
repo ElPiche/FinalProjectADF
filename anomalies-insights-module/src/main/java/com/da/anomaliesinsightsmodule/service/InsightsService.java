@@ -1,12 +1,9 @@
 package com.da.anomaliesinsightsmodule.service;
-
-import co.elastic.clients.elasticsearch._types.OpType;
 import co.elastic.clients.elasticsearch.core.IndexResponse;
 import com.da.anomaliesinsightsmodule.dto.DocumentDto;
 import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
+import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -14,11 +11,14 @@ import java.util.Optional;
 @Service
 public class InsightsService {
 
-    @Autowired
-    ElasticsearchService elasticsearchService;
+    private final ElasticsearchService elasticsearchService;
 
-    @Autowired
-    private KibanaService kibanaService;
+    private final KibanaService kibanaService;
+
+    public InsightsService(ElasticsearchService elasticsearchService, KibanaService kibanaService) {
+        this.elasticsearchService = elasticsearchService;
+        this.kibanaService = kibanaService;
+    }
 
     public void createKbMapping(IndexKbIdMapping kbIdMapping) throws Exception {
 
@@ -29,24 +29,34 @@ public class InsightsService {
         //Crear indice
         elasticsearchService.createIndex(normalizedIndexName);
 
-        //crear dataview
+        //Doc test
+        Instant now = Instant.now();
+
+        DocumentDto testDoc = new DocumentDto(
+                "ZScore",                      // algorithm
+                "ASD",                         // metric
+                "ASD",                         // text
+                now.toString(),                // timestamp
+                213.0,                         // value -> NUMÉRICO ✅
+                now.toString()                 // created_at
+        );
+
+        // Insertar doc de prueba en el índice
+        elasticsearchService.indexAnomalyDocument(normalizedIndexName, testDoc);
+
+        //Crear dataview
         String dataViewId = kibanaService.createDataView(normalizedIndexName);
-        kbIdMapping.setDataViewId(dataViewId);
 
-        /*
-
-        // Crear saved search + lens para dashboard
+        //Crear saved search + lens para dashboard
         String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + normalizedIndexName);
-        String lensId = kibanaService.createLens(dataViewId, "Lens - " + normalizedIndexName);
 
         //Crear dashboard
-        String dashId = kibanaService.createDashboard("Dashboard - " + normalizedIndexName, ssId, lensId);
+        String dashId = kibanaService.createDashboardWithEmbeddedLens("Dashboard - " + normalizedIndexName, dataViewId, ssId);
 
         //Cargar mapping
+        kbIdMapping.setDataViewId(dataViewId);
         kbIdMapping.setSavedSearchId(ssId);
-        kbIdMapping.setLensId(lensId);
         kbIdMapping.setDashboardId(dashId);
-        */
 
         //Crear mapeo
         elasticsearchService.createKbMapping(kbIdMapping);
@@ -61,7 +71,7 @@ public class InsightsService {
         IndexKbIdMapping mapping = mappingOpt
                 .orElseThrow(() -> new IllegalStateException("kb mapping not found: " + kbId));
 
-        //subir documento.
+        //Subir documento.
         var response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
 
         //Refrescar dataView

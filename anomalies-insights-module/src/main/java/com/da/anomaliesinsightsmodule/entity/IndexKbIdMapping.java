@@ -27,9 +27,6 @@ public class IndexKbIdMapping {
     @Field(name = "savedSearchId")
     private String savedSearchId;
 
-    @Field(name = "lensId")
-    private String lensId;
-
     @Field(name = "dashboardId")
     private String dashboardId;
 
