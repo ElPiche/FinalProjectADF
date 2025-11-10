@@ -2,3 +2,4 @@ elasticsearch==8.18.1
 pandas==2.3.3
 pymongo==4.6.1
 ZScore==0.1
+pydantic==2.12.4
