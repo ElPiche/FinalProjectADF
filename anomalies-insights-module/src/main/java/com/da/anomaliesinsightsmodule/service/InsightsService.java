@@ -6,12 +6,9 @@ import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
 //import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-<<<<<<< Updated upstream
-=======
+
 import java.time.Instant;
 import java.util.Locale;
-import java.util.Map;
->>>>>>> Stashed changes
 import java.util.Optional;
 
 
@@ -29,8 +26,6 @@ public class InsightsService {
 
     public void createKbMapping(IndexKbIdMapping kbIdMapping) throws Exception {
 
-<<<<<<< Updated upstream
-=======
         //Normalizar nombre.
         String normalizedIndexName = normalizeIndexName(kbIdMapping.getIndexName());
         kbIdMapping.setIndexName(normalizedIndexName);
@@ -58,26 +53,17 @@ public class InsightsService {
 
         //Crear saved search + lens para dashboard
         String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + normalizedIndexName);
-        String lensId = kibanaService.createLensBasic(dataViewId, "Lens - " + normalizedIndexName);
 
         //Crear dashboard
-        String dashId = kibanaService.createDashboardDirect("Dashboard - " + normalizedIndexName, ssId, lensId);
+        String dashId = kibanaService.createDashboardWithEmbeddedLens("Dashboard - " + normalizedIndexName, dataViewId, ssId);
 
         //Cargar mapping
         kbIdMapping.setDataViewId(dataViewId);
         kbIdMapping.setSavedSearchId(ssId);
-        kbIdMapping.setLensId(lensId);
         kbIdMapping.setDashboardId(dashId);
 
->>>>>>> Stashed changes
         //Crear mapeo
         elasticsearchService.createKbMapping(kbIdMapping);
-
-        //crear indice
-        elasticsearchService.createIndex(kbIdMapping.getIndexName());
-
-        //crear dataview
-        kibanaService.createDataView(kbIdMapping.getIndexName());
 
     }
 
@@ -89,10 +75,7 @@ public class InsightsService {
         IndexKbIdMapping mapping = mappingOpt
                 .orElseThrow(() -> new IllegalStateException("kb mapping not found: " + kbId));
 
-<<<<<<< Updated upstream
-        //subir documento.
-        return elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
-=======
+
         //Subir documento.
         var response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
 
@@ -139,7 +122,6 @@ public class InsightsService {
         }
 
         return normalized;
->>>>>>> Stashed changes
     }
 
 }
