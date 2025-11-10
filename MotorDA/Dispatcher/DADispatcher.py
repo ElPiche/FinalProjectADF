@@ -287,7 +287,7 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
             print(f"printing the key of the observed_values: {key}")
             print(f"printing the key of the observed_values: {value}")
 
-            results = train_baseline(config.kb_id, key, value, "value", time_window, workday_separation=False)
+            results = train_baseline(config.kb_id, key, value, "value", time_window, workday_separation=True)
             print("PRINTING RESULTS:-----------------------------------------------------------------------")
             print(results)
 
