@@ -2,8 +2,8 @@ package com.da.anomaliesinsightsmodule.service;
 
 import com.da.anomaliesinsightsmodule.entity.DataView;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -16,7 +16,10 @@ public class KibanaService {
 
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
-    private String baseUrl = "http://localhost:5602";
+
+    @Value("${kibana.base-url}")
+    private String baseUrl;
+
 
     public KibanaService(HttpClient httpClient, ObjectMapper objectMapper) {
         this.httpClient = httpClient;
@@ -36,6 +39,7 @@ public class KibanaService {
                     .build();
 
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+
             int status = resp.statusCode();
 
             String id;
@@ -68,6 +72,8 @@ public class KibanaService {
         }
     }
 
+
+
     public String getDataViewIdByTitle(String title) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -95,6 +101,7 @@ public class KibanaService {
         }
     }
 
+
     public void refreshDataViewFields(String dataViewId) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
@@ -111,11 +118,15 @@ public class KibanaService {
         }
     }
 
+
+
+
     public String createSavedSearch(String dataViewId, String title) {
         try {
             String searchSourceJson = """
                 {"index":"%s","query":{"language":"kuery","query":""},"filter":[]}
                 """.formatted(dataViewId).trim();
+
 
             var body = Map.of(
                     "attributes", Map.of(
@@ -151,6 +162,7 @@ public class KibanaService {
             throw new RuntimeException(e);
         }
     }
+
 
     public String createDashboardWithEmbeddedLens(String title, String dataViewId, String savedSearchId) {
         try {
@@ -331,6 +343,7 @@ public class KibanaService {
                     "references", references
             );
 
+
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/api/saved_objects/dashboard"))
                     .header("kbn-xsrf", "true")
@@ -339,15 +352,21 @@ public class KibanaService {
                     .build();
 
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+
             if (resp.statusCode() == 200 || resp.statusCode() == 201) {
                 return objectMapper.readTree(resp.body()).get("id").asText();
             }
-            throw new RuntimeException("Dashboard error " + resp.statusCode() + ": " + resp.body());
+
+            if (resp.statusCode() == 409) {
+                System.out.println("Dashboard error conflict board already exists" + resp.statusCode() + ": " + resp.body());
+                return null;
+            }
+
+            return null;
 
         } catch (Exception e) {
             throw new RuntimeException("Error creating dashboard with embedded lens", e);
         }
     }
-
 
 }

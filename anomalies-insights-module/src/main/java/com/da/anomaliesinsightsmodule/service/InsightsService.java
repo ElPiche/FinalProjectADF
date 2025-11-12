@@ -1,12 +1,8 @@
 package com.da.anomaliesinsightsmodule.service;
-
 import co.elastic.clients.elasticsearch.core.IndexResponse;
 import com.da.anomaliesinsightsmodule.dto.DocumentDto;
 import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
-//import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Optional;
@@ -74,7 +70,6 @@ public class InsightsService {
 
         IndexKbIdMapping mapping = mappingOpt
                 .orElseThrow(() -> new IllegalStateException("kb mapping not found: " + kbId));
-
 
         //Subir documento.
         var response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);

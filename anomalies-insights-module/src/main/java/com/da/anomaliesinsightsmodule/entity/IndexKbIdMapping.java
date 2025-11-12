@@ -18,7 +18,7 @@ public class IndexKbIdMapping {
     @Id
     private String kbId;
 
-    @Field("index_name")
+    @Field(name = "indexName")
     private String indexName;
 
     @Field(name = "dataViewId")
