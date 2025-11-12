@@ -1,8 +1,11 @@
 package com.da.anomaliesinsightsmodule.controller;
 
+import com.da.anomaliesinsightsmodule.dto.CreateMappingRequestDto;
 import com.da.anomaliesinsightsmodule.dto.DocumentDto;
 import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
 import com.da.anomaliesinsightsmodule.service.InsightsService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -11,6 +14,8 @@ import org.springframework.web.bind.annotation.*;
 public class InsightsController {
 
     private final InsightsService insightsService;
+
+    private final Logger logger = LoggerFactory.getLogger(InsightsController.class);
 
     public InsightsController(InsightsService insightsService) {
         this.insightsService = insightsService;
@@ -23,19 +28,24 @@ public class InsightsController {
     }
 
     @PostMapping("/createMapping")
-    public ResponseEntity createMapping(@RequestBody IndexKbIdMapping kbIdMapping){
+    public ResponseEntity createMapping(@RequestBody CreateMappingRequestDto kbIdMapping){
 
         try{
 
-            insightsService.createKbMapping(kbIdMapping);
+            insightsService.createKbMapping(new IndexKbIdMapping(
+                    kbIdMapping.getKbId(),
+                    kbIdMapping.getIndexName(),
+                    null,
+                    null,
+                    null
+            ));
 
             return ResponseEntity.ok(kbIdMapping.getKbId());
 
         }catch (Exception e){
-            e.printStackTrace();
+            logger.error("Error al crear el mapping para kbId: {}", kbIdMapping.getKbId(), e);
+            return ResponseEntity.status(500).body("Internal Server Error creating mapping");
         }
-
-        return null;
     }
 
     @PostMapping("/insertDocument/{kbId}")

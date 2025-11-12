@@ -2,6 +2,8 @@ package com.da.extractor.utils;
 
 
 import java.util.Date;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class Utils {
 
@@ -19,6 +21,16 @@ public class Utils {
             case "datetime" -> Date.class;
             default -> Object.class;
         };
+    }
+
+    /// Extrae el nombre del índice de una consulta Elasticsearch SQL
+    public static String extractIndexName(String query) {
+        Pattern pattern = Pattern.compile("FROM\\s+\"?([^\"]+)\"?", Pattern.CASE_INSENSITIVE);
+        Matcher matcher = pattern.matcher(query);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
     }
 
 }
