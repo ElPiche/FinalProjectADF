@@ -10,6 +10,9 @@ import pandas as pd
 from typing import Dict, Any, List, Optional
 from elasticsearch import Elasticsearch, helpers
 from dataclasses import dataclass
+
+from pymongo.errors import PyMongoError
+
 #from pydantic import BaseModel
 
 
@@ -97,6 +100,7 @@ class Algorithm:
 
             case _:
                 print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
+        delete_series(config)
 
 
 def send_anomalies_elastic(anomalies: Dict[str, List]):
@@ -289,7 +293,7 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
             print(f"printing the key of the observed_values: {key}")
             print(f"printing the key of the observed_values: {value}")
 
-            results = train_baseline(config.kb_id, key, value, "value", time_window, workday_separation=False)
+            results = train_baseline(config.kb_id, key, value, "value", time_window, workday_separation=True)
             print("PRINTING RESULTS:-----------------------------------------------------------------------")
             print(results)
 
@@ -304,7 +308,6 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
             da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(
                 results)
 
-
     kb_id: str = config.kb_id
 
     query_filter = {'kb_id': kb_id}
@@ -314,8 +317,18 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
 
     da_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].update_one(
         query_filter, update_operation)
-    return results
 
+def delete_series( config: Config):
+
+    da_client: MongoClient = CreateConnectionToDA()
+
+    query =  {'metadata.kbId': config.kb_id,
+            'metadata.mode': int(config.mode) } # Use mode as-is (integer)
+
+    print("WE'RE DELETING SERIES AFTER TRAINING")
+    # we delete the data we used to train
+    result =da_client[MONGO_DB_NAME][SERIES_COLLECTION_NAME].delete_many(query)
+    print(result)
 
 def run_arma(config_block: Dict[str, Any]):
     params = (config_block.get("daAlgParameters") or {}).get("arma", [])
@@ -591,113 +604,135 @@ def fetch_series_data_batch(
 
 
 def watch_kb_changes(kb_client):
-    with kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].watch() as stream:
 
-        for change in stream:
-            print(f"something happened on: {TRAINING_COLLECTION_NAME}")
+    while True:
+        try:
+            with kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].watch() as stream:
 
-            if change.get("operationType") == "insert" or change.get("operationType") == "update":
-                print(
-                    f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
+                for change in stream:
+                    print(f"something happened on: {TRAINING_COLLECTION_NAME}")
 
-                # TODO: add delete if exists for the series result
+                    if change.get("operationType") == "insert" or change.get("operationType") == "update":
+                        print(
+                            f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
 
-                # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
-                latest_series_config = ExtractLatestConfigurationKB(kb_client)
+                        # TODO: add delete if exists for the series result
 
-                # we turn the JSON with the config data into a class
-                config: Config = parse_config(latest_series_config)
+                        # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
+                        latest_series_config = ExtractLatestConfigurationKB(kb_client)
 
-                # now we go thru each algorithm call we extracted, and try to execute training on them
-                config.execute_algos()
-                # TODO: delete series once they are trained
+                        # we turn the JSON with the config data into a class
+                        config: Config = parse_config(latest_series_config)
+
+                        # now we go thru each algorithm call we extracted, and try to execute training on them
+                        config.execute_algos()
+                        # TODO: delete series once they are trained
+
+        except PyMongoError as e:
+            print(f"[watch_kb_changes] Mongo error: {e}, reconnecting in 5s...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[watch_kb_changes] Unexpected error: {e}")
+            traceback.print_exc()
+            time.sleep(5)
+
+
 
 
 def watch_detection_changes(kb_client):
 
-    with kb_client[MONGO_DB_NAME][SERIES_COLLECTION_NAME].watch([
-        {"$match": {"fullDocument.metadata.mode": 1}}
-    ]) as stream:
+    while True:
+        try:
+            with kb_client[MONGO_DB_NAME][SERIES_COLLECTION_NAME].watch([
+                {"$match": {"fullDocument.metadata.mode": 1}}
+            ]) as stream:
 
-        for change in stream:
-            print(f"something happened on: {SERIES_COLLECTION_NAME}")
+                for change in stream:
+                    print(f"something happened on: {SERIES_COLLECTION_NAME}")
 
-            if change.get("operationType") == "insert":
-                print(
-                    f"\033[31m Someone inserted data into: {SERIES_COLLECTION_NAME} \033[0m")
+                    if change.get("operationType") == "insert":
+                        print(
+                            f"\033[31m Someone inserted data into: {SERIES_COLLECTION_NAME} \033[0m")
 
-                serie_to_detect = change.get("fullDocument")
+                        serie_to_detect = change.get("fullDocument")
 
-                print(f"I am printing serie_to_detect: {serie_to_detect}")
+                        print(f"I am printing serie_to_detect: {serie_to_detect}")
 
-                pipeline = [{'$match':
-                            {'kb_id': serie_to_detect["metadata"]["kbId"],
-                             'dimension': serie_to_detect["metadata"]["dim"]}
-                             }]
+                        pipeline = [{'$match':
+                                    {'kb_id': serie_to_detect["metadata"]["kbId"],
+                                     'dimension': serie_to_detect["metadata"]["dim"]}
+                                     }]
 
-                result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
-                    pipeline)
+                        result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
+                            pipeline)
 
-                training_result = next(result, None)
-                #print(f"I am priting the result of training:  {training_result}")
+                        training_result = next(result, None)
+                        #print(f"I am priting the result of training:  {training_result}")
 
-                # 2) flatten nested fields (metadata -> metadata.kbId etc.)
-                df = pd.json_normalize(serie_to_detect)
+                        # 2) flatten nested fields (metadata -> metadata.kbId etc.)
+                        df = pd.json_normalize(serie_to_detect)
 
-                # optional: rename for convenience
-                df = df.rename(columns={
-                    "metadata.kbId": "kbId",
-                    "metadata.dim": "dim",
-                    "metadata.mode": "mode"
-                })
-                # TODO: delete series once they are detected
+                        # optional: rename for convenience
+                        df = df.rename(columns={
+                            "metadata.kbId": "kbId",
+                            "metadata.dim": "dim",
+                            "metadata.mode": "mode"
+                        })
+                        # TODO: delete series once they are detected
 
-                # 3) make _id string (pandas doesn't like ObjectId)
-                if "_id" in df.columns:
-                    df["_id"] = df["_id"].astype(str)
+                        # 3) make _id string (pandas doesn't like ObjectId)
+                        if "_id" in df.columns:
+                            df["_id"] = df["_id"].astype(str)
 
-                # 4) ensure timestamp is datetime dtype
-                if "timestamp" in df.columns:
-                    df["timestamp"] = pd.to_datetime(df["timestamp"])
+                        # 4) ensure timestamp is datetime dtype
+                        if "timestamp" in df.columns:
+                            df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-                if training_result["work_day_enabled?"]:
+                        if training_result["work_day_enabled?"]:
 
-                    #we add a boolean to know if it's a workday or not
-                    df["is_workday"] = df["timestamp"].dt.dayofweek < 5
+                            #we add a boolean to know if it's a workday or not
+                            df["is_workday"] = df["timestamp"].dt.dayofweek < 5
 
-                    print("I am detecting Z score with work day enabled")
-                    bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+                            print("I am detecting Z score with work day enabled")
+                            bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
 
-                    anomalies = anomaly_detection_workdayful(
-                        df, training_result, training_result["time_window"], bucket_value)
+                            anomalies = anomaly_detection_workdayful(
+                                df, training_result, training_result["time_window"], bucket_value)
 
-                else:
+                        else:
 
-                    bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
-                    print("I am detecting Z score with work day disabled")
+                            bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+                            print("I am detecting Z score with work day disabled")
 
-                    anomalies = anomaly_detection_workdayless(
-                        df, training_result, training_result["time_window"], bucket_value)
+                            anomalies = anomaly_detection_workdayless(
+                                df, training_result, training_result["time_window"], bucket_value)
 
-                if anomalies[0].get("is_anomaly"):
-                    print("=========================================================================================================================")
-                    print(f"\033[31m anomaly detected: {anomalies} \033[0m")
-                    print(
-                        "=========================================================================================================================")
+                        if anomalies[0].get("is_anomaly"):
+                            print("=========================================================================================================================")
+                            print(f"\033[31m anomaly detected: {anomalies} \033[0m")
+                            print(
+                                "=========================================================================================================================")
 
-                    doc = {
-                        'algorithm': 'ZScore',
-                        # optional — store which metric the anomaly belongs to
-                        'metric': training_result.get('field'),
-                        'text': 'Anomaly detected',
-                        'timestamp': anomalies[0].get("timestamp"),
-                        'value': anomalies[0].get("value"),
-                        'created_at' : datetime.now()
-                    }
+                            doc = {
+                                'algorithm': 'ZScore',
+                                # optional — store which metric the anomaly belongs to
+                                'metric': training_result.get('field'),
+                                'text': 'Anomaly detected',
+                                'timestamp': anomalies[0].get("timestamp"),
+                                'value': anomalies[0].get("value"),
+                                'created_at' : datetime.now()
+                            }
 
-                    elastic_client.index(index="anomaly", document=doc)
-                    #raise exception("forced exception to try and debug retry logic")
+                            elastic_client.index(index="anomaly", document=doc)
+                            #raise exception("forced exception to try and debug retry logic")
 
+        except PyMongoError as e:
+            print(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"[watch_detection_changes] Unexpected error: {e}")
+            traceback.print_exc()
+            time.sleep(5)
 
 def restartable_thread(target, *args, delay=5):
     """Runs the given target in a loop, restarting if it crashes."""
@@ -737,6 +772,7 @@ def main():
         print("\nStopping watcher...")
         # Let it end naturally when Mongo closes or you implement a stop condition
         pass
+
 
 
 if __name__ == "__main__":
