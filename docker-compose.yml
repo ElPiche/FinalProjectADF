@@ -261,6 +261,42 @@ services:
       retries: 5
       start_period: 60s
 
+
+  anomalies-insights:
+    build:
+      context: ./anomalies-insights-module
+      dockerfile: Dockerfile
+    container_name: anomalies-insights
+    # restart: unless-stopped
+    depends_on:
+      elasticsearch-anomalies:
+        condition: service_healthy
+      kibana-anomalies:
+        condition: service_healthy
+    environment:
+    - JAVA_OPTS=-Xmx512m -Xms256m
+    - SPRING_PROFILES_ACTIVE=docker
+    ports:
+    - 8087:8081
+    networks:
+    - adf-network
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 256m
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -f
+      - http://localhost:8080/actuator/health
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
   dispatcher:
     build:
       context: . # change to ./MotorDA if the Dockerfile is inside MotorDA

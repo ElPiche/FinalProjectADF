@@ -15,6 +15,6 @@ public class DocumentDto {
     public String metric;
     public String text;
     public String timestamp;
-    public String value;
+    public Double value;
     public String created_at;
 }

@@ -22,9 +22,6 @@ RUN mvn clean package -DskipTests
 # Etapa de ejecución
 FROM eclipse-temurin:25-jdk
 
-# Paquetes de networking útiles para debugging
-#RUN apt-get update && apt-get install -y net-tools iputils-ping telnet && apt-get clean && rm -rf /var/lib/apt/lists/*
-
 # Crear usuario no root para seguridad
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
@@ -32,14 +29,14 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 WORKDIR /app
 
 # Copiar el JAR compilado desde la etapa de construcción
-COPY --from=build /app/target/extractor-*.jar app.jar
+COPY --from=build /app/target/anomalies-insights-module-*.jar app.jar
 
 # Cambiar permisos y propietario
 RUN chown -R appuser:appuser /app
 USER appuser
 
 # Exponer puerto (ajustar según el puerto que use tu aplicación)
-EXPOSE 8080
+EXPOSE 8081
 
 # Variables de entorno
 ENV JAVA_OPTS="-Xmx512m -Xms256m"

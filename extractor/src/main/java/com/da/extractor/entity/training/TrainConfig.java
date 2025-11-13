@@ -37,9 +37,6 @@ public class TrainConfig {
     @Field("is_trained")
     private boolean isTrained = false;
 
-    @Field("index_name")
-    private String indexName;
-
     private short mode;
 
     private List<AlgorithmConfig> algorithms;
