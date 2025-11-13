@@ -1,13 +1,15 @@
 import threading
 import time
+import traceback
 from datetime import datetime, timezone
-import json
+from logging import exception
+
 from bson import json_util
 from pymongo import MongoClient
 import pandas as pd
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 from elasticsearch import Elasticsearch, helpers
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 #from pydantic import BaseModel
 
 
@@ -694,7 +696,18 @@ def watch_detection_changes(kb_client):
                     }
 
                     elastic_client.index(index="anomaly", document=doc)
+                    #raise exception("forced exception to try and debug retry logic")
 
+
+def restartable_thread(target, *args, delay=5):
+    """Runs the given target in a loop, restarting if it crashes."""
+    while True:
+        try:
+            target(*args)
+        except Exception as e:
+            print(f"[{target.__name__}] crashed with {e}, restarting in {delay}s...")
+            traceback.print_exc()
+            time.sleep(delay)
 
 def main():
 
@@ -706,11 +719,11 @@ def main():
 
     # Start watcher in its own thread
     training_watcher = threading.Thread(
-        target=watch_kb_changes, args=(kb_client,), daemon=True)
+        target=restartable_thread, args=(watch_kb_changes,kb_client), daemon=True)
 
     detection_watcher = threading.Thread(
-        target=watch_detection_changes,
-        args=(kb_client,),
+        target=restartable_thread,
+        args=(watch_detection_changes,kb_client,),
         daemon=True
     )
 

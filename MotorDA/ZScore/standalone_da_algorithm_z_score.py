@@ -14,6 +14,7 @@ def add_workday_flag(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 # TODO: this might get resource intensive if time_window is small and df_train is too big.
+#
 # === TRAIN BASELINE ==========================================================
 def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: str, time_window: int = 3600, percentile: float = 99.5, workday_separation: bool = True):
     """Compute mean, std, and dynamic threshold from training data."""
