@@ -1,9 +1,9 @@
+import json
 import threading
 import time
 import traceback
+import requests
 from datetime import datetime, timezone
-from logging import exception
-
 from bson import json_util
 from pymongo import MongoClient
 import pandas as pd
@@ -50,6 +50,9 @@ TRAINING_COLLECTION_NAME = "training_config"
 SERIES_COLLECTION_NAME = "series"
 SERIES_RESULT_COLLECTION_NAME = "series_result"
 MONGO_TIMEOUT_MS = 2000
+
+# beaware it has a trailing slash
+ANOMALIES_INSIGHT_URL = "http://anomalies-insights:8081/api/"
 
 # conexión a elasticSearch
 ES_HOST = "http://elasticsearch-anomalies:9200"
@@ -102,34 +105,6 @@ class Algorithm:
                 print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
         delete_series(config)
 
-
-def send_anomalies_elastic(anomalies: Dict[str, List]):
-
-    filtered_anomalies = {
-        key: [item for item in value if item.get('is_anomaly')]
-        for key, value in anomalies.items()
-    }
-
-    print(f"Found {len(filtered_anomalies)} anomalies")
-
-    anomalies_for_elastic = []
-
-    for key, anomalies in filtered_anomalies.items():
-        for item in anomalies:
-            doc = {
-                'algorithm': 'ZScore',
-                'metric': key,  # optional — store which metric the anomaly belongs to
-                'text': 'Anomaly detected',
-                'timestamp': item["timestamp"],
-                'value': item["value"],
-                '_index': "anomaly"
-            }
-            anomalies_for_elastic.append(doc)
-
-    helpers.bulk(elastic_client, anomalies_for_elastic)
-    print(anomalies_for_elastic)
-    print(
-        f" Inserted { len(anomalies_for_elastic) } anomalies into Elastic ")
 
 
 @dataclass
@@ -713,18 +688,31 @@ def watch_detection_changes(kb_client):
                             print(
                                 "=========================================================================================================================")
 
-                            doc = {
-                                'algorithm': 'ZScore',
-                                # optional — store which metric the anomaly belongs to
-                                'metric': training_result.get('field'),
-                                'text': 'Anomaly detected',
-                                'timestamp': anomalies[0].get("timestamp"),
+                            url_post = ANOMALIES_INSIGHT_URL + "insights/insertDocument/" + serie_to_detect["metadata"]["kbId"]
+                            headers = {'Accept': 'application/json', "Content-Type": "application/json"}
+
+                            # convert values that might be datetimes into ISO strings
+                            ts = anomalies[0].get("timestamp")
+
+                            if isinstance(ts, datetime):
+                                # send UTC ISO 8601 string (add 'Z' or include tzinfo)
+                                ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+                            processed_data = {
+                                'algorithm': 'Z Score',
+                                'metric': serie_to_detect["metadata"]["dim"],
+                                'text': "Anomaly detected",
+                                'timestamp': ts,
                                 'value': anomalies[0].get("value"),
-                                'created_at' : datetime.now()
+                                'created_at': datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat().replace(
+                                    "+00:00", "Z")
                             }
 
-                            elastic_client.index(index="anomaly", document=doc)
-                            #raise exception("forced exception to try and debug retry logic")
+                            r = requests.post(url_post, json=processed_data, headers=headers)
+
+                            print(r.status_code, r.text)
+                            # for debugging, you can inspect what was actually sent:
+                            print("REQUEST BODY:", r.request.body)  # will be a JSON string
 
         except PyMongoError as e:
             print(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
