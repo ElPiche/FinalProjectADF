@@ -101,8 +101,12 @@ class Algorithm:
                 # --------------------------- ENDING OF DETECTION ZSCORE----------------------------------------------------------------------------
                 # send_anomalies_elastic(anomalies_dict)
 
+            case "arma":
+                print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
+
             case _:
                 print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
+
         delete_series(config)
 
 
@@ -352,8 +356,8 @@ def fetch_series_data_with_aggregation(
     dimensions = list(algorithm_to_execute.parameters.observed_values.keys())
     kb_id = config.kb_id
     mode = config.mode
-    date_from = algorithm_to_execute.parameters.from_
-    date_to = algorithm_to_execute.parameters.to
+    #date_from = algorithm_to_execute.parameters.from_
+    #date_to = algorithm_to_execute.parameters.to
 
     print(f"\033[33m{algorithm_to_execute.parameters}\033[0m")
 
@@ -387,27 +391,12 @@ def fetch_series_data_with_aggregation(
 
     for dimension in dimensions:
 
-        print(type(date_from))
-        """
-        # Convert ISO string dates to datetime objects for MongoDB query
-        date_from_dt = datetime.fromisoformat(
-            date_from.replace('Z', '+00:00')) if date_from else None
-        date_to_dt = datetime.fromisoformat(
-            date_to.replace('Z', '+00:00')) if date_to else None
-        """
         # Build aggregation pipeline
         match_query = {
             'metadata.kbId': kb_id,
             'metadata.dim': dimension,
             'metadata.mode': int(mode)  # Use mode as-is (integer)
         }
-
-        # Add timestamp filter if dates are provided
-        if date_from and date_to:
-            match_query['timestamp'] = {
-                '$gte': date_from,
-                '$lte': date_to
-            }
 
         pipeline = [
             {
@@ -443,12 +432,13 @@ def fetch_series_data_with_aggregation(
                 f"  DEBUG: Documents with dim='{dimension}' AND kbId='{kb_id}': {count_with_kb}")
 
             # Check mode match
-            test_query['metadata.mode'] = int(mode)
+            test_query['metadata.mode'] = "0"
             count_with_mode = series_collection.count_documents(test_query)
             print(
                 f"  DEBUG: Documents with all filters (no timestamp): {count_with_mode}")
 
             # Check with timestamp
+            """
             if date_from and date_to:
                 test_query['timestamp'] = {
                     '$gte': date_from, '$lte': date_to}
@@ -456,7 +446,7 @@ def fetch_series_data_with_aggregation(
                     test_query)
                 print(
                     f"  DEBUG: Documents with all filters (WITH timestamp): {count_with_timestamp}")
-
+            """
         try:
             # Execute aggregation pipeline
             cursor = series_collection.aggregate(pipeline)
@@ -613,7 +603,8 @@ def watch_kb_changes(kb_client):
 
 
 
-
+# TODO: test how robust it is this with a lot of different datapoints sent at the same time
+# TODO: check how change stream works with threads
 def watch_detection_changes(kb_client):
 
     while True:
@@ -717,7 +708,9 @@ def watch_detection_changes(kb_client):
         except PyMongoError as e:
             print(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
             time.sleep(5)
+
         except Exception as e:
+
             print(f"[watch_detection_changes] Unexpected error: {e}")
             traceback.print_exc()
             time.sleep(5)
@@ -733,16 +726,15 @@ def restartable_thread(target, *args, delay=5):
             time.sleep(delay)
 
 def main():
-
+    """Main function. It creates 2 watchers, one for training (listens to Mongo's anomaly_detection -> training_config) and one for detection (listens to Mongo's anomaly_detection -> series)."""
     # Esto arma la conexión a MongoDB
     kb_client = CreateConnectionToKB()
 
-    # aquí llamariamos a nuestra lógica para checkear la metadata para corroborar si ya hemos hechos
-    # esta operativa antes
-
     # Start watcher in its own thread
     training_watcher = threading.Thread(
-        target=restartable_thread, args=(watch_kb_changes,kb_client), daemon=True)
+        target=restartable_thread,
+        args=(watch_kb_changes,kb_client),
+        daemon=True)
 
     detection_watcher = threading.Thread(
         target=restartable_thread,
@@ -756,6 +748,7 @@ def main():
     try:
         while training_watcher.is_alive() or detection_watcher.is_alive():
             time.sleep(1)
+
     except KeyboardInterrupt:
         print("\nStopping watcher...")
         # Let it end naturally when Mongo closes or you implement a stop condition
