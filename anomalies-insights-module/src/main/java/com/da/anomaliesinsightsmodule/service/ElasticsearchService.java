@@ -63,6 +63,9 @@ public class ElasticsearchService {
         client.indices().create(c -> c.index(indexName));
     }
 
+    public boolean indexExists(String indexName) throws IOException {
+        return client.indices().exists(e -> e.index(indexName)).value();
+    }
 
     private Map<String, Object> toDocumentMap(DocumentDto dto) {
         Map<String, Object> m = new HashMap<>();

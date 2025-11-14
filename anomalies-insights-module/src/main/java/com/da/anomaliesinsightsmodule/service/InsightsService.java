@@ -1,10 +1,14 @@
 package com.da.anomaliesinsightsmodule.service;
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch.core.IndexResponse;
 import com.da.anomaliesinsightsmodule.dto.DocumentDto;
 import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 
@@ -15,6 +19,8 @@ public class InsightsService {
 
     private final KibanaService kibanaService;
 
+    private final Logger logger = LoggerFactory.getLogger(InsightsService.class);
+
     public InsightsService(ElasticsearchService elasticsearchService, KibanaService kibanaService) {
         this.elasticsearchService = elasticsearchService;
         this.kibanaService = kibanaService;
@@ -24,42 +30,52 @@ public class InsightsService {
 
         //Normalizar nombre.
         String normalizedIndexName = normalizeIndexName(kbIdMapping.getIndexName());
+
         kbIdMapping.setIndexName(normalizedIndexName);
 
-        //Crear indice
-        elasticsearchService.createIndex(normalizedIndexName);
+        if(!elasticsearchService.indexExists(normalizedIndexName)){
 
-        //Doc test
-        Instant now = Instant.now();
+            //Crear indice
+            elasticsearchService.createIndex(normalizedIndexName);
+            logger.info("Creating anomalies index in elasticsearch: " + normalizedIndexName);
 
-        DocumentDto testDoc = new DocumentDto(
-                "ZScore",                      // algorithm
-                "ASD",                         // metric
-                "ASD",                         // text
-                now.toString(),                // timestamp
-                213.0,                         // value -> NUMÉRICO ✅
-                now.toString()                 // created_at
-        );
+            //Crear dataview
+            String dataViewId = kibanaService.createDataView(normalizedIndexName);
 
-        // Insertar doc de prueba en el índice
-        elasticsearchService.indexAnomalyDocument(normalizedIndexName, testDoc);
+            logger.info("Creating dataView for index:  " + normalizedIndexName + " data view id: " + dataViewId);
 
-        //Crear dataview
-        String dataViewId = kibanaService.createDataView(normalizedIndexName);
+            //Crear saved search + lens para dashboard
+            String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + normalizedIndexName);
 
-        //Crear saved search + lens para dashboard
-        String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + normalizedIndexName);
+            logger.info("Creating saved search:  " + ssId + " data view id: " + dataViewId);
 
-        //Crear dashboard
-        String dashId = kibanaService.createDashboardWithEmbeddedLens("Dashboard - " + normalizedIndexName, dataViewId, ssId);
+            //Crear dashboard
+            String dashId = kibanaService.createDashboardWithEmbeddedLens("Dashboard - " + normalizedIndexName, dataViewId, ssId);
 
-        //Cargar mapping
-        kbIdMapping.setDataViewId(dataViewId);
-        kbIdMapping.setSavedSearchId(ssId);
-        kbIdMapping.setDashboardId(dashId);
+            logger.info("Creating dashboard:  " + dashId + " saved search id: " + ssId);
 
-        //Crear mapeo
-        elasticsearchService.createKbMapping(kbIdMapping);
+            //Cargar mapping
+            kbIdMapping.setDataViewId(dataViewId);
+            kbIdMapping.setSavedSearchId(ssId);
+            kbIdMapping.setDashboardId(dashId);
+
+        }
+
+        try {
+            //Crear mapeo
+            elasticsearchService.createKbMapping(kbIdMapping);
+
+        } catch (ElasticsearchException e) {
+
+            if (e.status() == 409) {
+                //No suchElement es para 404, pero nos salva las papas por ahora
+                throw new NoSuchElementException("Conflict, index already exists: " + kbIdMapping.getKbId());
+            }
+
+            throw e;
+        }
+
+        logger.info("Creating mapping:  kbid: " + kbIdMapping.getKbId() + " Index name: " + normalizedIndexName);
 
     }
 
@@ -69,14 +85,31 @@ public class InsightsService {
         Optional<IndexKbIdMapping> mappingOpt = elasticsearchService.getKbIdMapping(kbId);
 
         IndexKbIdMapping mapping = mappingOpt
-                .orElseThrow(() -> new IllegalStateException("kb mapping not found: " + kbId));
+                .orElseThrow(() -> new NoSuchElementException("kb mapping not found: " + kbId));
 
-        //Subir documento.
-        var response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
+        IndexResponse response;
+
+        try {
+            //Subir documento.
+            response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
+            logger.info("Inserting document in index:  " + mapping.getIndexName());
+
+        } catch (ElasticsearchException e) {
+
+            if (e.status() == 409) {
+                //No suchElement es para 404, pero nos salva las papas por ahora
+                throw new IllegalArgumentException("Conflict, docuement already exists: " + kbId);
+            }
+
+            throw e;
+        }
 
         //Refrescar dataView
         if (mapping.getDataViewId() != null) {
+
             kibanaService.refreshDataViewFields(mapping.getDataViewId());
+            logger.info("Refreshing Data view fields: " + mapping.getDataViewId());
+
         }
 
         return response;
