@@ -15,6 +15,7 @@ import java.util.Map;
 public class KibanaService {
 
     private final HttpClient httpClient;
+
     private final ObjectMapper objectMapper;
 
     @Value("${kibana.base-url}")
@@ -189,7 +190,7 @@ public class KibanaService {
                     "panelIndex", "1",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
-                                    "title", "Suma de value",
+                                    "title", "Suma de valores",
                                     "visualizationType", "lnsXY",
                                     "type", "lens",
                                     "references", List.of(Map.of(
