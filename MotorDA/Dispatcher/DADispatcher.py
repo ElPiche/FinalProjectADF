@@ -114,7 +114,7 @@ class Algorithm:
             case _:
                 print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
 
-        #delete_series(config)
+        delete_series(config)
 
 
 
@@ -718,9 +718,6 @@ def main():
     """Main function. It creates 2 watchers, one for training (listens to Mongo's anomaly_detection -> training_config) and one for detection (listens to Mongo's anomaly_detection -> series)."""
     # Esto arma la conexión a MongoDB
     kb_client = CreateConnectionToKB()
-
-
-
 
     data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
 
