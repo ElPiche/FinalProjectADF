@@ -697,11 +697,7 @@ def detect_z_score(serie_to_detect):
                 "+00:00", "Z")
         }
 
-        r = requests.post(url_post, json=processed_data, headers=headers)
-
-        print(r.status_code, r.text)
-        # for debugging, you can inspect what was actually sent:
-        print("REQUEST BODY:", r.request.body)  # will be a JSON string
+        requests.post(url_post, json=processed_data, headers=headers)
 
 
 def restartable_thread(target, *args, delay=5):
@@ -724,7 +720,8 @@ def main():
     # we automatically use max amount of (Cores - 1) and then create workers
     num_cpu_workers = max(1, multiprocessing.cpu_count() - 1)
 
-    workers : ProcessPoolExecutor = ProcessPoolExecutor(max_workers=num_cpu_workers)
+    workers : ProcessPoolExecutor = ProcessPoolExecutor()
+    #workers : ThreadPoolExecutor = ProcessPoolExecutor(50)
 
     # Start watcher in its own thread
     training_watcher = threading.Thread(
