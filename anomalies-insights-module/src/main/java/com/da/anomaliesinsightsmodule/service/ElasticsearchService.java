@@ -1,6 +1,7 @@
 package com.da.anomaliesinsightsmodule.service;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.OpType;
 import co.elastic.clients.elasticsearch.core.IndexResponse;
 import co.elastic.clients.elasticsearch.sql.ElasticsearchSqlClient;
@@ -37,6 +38,11 @@ public class ElasticsearchService {
     }
 
     public IndexResponse createKbMapping(IndexKbIdMapping kbIdMapping) throws Exception {
+
+        if (indexKbIdMappingRepo.findByKbId(kbIdMapping.getKbId()).isPresent()) {
+            throw new IllegalArgumentException("Index conflict mapping already exists");
+        }
+
         return client.index(i -> i
                 .index("index_kb_id_mappings")
                 .id(kbIdMapping.getKbId())
@@ -49,10 +55,19 @@ public class ElasticsearchService {
 
         Map<String, Object> docMap = toDocumentMap(doc);
 
-        return client.index(i -> i
-                .index(indexName)
-                .document(docMap)
-        );
+        try {
+            return client.index(i -> i
+                    .index(indexName)
+                    .document(docMap)
+            );
+        } catch (ElasticsearchException e) {
+            //Nunca se debería de dar, dto no tiene id de documento
+            if (e.status() == 409) {
+                throw new IllegalArgumentException("Document conflict: a document with the same ID already exists in index '" + indexName + "'.", e);
+            }
+            throw new Exception(e.getMessage());
+        }
+
     }
 
     public Optional<IndexKbIdMapping> getKbIdMapping(String kbId) throws Exception {

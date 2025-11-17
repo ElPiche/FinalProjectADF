@@ -1,0 +1,10 @@
+http.host: "0.0.0.0"
+xpack.monitoring.enabled: false
+
+# Habilitar hot reload de pipelines .conf
+config.reload.automatic: true
+config.reload.interval: 3s
+
+# Ruta por defecto a pipeline.yml (la propia de la imagen)
+path.config: /usr/share/logstash/pipeline
+pipeline.ordered: auto
