@@ -45,7 +45,7 @@ public class InsightsController {
             return ResponseEntity.ok(kbIdMapping.getKbId());
 
         }
-        catch (NoSuchElementException e){
+        catch (IllegalArgumentException e){
 
             logger.error("Error creating mapping for kbId: {}", kbIdMapping.getKbId(), e);
             return ResponseEntity.status(409).body(e.getMessage());

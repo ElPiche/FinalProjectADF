@@ -61,19 +61,8 @@ public class InsightsService {
 
         }
 
-        try {
-            //Crear mapeo
-            elasticsearchService.createKbMapping(kbIdMapping);
-
-        } catch (ElasticsearchException e) {
-
-            if (e.status() == 409) {
-                //No suchElement es para 404, pero nos salva las papas por ahora
-                throw new NoSuchElementException("Conflict, index already exists: " + kbIdMapping.getKbId());
-            }
-
-            throw e;
-        }
+        //Crear mapeo
+        elasticsearchService.createKbMapping(kbIdMapping);
 
         logger.info("Creating mapping:  kbid: " + kbIdMapping.getKbId() + " Index name: " + normalizedIndexName);
 
@@ -89,20 +78,9 @@ public class InsightsService {
 
         IndexResponse response;
 
-        try {
-            //Subir documento.
-            response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
-            logger.info("Inserting document in index:  " + mapping.getIndexName());
-
-        } catch (ElasticsearchException e) {
-
-            if (e.status() == 409) {
-                //No suchElement es para 404, pero nos salva las papas por ahora
-                throw new IllegalArgumentException("Conflict, docuement already exists: " + kbId);
-            }
-
-            throw e;
-        }
+        //Subir documento.
+        response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
+        logger.info("Inserting document in index:  " + mapping.getIndexName());
 
         //Refrescar dataView
         if (mapping.getDataViewId() != null) {
