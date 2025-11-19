@@ -29,7 +29,7 @@ public class InsightsController {
         return ResponseEntity.ok("hello world");
     }
 
-    @PostMapping("/createMapping")
+    @PutMapping("/dashboards")
     public ResponseEntity createMapping(@RequestBody CreateMappingRequestDto kbIdMapping){
 
         try{
@@ -59,7 +59,7 @@ public class InsightsController {
         }
     }
 
-    @PostMapping("/insertDocument/{kbId}")
+    @PostMapping("/dashboard/{kbId}/anomalies")
     public ResponseEntity insertDocument(@PathVariable String kbId, @RequestBody DocumentDto doc){
 
         try{
