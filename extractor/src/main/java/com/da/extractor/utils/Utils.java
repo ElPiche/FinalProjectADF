@@ -15,8 +15,8 @@ public class Utils {
 
         return switch (className){
             case "string", "text" -> String.class;
-            case "long" -> Long.class;
-            case "double" -> Double.class;
+//            case "long" -> Long.class;
+            case "double", "long" -> Double.class;
             case "boolean" -> Boolean.class;
             case "datetime" -> Date.class;
             default -> Object.class;
