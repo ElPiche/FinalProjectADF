@@ -9,14 +9,13 @@
       "to": "2025-12-01T00:00:00Z",
       "training_window": 3600,
       "is_active": true
-    },
-    "detection_config": {
+    }, 
       "detection_query": "SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
       "from": "2025-11-01T00:00:00Z",
       "frequency": "*/1 * * * *",
       "detection_window": 3600,
-      "is_active": true
-    }
+      "is_active": true,
+      "sumarizable": true //En true si la query genera datos ya sumarizados, en caso contrario en false
   },
   "algorithms": [
     {
