@@ -25,7 +25,7 @@ Una vez alli agregamos la siguiente configuración:
 ```json
 {
   "mcpServers": {
-    "elasticsearch": {
+    "elasticsearch-logs-exploration": {
       "command": "docker",
       "args": [
         "run",
@@ -59,6 +59,16 @@ Una vez alli agregamos la siguiente configuración:
         "list_kb_configurations",
         "describe_mcp_server"
       ]
+    },
+    "elasticsearch-anomalies-results": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm", "-e", "ES_URL",
+        "mcp/elasticsearch", "stdio"
+      ],
+      "env": {
+        "ES_URL": "http://host.docker.internal:9201"
+      }
     }
   }
 }
