@@ -15,7 +15,7 @@ import time
 import json
 
 from models import AlgorithmConfig
-from utils import log_message as _utils_log_message
+from utils import log_message as _utils_log_message, stderr_print
 from instrumentation import timed
 from description_utils import ALGORITHM_CONFIG_DESCRIPTION, AVAILABLE_ALGORITHMS_DESCRIPTION, SUPPORTED_ALGORITHMS, SUPPORTED_ALGORITHMS_INLINE, SUPPORTED_ALGORITHMS_QUOTED, generate_tool_list_for_describe_mcp, get_tool_count, generate_kb_config_template_description, generate_kb_config_fields_description, generate_kb_config_description, generate_kb_config_example, generate_kb_config_description, generate_kb_config_example, generate_algorithm_config_example
 
@@ -500,23 +500,23 @@ def ping_elasticsearch() -> str:
         log_message(f"ping_elasticsearch tool completed: {success}", "info",
                     "ping_elasticsearch", "completion", request_id=request_id,
                     duration_ms=duration_ms, extra_data={"ping_success": success})
-        print(f"[KB-MCP] ping_elasticsearch result: {success}")
+        stderr_print(f"[KB-MCP] ping_elasticsearch result: {success}")
         return json.dumps({"ping_success": success, "duration_ms": duration_ms})
     except Exception as e:
         duration_ms = (time.time() - start) * 1000
         log_message(f"ping_elasticsearch tool error: {str(e)}", "error",
                     "ping_elasticsearch", "error", request_id=request_id,
                     duration_ms=duration_ms, extra_data={"error_type": type(e).__name__})
-        print(f"[KB-MCP] ping_elasticsearch error: {e}")
+        stderr_print(f"[KB-MCP] ping_elasticsearch error: {e}")
         return json.dumps({"ping_success": False, "error": str(e), "duration_ms": duration_ms})
 
 
 @timed
-def elasticsearch_sql(query: str) -> str:
+async def elasticsearch_sql(query: str, ctx: Context | None = None) -> str:
     request_id = str(uuid.uuid4())[:8]
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "elasticsearch_sql"):
-        return pkg.elasticsearch_sql(query)
+        return await pkg.elasticsearch_sql(query, ctx=ctx)
     raise ToolError("elasticsearch_sql is not implemented in the migration package yet")
 
 
@@ -554,4 +554,3 @@ mcp.add_tool(
     elasticsearch_sql,
     description=_elasticsearch_sql_docstring()
 )
-

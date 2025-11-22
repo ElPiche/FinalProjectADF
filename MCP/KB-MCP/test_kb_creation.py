@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 import sys
 sys.path.insert(0, '/app')
@@ -44,5 +45,5 @@ with patch('mcp_tools_pkg.elasticsearch_sql.elasticsearch_sql', side_effect=mock
         algorithms=[zscore_config]
     )
 
-print('KB Config created successfully:')
-print(result)
+stderr_print('KB Config created successfully:')
+stderr_print(result)

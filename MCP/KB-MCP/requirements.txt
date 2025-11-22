@@ -22,3 +22,6 @@ requests==2.31.0
 # FastAPI and ASGI server for HTTP transport
 fastapi>=0.104.0
 uvicorn>=0.24.0
+
+# Testing framework for container validation
+pytest==9.0.1

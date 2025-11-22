@@ -1,3 +1,4 @@
+from utils import stderr_print
 # test_validation.py - Unit tests for validation functions
 
 import sys
@@ -36,7 +37,7 @@ def test_extract_sql_output_fields():
     result4 = extract_sql_output_fields(query4)
     assert result4 == [], f"Expected [], got {result4}"
 
-    print("PASS: test_extract_sql_output_fields")
+    stderr_print("PASS: test_extract_sql_output_fields")
 
 def test_extract_sql_select_fields():
     """Test extraction of select fields from SQL queries."""
@@ -60,7 +61,7 @@ def test_extract_sql_select_fields():
     result4 = extract_sql_select_fields(query4)
     assert result4 == [], f"Expected [], got {result4}"
 
-    print("PASS: test_extract_sql_select_fields")
+    stderr_print("PASS: test_extract_sql_select_fields")
 
 def test_validate_algorithms():
     """Test validation of algorithms array."""
@@ -106,7 +107,7 @@ def test_validate_algorithms():
     errors_missing_dim = validate_algorithms(missing_dimension)
     assert len(errors_missing_dim) == 1 and "missing dimension" in errors_missing_dim[0], f"Expected missing dimension error, got {errors_missing_dim}"
 
-    print("PASS: test_validate_algorithms")
+    stderr_print("PASS: test_validate_algorithms")
 
 
 def test_validate_window_size_valid_no_warning():
@@ -137,4 +138,4 @@ if __name__ == "__main__":
     test_extract_sql_output_fields()
     test_extract_sql_select_fields()
     test_validate_algorithms()
-    print("All validation tests passed!")
+    stderr_print("All validation tests passed!")

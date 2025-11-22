@@ -1,6 +1,8 @@
+import asyncio
 import logging
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 import requests
 from requests.exceptions import ConnectionError, RequestException, Timeout
@@ -11,6 +13,10 @@ from utils import log_message as _utils_log_message
 from .query_validator import VALIDATION_TIMEOUTS
 
 
+if TYPE_CHECKING:
+    from mcp.server.fastmcp import Context
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,7 +24,7 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
     return _utils_log_message(message, level, component, method, **kwargs)
 
 
-def elasticsearch_sql(query: str) -> dict:
+def _run_query(query: str) -> dict:
     request_id = str(uuid.uuid4())[:8]
     timeout = VALIDATION_TIMEOUTS["ELASTICSEARCH_SQL_QUERY_TIMEOUT"]
     endpoint = f"{db.es_host.rstrip('/')}/_sql"
@@ -109,4 +115,10 @@ def elasticsearch_sql(query: str) -> dict:
         "cursor": result.get("cursor"),
         "duration_ms": duration_ms,
     }
+
+
+async def elasticsearch_sql(query: str, ctx: "Context | None" = None) -> dict:
+    """Async wrapper that executes the Elasticsearch SQL query on a worker thread."""
+    # ctx reserved for future progress reporting integration. It is unused when None.
+    return await asyncio.to_thread(_run_query, query)
 

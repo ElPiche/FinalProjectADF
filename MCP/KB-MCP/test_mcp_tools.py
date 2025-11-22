@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 """
 test_mcp_tools.py - Quick test script to verify MCP tools are properly registered.
@@ -15,33 +16,33 @@ async def _run_mcp_tool_validation() -> bool:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
-    print("✓ MCP instance created successfully")
+    stderr_print("✓ MCP instance created successfully")
 
     tools = await module.mcp.list_tools()
-    print(f"✓ Tools registered: {len(tools)}")
+    stderr_print(f"✓ Tools registered: {len(tools)}")
 
     tool_names = [tool.name for tool in tools]
-    print(f"✓ Tool names: {tool_names}")
+    stderr_print(f"✓ Tool names: {tool_names}")
 
     expected_tools = 7
     if len(tools) != expected_tools:
-        print(f"✗ Expected {expected_tools} tools, got {len(tools)}")
+        stderr_print(f"✗ Expected {expected_tools} tools, got {len(tools)}")
         return False
 
     all_have_descriptions = True
     for tool in tools:
         desc_len = len(tool.description) if tool.description else 0
         if desc_len == 0:
-            print(f"✗ Tool {tool.name}: missing description!")
+            stderr_print(f"✗ Tool {tool.name}: missing description!")
             all_have_descriptions = False
         else:
-            print(f"✓ Tool {tool.name}: description length = {desc_len}")
+            stderr_print(f"✓ Tool {tool.name}: description length = {desc_len}")
 
     if all_have_descriptions:
-        print("\n🎉 All tests passed! MCP tools are properly configured.")
+        stderr_print("\n🎉 All tests passed! MCP tools are properly configured.")
         return True
 
-    print("\n❌ Some tools are missing descriptions.")
+    stderr_print("\n❌ Some tools are missing descriptions.")
     return False
 
 
@@ -54,7 +55,7 @@ if __name__ == "__main__":
     try:
         success = asyncio.run(_run_mcp_tool_validation())
     except Exception as exc:  # pragma: no cover - CLI helper
-        print(f"✗ Test failed with error: {exc}")
+        stderr_print(f"✗ Test failed with error: {exc}")
         import traceback
 
         traceback.print_exc()

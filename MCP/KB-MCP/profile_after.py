@@ -1,3 +1,4 @@
+from utils import stderr_print
 # profile_after.py - Profile the modular KB-MCP implementation
 
 import cProfile
@@ -93,24 +94,24 @@ def profile_instrumentation():
 
 def run_profiling():
     """Run all profiling tests and save results."""
-    print("Profiling modular KB-MCP implementation...")
+    stderr_print("Profiling modular KB-MCP implementation...")
 
     # Profile imports
-    print("Profiling imports...")
+    stderr_print("Profiling imports...")
     pr_imports = profile_imports()
     s_imports = io.StringIO()
     ps_imports = pstats.Stats(pr_imports, stream=s_imports).sort_stats('cumulative')
     ps_imports.print_stats()
 
     # Profile basic operations
-    print("Profiling basic operations...")
+    stderr_print("Profiling basic operations...")
     pr_ops = profile_basic_operations()
     s_ops = io.StringIO()
     ps_ops = pstats.Stats(pr_ops, stream=s_ops).sort_stats('cumulative')
     ps_ops.print_stats()
 
     # Profile instrumentation
-    print("Profiling instrumentation...")
+    stderr_print("Profiling instrumentation...")
     pr_inst = profile_instrumentation()
     s_inst = io.StringIO()
     ps_inst = pstats.Stats(pr_inst, stream=s_inst).sort_stats('cumulative')
@@ -119,17 +120,17 @@ def run_profiling():
     # Save profiles
     with open('profile.after.imports', 'w') as f:
         f.write(s_imports.getvalue())
-    print("Saved profile.after.imports")
+    stderr_print("Saved profile.after.imports")
 
     with open('profile.after.operations', 'w') as f:
         f.write(s_ops.getvalue())
-    print("Saved profile.after.operations")
+    stderr_print("Saved profile.after.operations")
 
     with open('profile.after.instrumentation', 'w') as f:
         f.write(s_inst.getvalue())
-    print("Saved profile.after.instrumentation")
+    stderr_print("Saved profile.after.instrumentation")
 
-    print("Profiling completed. Profile files saved.")
+    stderr_print("Profiling completed. Profile files saved.")
 
 if __name__ == "__main__":
     run_profiling()

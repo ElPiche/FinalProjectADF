@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 """
 Manual test that calls `create_da_config` directly. Moved to `tests/` to avoid accidental module imports.
@@ -37,8 +38,8 @@ def main():
         )
     )
 
-    print('KB Config created successfully:')
-    print(result)
+    stderr_print('KB Config created successfully:')
+    stderr_print(result)
 
 
 if __name__ == '__main__':

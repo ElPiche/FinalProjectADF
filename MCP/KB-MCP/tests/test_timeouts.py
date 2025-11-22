@@ -47,7 +47,7 @@ def test_elasticsearch_sql_timeout(monkeypatch):
     monkeypatch.setattr(es_module.requests, "post", raise_timeout)
 
     with pytest.raises(ToolError) as exc:
-        elasticsearch_sql("SELECT * FROM logs LIMIT 1")
+        asyncio.run(elasticsearch_sql("SELECT * FROM logs LIMIT 1"))
 
     assert "timed out" in str(exc.value)
 
