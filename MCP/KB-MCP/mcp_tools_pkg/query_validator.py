@@ -1,6 +1,7 @@
 """Query validation helper that proxies validations to the extractor service."""
 
 import os
+import re
 from typing import Any, Dict, Optional
 
 import requests
@@ -20,14 +21,18 @@ def log_message(
 
 
 class QueryValidator:
-    """Validate SQL queries through the extractor's validation endpoint.
+    """Validate Elasticsearch SQL queries through the extractor endpoint.
 
     The extractor service enforces query compatibility with downstream ETL components.
     If the extractor is unavailable and fallback is enabled, the validator reports the
-    failure but allows callers to continue with legacy validation logic.
+    failure but allows callers to continue with legacy validation logic. Only the SQL
+    dialect exposed by Elasticsearch's `_sql` endpoint is supported; ES|QL or other
+    syntaxes must be rejected before reaching the extractor.
     """
 
     DEFAULT_TIMEOUT_SECONDS = 3
+    _SQL_ENTRYPOINTS = ("select", "show", "describe", "explain", "with")
+    _PIPE_PATTERN = re.compile(r"\|\s*[A-Za-z]", re.MULTILINE)
 
     @classmethod
     def validate(
@@ -40,7 +45,7 @@ class QueryValidator:
         """Validate the provided query via the extractor.
 
         Args:
-            query: SQL/ES|QL string to validate.
+            query: Elasticsearch SQL string to validate.
             query_label: Name used for logging/error context (e.g., "training").
             timeout: Optional timeout override for the HTTP request.
             allow_fallback: Optional override for fallback behavior. If None, the
@@ -51,6 +56,8 @@ class QueryValidator:
             triggered. Raises ToolError when validation fails and fallback is not
             allowed.
         """
+
+        cls._assert_elasticsearch_sql(query, query_label)
 
         endpoint = cls._build_endpoint()
         timeout_seconds = timeout or cls.DEFAULT_TIMEOUT_SECONDS
@@ -140,6 +147,60 @@ class QueryValidator:
     def _get_env_value(name: str, default: str) -> str:
         value = os.getenv(name)
         return value.strip() if value and value.strip() else default
+
+    @classmethod
+    def _assert_elasticsearch_sql(cls, query: str, query_label: str) -> None:
+        cleaned = cls._strip_leading_comments(query or "")
+        if not cleaned:
+            raise ToolError(f"{query_label.title()} query must be a non-empty Elasticsearch SQL statement")
+
+        if cls._PIPE_PATTERN.search(cleaned):
+            raise ToolError(
+                f"{query_label.title()} query appears to use ES|QL style pipelines, which are not supported. "
+                "Please provide an Elasticsearch SQL statement (SELECT/SHOW/DESCRIBE/EXPLAIN/WITH)."
+            )
+
+        token = cls._leading_token(cleaned)
+        if token not in cls._SQL_ENTRYPOINTS:
+            raise ToolError(
+                f"{query_label.title()} query must start with an Elasticsearch SQL keyword "
+                f"({', '.join(keyword.upper() for keyword in cls._SQL_ENTRYPOINTS)}); received '{token or 'unknown'}'."
+            )
+
+        if token in {"with", "explain"}:
+            lowered = cleaned.lower()
+            if "select" not in lowered:
+                raise ToolError(f"{query_label.title()} query must include a SELECT statement when using {token.upper()}.")
+
+    @staticmethod
+    def _strip_leading_comments(query: str) -> str:
+        text = query.lstrip()
+        while True:
+            if text.startswith("/*"):
+                end = text.find("*/", 2)
+                if end == -1:
+                    return ""
+                text = text[end + 2 :].lstrip()
+                continue
+            if text.startswith("--") or text.startswith("//"):
+                newline = text.find("\n")
+                if newline == -1:
+                    return ""
+                text = text[newline + 1 :].lstrip()
+                continue
+            if text.startswith("#"):
+                newline = text.find("\n")
+                if newline == -1:
+                    return ""
+                text = text[newline + 1 :].lstrip()
+                continue
+            break
+        return text
+
+    @staticmethod
+    def _leading_token(query: str) -> Optional[str]:
+        match = re.match(r"([A-Za-z]+)", query)
+        return match.group(1).lower() if match else None
 
     @classmethod
     def _build_endpoint(cls) -> str:

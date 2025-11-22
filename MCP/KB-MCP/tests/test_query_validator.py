@@ -69,3 +69,27 @@ def test_query_validator_no_fallback(monkeypatch):
 
     with pytest.raises(ToolError):
         QueryValidator.validate("SELECT 1", "training")
+
+
+def test_query_validator_blocks_esql_pipeline(monkeypatch):
+    def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
+        raise AssertionError("Extractor should not be called for ES|QL queries")
+
+    monkeypatch.setattr("mcp_tools_pkg.query_validator.requests.post", fail_post)
+
+    with pytest.raises(ToolError) as exc:
+        QueryValidator.validate("from logs | stats count()", "detection")
+
+    assert "ES|QL" in str(exc.value)
+
+
+def test_query_validator_requires_sql_entrypoint(monkeypatch):
+    def fail_post(*_args, **_kwargs):  # pragma: no cover - should never run
+        raise AssertionError("Extractor should not be called for invalid entrypoints")
+
+    monkeypatch.setattr("mcp_tools_pkg.query_validator.requests.post", fail_post)
+
+    with pytest.raises(ToolError) as exc:
+        QueryValidator.validate("FROM metrics", "training")
+
+    assert "Elasticsearch SQL keyword" in str(exc.value)
