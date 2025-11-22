@@ -28,6 +28,48 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
 mcp = FastMCP("KB-MCP")
 
 
+def _format_elasticsearch_sql_result(result: dict) -> str:
+    columns = result.get("columns") or []
+    rows = result.get("rows") or []
+    cursor = result.get("cursor")
+    duration_ms = result.get("duration_ms")
+
+    column_lines = [
+        f"- {col.get('name', '<unnamed>')} ({col.get('type', 'unknown')})"
+        for col in columns
+    ]
+    if not column_lines:
+        column_lines = ["- (no columns returned)"]
+
+    max_preview_rows = 5
+    preview_rows = rows[:max_preview_rows]
+    row_lines = [f"{idx}. {row}" for idx, row in enumerate(preview_rows, 1)]
+    if not row_lines:
+        row_lines = ["(no rows returned)"]
+    elif len(rows) > max_preview_rows:
+        row_lines.append(f"... {len(rows) - max_preview_rows} more rows not shown")
+
+    metadata_lines = [
+        f"- Duration: {duration_ms if duration_ms is not None else 'unknown'} ms",
+        f"- Cursor: {cursor if cursor else 'None'}",
+        f"- Total Rows: {len(rows)}",
+    ]
+
+    pretty_json = json.dumps(result, indent=2)
+
+    return (
+        "Elasticsearch SQL query executed successfully.\n\n"
+        "Columns:\n"
+        + "\n".join(column_lines)
+        + "\n\nSample rows (up to 5):\n"
+        + "\n".join(row_lines)
+        + "\n\nMetadata:\n"
+        + "\n".join(metadata_lines)
+        + "\n\nRaw JSON response:\n"
+        + pretty_json
+    )
+
+
 def _lazy_import_pkg():
     """Lazily import the migration package if present.
 
@@ -513,10 +555,25 @@ def ping_elasticsearch() -> str:
 
 @timed
 async def elasticsearch_sql(query: str, ctx: Context | None = None) -> str:
+    """Run elasticsearch SQL and return a single formatted string for MCP output."""
     request_id = str(uuid.uuid4())[:8]
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "elasticsearch_sql"):
-        return await pkg.elasticsearch_sql(query, ctx=ctx)
+        result = await pkg.elasticsearch_sql(query, ctx=ctx)
+        if isinstance(result, dict):
+            return _format_elasticsearch_sql_result(result)
+
+        # Attempt to parse stringified JSON responses for consistency
+        if isinstance(result, str):
+            try:
+                parsed = json.loads(result)
+            except Exception:
+                return result
+            else:
+                return _format_elasticsearch_sql_result(parsed)
+
+        return str(result)
+
     raise ToolError("elasticsearch_sql is not implemented in the migration package yet")
 
 
