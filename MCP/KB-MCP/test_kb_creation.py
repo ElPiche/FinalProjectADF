@@ -18,11 +18,10 @@ db.mongo_connection_string = "mongodb://admin:1q2w3E*@localhost:27017/?authSourc
 # Mock elasticsearch_sql to avoid external dependencies
 def mock_elasticsearch_sql(query):
     # Return a mock response with the expected columns
-    mock_response = {
+    return {
         "columns": [{"name": "bytes"}],
         "rows": []
     }
-    return json.dumps(mock_response)
 
 # Create algorithm config using ZScoreConfig model
 zscore_config = ZScoreConfig(dimensions=["bytes"])

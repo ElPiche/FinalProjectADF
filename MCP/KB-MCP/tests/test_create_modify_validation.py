@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 from types import SimpleNamespace
@@ -43,6 +42,8 @@ class FakeCollection:
             return None
         if query.get("_id") == self.document.get("_id"):
             return dict(self.document)
+        if query.get("name") == self.document.get("name"):
+            return dict(self.document)
         return None
 
     def update_one(self, _filter, update):
@@ -71,7 +72,7 @@ class FakeClient:
 
 
 def fake_elasticsearch_success(*_args, **_kwargs):
-    return json.dumps({"columns": [{"name": "response_time", "type": "long"}], "rows": []})
+    return {"columns": [{"name": "response_time", "type": "long"}], "rows": []}
 
 
 def build_existing_document(object_id):
@@ -153,6 +154,61 @@ def test_create_da_config_succeeds_after_extractor_validation(monkeypatch):
 
     assert "SUCCESS" in result
     assert fake_collection.inserted is not None
+
+
+def test_create_config_duplicate_name_warns(monkeypatch):
+    existing = {"_id": ObjectId(), "name": "duplicate-config"}
+    fake_collection = FakeCollection(document=existing)
+
+    monkeypatch.setattr(create_module.QueryValidator, "validate", lambda *_: True)
+    monkeypatch.setattr(create_module, "elasticsearch_sql", fake_elasticsearch_success)
+    monkeypatch.setattr(create_module, "connect_mongodb", lambda: FakeClient(fake_collection))
+
+    result = create_da_config(
+        name="duplicate-config",
+        description="Desc",
+        training_query="SELECT response_time FROM metrics",
+        detection_query="SELECT response_time FROM metrics",
+        training_from="2025-01-01T00:00:00Z",
+        training_to="2025-01-02T00:00:00Z",
+        training_is_active=True,
+        detection_is_active=True,
+        training_window=3600,
+        detection_window=900,
+        detection_frequency="*/15 * * * *",
+        detection_start="2025-01-02T00:00:00Z",
+        algorithms=VALID_ALGORITHMS,
+    )
+
+    assert "Warning" in result
+    assert "duplicate-config" in result
+
+
+def test_create_config_unique_name_has_no_warning(monkeypatch):
+    fake_collection = FakeCollection()
+
+    monkeypatch.setattr(create_module.QueryValidator, "validate", lambda *_: True)
+    monkeypatch.setattr(create_module, "elasticsearch_sql", fake_elasticsearch_success)
+    monkeypatch.setattr(create_module, "connect_mongodb", lambda: FakeClient(fake_collection))
+
+    result = create_da_config(
+        name="unique-config",
+        description="Desc",
+        training_query="SELECT response_time FROM metrics",
+        detection_query="SELECT response_time FROM metrics",
+        training_from="2025-01-01T00:00:00Z",
+        training_to="2025-01-02T00:00:00Z",
+        training_is_active=True,
+        detection_is_active=True,
+        training_window=3600,
+        detection_window=900,
+        detection_frequency="*/15 * * * *",
+        detection_start="2025-01-02T00:00:00Z",
+        algorithms=VALID_ALGORITHMS,
+    )
+
+    assert "Warning" not in result
+    assert "SUCCESS" in result
 
 
 def test_modify_kb_config_stops_when_extractor_rejects(monkeypatch):

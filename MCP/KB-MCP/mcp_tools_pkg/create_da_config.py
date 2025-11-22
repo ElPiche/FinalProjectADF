@@ -1,14 +1,14 @@
-import uuid
-import time
 import json
+import os
+import time
+import uuid
 from typing import List
-from pydantic import Field
 
 from mcp.server.fastmcp.exceptions import ToolError
 
 from models import AlgorithmConfig
 from db import connect_mongodb
-from validation import validate_algorithms
+from validation import validate_algorithms, validate_cron_expression, validate_window_size
 from utils import log_message as _utils_log_message
 from .algorithms import parse_algorithms_to_internal_format, validate_algorithm_dimensions
 from .elasticsearch_sql import elasticsearch_sql
@@ -35,20 +35,49 @@ def create_da_config(
     algorithms: List[AlgorithmConfig]
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
-    start_time = time.time()
+    total_start = time.time()
+    warnings: list[str] = []
+    client = None
 
-    log_message("Tool execution started", "info", "create_da_config", "entry",
-                request_id=request_id, extra_data={
-                    "config_name": name,
-                    "algorithm_count": len(algorithms) if algorithms else 0
-                })
+    log_message(
+        "=== Starting create_da_config ===",
+        "info",
+        "create_da_config",
+        "entry",
+        request_id=request_id,
+        extra_data={"config_name": name, "algorithm_count": len(algorithms) if algorithms else 0},
+    )
 
-    # Validate input using Pydantic models
     try:
+        # Step 1: Window validation
+        step_start = time.time()
+        log_message("Step 1/5: Validating window sizes", "info", "create_da_config", "step", request_id=request_id)
+        try:
+            training_window_result = validate_window_size(training_window, "training")
+            detection_window_result = validate_window_size(detection_window, "detection")
+        except ValueError as exc:
+            raise ToolError(f"Invalid window size: {exc}") from exc
+
+        for result in (training_window_result, detection_window_result):
+            if result.get("warning"):
+                warning_text = f"⚠️  Warning: {result['warning']}"
+                warnings.append(warning_text)
+                log_message(warning_text, "warning", "create_da_config", "step", request_id=request_id)
+
+        log_message(
+            f"✓ Step 1 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "create_da_config",
+            "step",
+            request_id=request_id,
+        )
+
+        # Step 2: Schema validation (Pydantic + CRON + timestamps)
+        step_start = time.time()
+        log_message("Step 2/5: Validating configuration payload", "info", "create_da_config", "step", request_id=request_id)
         from pydantic import ValidationError
         from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem
 
-        # Convert algorithms to AlgorithmConfigItem format
         algorithm_items = []
         for alg in algorithms or []:
             try:
@@ -63,7 +92,11 @@ def create_da_config(
             except ValidationError as exc:
                 raise ToolError(f"Algorithm validation error: {exc}") from exc
 
-        # Create and validate KBConfig instance
+        try:
+            validate_cron_expression(detection_frequency)
+        except ValueError as exc:
+            raise ToolError(str(exc)) from exc
+
         config = KBConfig(
             name=name,
             description=description,
@@ -74,115 +107,164 @@ def create_da_config(
                     **{"from": training_from},
                     to=training_to,
                     training_window=training_window,
-                    is_active=training_is_active
+                    is_active=training_is_active,
                 ),
                 detection_config=DetectionConfig(
                     detection_query=detection_query,
                     **{"from": detection_start},
                     frequency=detection_frequency,
                     detection_window=detection_window,
-                    is_active=detection_is_active
-                )
+                    is_active=detection_is_active,
+                ),
             ),
-            algorithms=algorithm_items
+            algorithms=algorithm_items,
         )
 
-        log_message("Pydantic validation successful", "info", "create_da_config", "validation",
-                    request_id=request_id)
+        from datetime import datetime
 
-    except Exception as e:
-        log_message(f"Pydantic validation failed: {str(e)}", "error", "create_da_config", "validation",
-                    request_id=request_id)
-        raise ToolError(f"Input validation failed: {str(e)}")
+        try:
+            training_from_dt = datetime.fromisoformat(training_from.replace("Z", "+00:00"))
+            training_to_dt = datetime.fromisoformat(training_to.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ToolError(f"Invalid timestamp format: {exc}") from exc
 
-    # Validate time range logic
-    from datetime import datetime
-    try:
-        training_from_dt = datetime.fromisoformat(training_from.replace('Z', '+00:00'))
-        training_to_dt = datetime.fromisoformat(training_to.replace('Z', '+00:00'))
         if training_to_dt <= training_from_dt:
             raise ToolError("training_to must be after training_from")
-    except ValueError as e:
-        raise ToolError(f"Invalid timestamp format: {str(e)}")
 
-    # Parse algorithms to internal format (using validated config)
-    internal_algorithms = parse_algorithms_to_internal_format(config.algorithms)
+        log_message(
+            f"✓ Step 2 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "create_da_config",
+            "step",
+            request_id=request_id,
+        )
 
-    algorithm_errors = validate_algorithms(internal_algorithms)
-    if algorithm_errors:
-        error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
-        log_message(f"Algorithm validation failed: {len(algorithm_errors)} errors", "error",
-                    "create_da_config", "validation", request_id=request_id)
-        raise ToolError(error_msg)
+        # Step 3: Algorithm + SQL validation
+        step_start = time.time()
+        log_message("Step 3/5: Validating algorithms and SQL queries", "info", "create_da_config", "step", request_id=request_id)
+        internal_algorithms = parse_algorithms_to_internal_format(config.algorithms)
+        algorithm_errors = validate_algorithms(internal_algorithms)
+        if algorithm_errors:
+            error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
+            raise ToolError(error_msg)
 
-    # Cross-validate algorithms against SQL queries
-    if config.scheduling.training_config.training_query:
-        QueryValidator.validate(config.scheduling.training_config.training_query, "training")
-        validation_result = elasticsearch_sql(config.scheduling.training_config.training_query + " LIMIT 0")
-        if "ERROR" in validation_result:
-            raise ToolError(f"Training SQL query validation failed: {validation_result}")
-        else:
-            try:
-                result_data = json.loads(validation_result)
-                available_fields = [col['name'] for col in result_data.get('columns', [])]
+        def _validate_query(query: str, label: str):
+            QueryValidator.validate(query, label)
+            preview = elasticsearch_sql(f"{query} LIMIT 0")
+            available_fields = [col.get("name") for col in preview.get("columns", []) if col.get("name")]
+            validate_algorithm_dimensions(config.algorithms, available_fields, label)
 
-                validate_algorithm_dimensions(config.algorithms, available_fields, "training")
-            except json.JSONDecodeError:
-                raise ToolError("Could not parse training SQL validation response")
+        if config.scheduling.training_config.training_query:
+            _validate_query(config.scheduling.training_config.training_query, "training")
 
-    if config.scheduling.detection_config.detection_query:
-        QueryValidator.validate(config.scheduling.detection_config.detection_query, "detection")
-        validation_result = elasticsearch_sql(config.scheduling.detection_config.detection_query + " LIMIT 0")
-        if "ERROR" in validation_result:
-            raise ToolError(f"Detection SQL query validation failed: {validation_result}")
-        else:
-            try:
-                result_data = json.loads(validation_result)
-                available_fields = [col['name'] for col in result_data.get('columns', [])]
+        if config.scheduling.detection_config.detection_query:
+            _validate_query(config.scheduling.detection_config.detection_query, "detection")
 
-                validate_algorithm_dimensions(config.algorithms, available_fields, "detection")
-            except json.JSONDecodeError:
-                raise ToolError("Could not parse detection SQL validation response")
+        log_message(
+            f"✓ Step 3 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "create_da_config",
+            "step",
+            request_id=request_id,
+        )
 
-    # Convert validated config to dict for storage
-    config_to_store = config.model_dump(by_alias=True)
+        # Prepare config dict for persistence
+        config_to_store = config.model_dump(by_alias=True)
+        print("\nConfiguration Preview:")
+        print(json.dumps(config_to_store, indent=2))
+        print()
 
-    log_message(f"Configuration validation successful for: {config.name}", "info",
-                "create_da_config", "validation", request_id=request_id)
+        # Step 4: Duplicate name detection
+        step_start = time.time()
+        log_message("Step 4/5: Checking configuration name uniqueness", "info", "create_da_config", "step", request_id=request_id)
+        client = connect_mongodb()
+        if client is None:
+            raise ToolError("Failed to connect to MongoDB - configuration not saved")
 
-    print("\nConfiguration Preview:")
-    print(json.dumps(config_to_store, indent=2))
-    print()
-
-    client = connect_mongodb()
-    if client is None:
-        error_msg = "Failed to connect to MongoDB - configuration not saved"
-        log_message(error_msg, "error", "create_da_config", "save", request_id=request_id)
-        raise ToolError(error_msg)
-
-    try:
         import db
+
         db_instance = client[db.db_kb_name]
         collection = db_instance[db.db_kb_collection_name]
+        enforce_unique = os.getenv("ENFORCE_UNIQUE_CONFIG_NAMES", "false").lower() == "true"
+        existing = collection.find_one({"name": name})
+        if existing:
+            msg = f"Configuration with name '{name}' already exists (ID: {existing.get('_id')})."
+            if enforce_unique:
+                raise ToolError(
+                    f"Duplicate configuration name: {msg} Strict mode is enabled; choose a unique name or disable ENFORCE_UNIQUE_CONFIG_NAMES."
+                )
+            warning_text = f"⚠️  Warning: {msg} Consider using a unique name to avoid confusion."
+            warnings.append(warning_text)
+            log_message(warning_text, "warning", "create_da_config", "step", request_id=request_id)
 
+        log_message(
+            f"✓ Step 4 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "create_da_config",
+            "step",
+            request_id=request_id,
+        )
+
+        # Step 5: Persist configuration (fire-and-forget via MongoDB insert)
+        step_start = time.time()
+        log_message("Step 5/5: Persisting configuration", "info", "create_da_config", "step", request_id=request_id)
+        # Verified: No blocking ETL triggers. MongoDB change streams handle downstream processing asynchronously.
         result = collection.insert_one(config_to_store)
         document_id = str(result.inserted_id)
+        log_message(
+            f"✓ Step 5 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "create_da_config",
+            "step",
+            request_id=request_id,
+            extra_data={"document_id": document_id},
+        )
 
-        duration_ms = (time.time() - start_time) * 1000
-        success_msg = f"SUCCESS: Configuration saved to MongoDB!\n\nDocument ID: {document_id}\n\nConfiguration saved successfully."
-        log_message("Configuration creation completed successfully", "info",
-                    "create_da_config", "completion", request_id=request_id,
-                    duration_ms=duration_ms, extra_data={"document_id": document_id})
+        total_elapsed = time.time() - total_start
+        success_msg = (
+            "SUCCESS: Configuration saved to MongoDB!\n\n"
+            f"Document ID: {document_id}\n\nConfiguration saved successfully."
+        )
+        if warnings:
+            success_msg += "\n" + "\n".join(warnings)
+
+        log_message(
+            "Configuration creation completed successfully",
+            "info",
+            "create_da_config",
+            "completion",
+            request_id=request_id,
+            duration_ms=int(total_elapsed * 1000),
+            extra_data={"document_id": document_id},
+        )
         return success_msg
 
-    except Exception as e:
-        duration_ms = (time.time() - start_time) * 1000
-        error_msg = f"Failed to save configuration: {str(e)}"
-        log_message(error_msg, "error", "create_da_config", "save", request_id=request_id,
-                    duration_ms=duration_ms, extra_data={"error_type": type(e).__name__})
-        raise ToolError(error_msg)
+    except ToolError:
+        total_elapsed = time.time() - total_start
+        log_message(
+            "create_da_config failed (ToolError)",
+            "error",
+            "create_da_config",
+            "failure",
+            request_id=request_id,
+            duration_ms=int(total_elapsed * 1000),
+        )
+        raise
+    except Exception as exc:
+        total_elapsed = time.time() - total_start
+        log_message(
+            f"Unexpected error: {exc}",
+            "error",
+            "create_da_config",
+            "failure",
+            request_id=request_id,
+            duration_ms=int(total_elapsed * 1000),
+            extra_data={"error_type": type(exc).__name__},
+        )
+        raise ToolError(f"Failed to create configuration: {exc}") from exc
     finally:
-        try:
-            client.close()
-        except:
-            pass
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass

@@ -1,13 +1,49 @@
 """Query validation helper that proxies validations to the extractor service."""
 
+import logging
 import os
 import re
+import time
 from typing import Any, Dict, Optional
 
 import requests
+from requests.exceptions import ConnectionError, RequestException, Timeout
 from mcp.server.fastmcp.exceptions import ToolError
 
 from utils import log_message as _utils_log_message
+
+
+logger = logging.getLogger(__name__)
+
+
+def _get_timeout_env(var_name: str, fallback: int) -> int:
+    raw_value = os.getenv(var_name)
+    if raw_value is None:
+        return fallback
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid timeout override '%s' for %s; using default %s seconds",
+            raw_value,
+            var_name,
+            fallback,
+        )
+        return fallback
+
+
+VALIDATION_TIMEOUTS = {
+    "EXTRACTOR_VALIDATION_TIMEOUT": _get_timeout_env("EXTRACTOR_VALIDATION_TIMEOUT_SECONDS", 10),
+    "ELASTICSEARCH_SQL_PREVIEW_TIMEOUT": _get_timeout_env("ELASTICSEARCH_SQL_PREVIEW_TIMEOUT_SECONDS", 5),
+    "ELASTICSEARCH_SQL_QUERY_TIMEOUT": _get_timeout_env("ELASTICSEARCH_SQL_QUERY_TIMEOUT_SECONDS", 30),
+}
+
+logger.info(
+    "Timeout configuration loaded: extractor=%ss, es_preview=%ss, es_query=%ss",
+    VALIDATION_TIMEOUTS["EXTRACTOR_VALIDATION_TIMEOUT"],
+    VALIDATION_TIMEOUTS["ELASTICSEARCH_SQL_PREVIEW_TIMEOUT"],
+    VALIDATION_TIMEOUTS["ELASTICSEARCH_SQL_QUERY_TIMEOUT"],
+)
 
 
 def log_message(
@@ -30,7 +66,7 @@ class QueryValidator:
     syntaxes must be rejected before reaching the extractor.
     """
 
-    DEFAULT_TIMEOUT_SECONDS = 3
+    DEFAULT_TIMEOUT_SECONDS = VALIDATION_TIMEOUTS["EXTRACTOR_VALIDATION_TIMEOUT"]
     _SQL_ENTRYPOINTS = ("select", "show", "describe", "explain", "with")
     _PIPE_PATTERN = re.compile(r"\|\s*[A-Za-z]", re.MULTILINE)
 
@@ -60,32 +96,51 @@ class QueryValidator:
         cls._assert_elasticsearch_sql(query, query_label)
 
         endpoint = cls._build_endpoint()
-        timeout_seconds = timeout or cls.DEFAULT_TIMEOUT_SECONDS
+        timeout_seconds = timeout or VALIDATION_TIMEOUTS["EXTRACTOR_VALIDATION_TIMEOUT"]
         fallback_enabled = cls._is_fallback_allowed(allow_fallback)
 
         log_message(
-            f"Validating {query_label} query via extractor",
+            f"Validating {query_label} query via extractor (timeout={timeout_seconds}s)",
             "info",
             "query_validator",
             "request",
             extra_data={"extractor_endpoint": endpoint},
         )
 
+        start_time = time.time()
+
         try:
             response = requests.post(endpoint, json={"query": query}, timeout=timeout_seconds)
-        except requests.RequestException as exc:  # pragma: no cover - exercised via tests
+        except Timeout as exc:
+            elapsed = time.time() - start_time
+            message = (
+                f"Extractor validation timed out after {timeout_seconds} seconds for {query_label} query. "
+                "The query may be too complex or the extractor cluster may be slow. "
+                "Try simplifying the query, narrowing the time range, or increasing EXTRACTOR_VALIDATION_TIMEOUT_SECONDS if appropriate."
+            )
+            log_message(
+                message,
+                "error",
+                "query_validator",
+                "timeout",
+                extra_data={"elapsed_seconds": round(elapsed, 2)},
+            )
+            raise ToolError(message) from exc
+        except (ConnectionError, RequestException) as exc:  # pragma: no cover - exercised via tests
+            elapsed = time.time() - start_time
             if fallback_enabled:
                 log_message(
                     f"Extractor validation unreachable for {query_label} query; falling back",
                     "warning",
                     "query_validator",
                     "fallback",
-                    extra_data={"error": str(exc)},
+                    extra_data={"error": str(exc), "elapsed_seconds": round(elapsed, 2)},
                 )
                 return False
             raise ToolError(f"Extractor validation failed for {query_label} query: {exc}") from exc
 
         payload = cls._safe_json(response)
+        elapsed = time.time() - start_time
 
         if response.status_code == 200:
             errors = payload.get("errors") if isinstance(payload, dict) else None
@@ -93,7 +148,7 @@ class QueryValidator:
                 message = payload.get("message", "Extractor reported validation errors")
                 raise ToolError(f"Extractor validation failed for {query_label} query: {message} - {errors}")
             log_message(
-                f"Extractor validation succeeded for {query_label} query",
+                f"Extractor validation succeeded for {query_label} query in {elapsed:.2f}s",
                 "info",
                 "query_validator",
                 "success",
@@ -111,7 +166,7 @@ class QueryValidator:
                 "warning",
                 "query_validator",
                 "fallback",
-                extra_data={"error": error_detail},
+                extra_data={"error": error_detail, "elapsed_seconds": round(elapsed, 2)},
             )
             return False
 

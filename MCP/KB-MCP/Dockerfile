@@ -2,6 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Conservative defaults for validation/timeout behavior (overridable at runtime)
+ENV EXTRACTOR_VALIDATION_TIMEOUT_SECONDS=10 \
+    ELASTICSEARCH_SQL_PREVIEW_TIMEOUT_SECONDS=5 \
+    ELASTICSEARCH_SQL_QUERY_TIMEOUT_SECONDS=30 \
+    MIN_TRAINING_WINDOW_SECONDS=1 \
+    MIN_DETECTION_WINDOW_SECONDS=1 \
+    LARGE_WINDOW_THRESHOLD_DAYS=30 \
+    ENFORCE_UNIQUE_CONFIG_NAMES=false \
+    LOG_LEVEL=INFO
+
 # Copy requirements first for better Docker layer caching
 COPY requirements.txt .
 

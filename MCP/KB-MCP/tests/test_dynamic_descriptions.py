@@ -44,7 +44,7 @@ def _patch_create_da_config_dependencies(monkeypatch):
     monkeypatch.setattr(
         create_module,
         "elasticsearch_sql",
-        lambda query: json.dumps({"columns": [{"name": "field", "type": "long"}], "rows": []}),
+        lambda query: {"columns": [{"name": "field", "type": "long"}], "rows": []},
     )
     monkeypatch.setattr(create_module, "connect_mongodb", lambda: None)
 

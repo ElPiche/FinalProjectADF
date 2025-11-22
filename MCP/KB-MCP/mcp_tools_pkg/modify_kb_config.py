@@ -1,4 +1,3 @@
-import json
 import time
 import uuid
 from typing import List
@@ -14,7 +13,7 @@ from models import (
     SchedulingConfig,
     TrainingConfig,
 )
-from validation import validate_algorithms
+from validation import validate_algorithms, validate_cron_expression, validate_window_size
 from .algorithms import parse_algorithms_to_internal_format, validate_algorithm_dimensions
 from .elasticsearch_sql import elasticsearch_sql
 from .query_validator import QueryValidator
@@ -43,6 +42,7 @@ def modify_kb_config(
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
     start_time = time.time()
+    warnings: list[str] = []
 
     log_message(
         "Tool execution started",
@@ -64,6 +64,16 @@ def modify_kb_config(
         db_instance = client[db.db_kb_name]
         collection = db_instance[db.db_kb_collection_name]
 
+        step_start = time.time()
+        log_message(
+            "Step 1/4: Loading configuration",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
+
         try:
             object_id = ObjectId(config_id)
         except Exception as exc:
@@ -77,6 +87,25 @@ def modify_kb_config(
             existing_config = KBConfig.model_validate({k: v for k, v in config_doc.items() if k != "_id"})
         except ValidationError as exc:
             raise ToolError(f"Stored configuration failed validation and cannot be updated: {exc}")
+
+        log_message(
+            f"✓ Step 1 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
+
+        step_start = time.time()
+        log_message(
+            "Step 2/4: Applying requested updates",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
 
         updates_applied = False
         algorithms_updated = False
@@ -108,6 +137,20 @@ def modify_kb_config(
                 training_config_updates["training_query"] = cleaned_training_query
                 updates_applied = True
                 training_query_updated = True
+
+        if training_window is not None:
+            if not isinstance(training_window, int):
+                raise ToolError("training_window must be an integer")
+            try:
+                validation_result = validate_window_size(training_window, "training")
+            except ValueError as exc:
+                raise ToolError(f"Invalid window size: {exc}") from exc
+            training_config_updates["training_window"] = training_window
+            updates_applied = True
+            if validation_result.get("warning"):
+                warning_text = f"⚠️  Warning: {validation_result['warning']}"
+                warnings.append(warning_text)
+                log_message(warning_text, "warning", "modify_kb_config", "step", request_id=request_id)
 
         if training_from is not None:
             if not isinstance(training_from, str) or not training_from.strip():
@@ -145,9 +188,27 @@ def modify_kb_config(
             if not isinstance(detection_frequency, str) or not detection_frequency.strip():
                 raise ToolError("detection_frequency must be a non-empty CRON expression")
             cleaned_detection_frequency = detection_frequency.strip()
+            try:
+                validate_cron_expression(cleaned_detection_frequency)
+            except ValueError as exc:
+                raise ToolError(str(exc)) from exc
             if cleaned_detection_frequency != existing_config.scheduling.detection_config.frequency:
                 detection_config_updates["frequency"] = cleaned_detection_frequency
                 updates_applied = True
+
+        if detection_window is not None:
+            if not isinstance(detection_window, int):
+                raise ToolError("detection_window must be an integer")
+            try:
+                validation_result = validate_window_size(detection_window, "detection")
+            except ValueError as exc:
+                raise ToolError(f"Invalid window size: {exc}") from exc
+            detection_config_updates["detection_window"] = detection_window
+            updates_applied = True
+            if validation_result.get("warning"):
+                warning_text = f"⚠️  Warning: {validation_result['warning']}"
+                warnings.append(warning_text)
+                log_message(warning_text, "warning", "modify_kb_config", "step", request_id=request_id)
 
         # Apply training config updates with validation
         if training_config_updates:
@@ -241,6 +302,25 @@ def modify_kb_config(
             except ValueError as e:
                 raise ToolError(f"Invalid timestamp format: {str(e)}")
 
+        log_message(
+            f"✓ Step 2 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
+
+        step_start = time.time()
+        log_message(
+            "Step 3/4: Validating algorithms and SQL queries",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
+
         internal_algorithms = parse_algorithms_to_internal_format(new_config.algorithms)
         algorithm_errors = validate_algorithms(internal_algorithms)
         if algorithm_errors:
@@ -250,43 +330,38 @@ def modify_kb_config(
         validate_training_query = training_query_updated or algorithms_updated
         validate_detection_query = detection_query_updated or algorithms_updated
 
-        if validate_training_query:
-            QueryValidator.validate(
-                new_config.scheduling.training_config.training_query,
-                "training",
-            )
-            validation_result = elasticsearch_sql(
-                f"{new_config.scheduling.training_config.training_query} LIMIT 0"
-            )
-            if "ERROR" in validation_result:
-                raise ToolError(f"Training SQL query validation failed: {validation_result}")
-            try:
-                result_data = json.loads(validation_result)
-                available_fields = [col["name"] for col in result_data.get("columns", [])]
-            except json.JSONDecodeError as exc:
-                raise ToolError("Could not parse training SQL validation response") from exc
+        def _validate_query(query: str, label: str):
+            QueryValidator.validate(query, label)
+            preview = elasticsearch_sql(f"{query} LIMIT 0")
+            available_fields = [col.get("name") for col in preview.get("columns", []) if col.get("name")]
+            validate_algorithm_dimensions(new_config.algorithms, available_fields, label)
 
-            validate_algorithm_dimensions(new_config.algorithms, available_fields, "training")
+        if validate_training_query:
+            _validate_query(new_config.scheduling.training_config.training_query, "training")
 
         if validate_detection_query:
-            QueryValidator.validate(
-                new_config.scheduling.detection_config.detection_query,
-                "detection",
-            )
-            validation_result = elasticsearch_sql(
-                f"{new_config.scheduling.detection_config.detection_query} LIMIT 0"
-            )
-            if "ERROR" in validation_result:
-                raise ToolError(f"Detection SQL query validation failed: {validation_result}")
-            try:
-                result_data = json.loads(validation_result)
-                available_fields = [col["name"] for col in result_data.get("columns", [])]
-            except json.JSONDecodeError as exc:
-                raise ToolError("Could not parse detection SQL validation response") from exc
+            _validate_query(new_config.scheduling.detection_config.detection_query, "detection")
 
-            validate_algorithm_dimensions(new_config.algorithms, available_fields, "detection")
+        log_message(
+            f"✓ Step 3 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
 
         payload = new_config.model_dump(by_alias=True)
+
+        step_start = time.time()
+        log_message(
+            "Step 4/4: Persisting configuration",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
 
         result = collection.update_one(
             {"_id": object_id},
@@ -304,6 +379,15 @@ def modify_kb_config(
             )
             raise ToolError("No changes were made to the configuration")
 
+        log_message(
+            f"✓ Step 4 completed in {time.time() - step_start:.2f}s",
+            "info",
+            "modify_kb_config",
+            "step",
+            request_id=request_id,
+            extra_data={"config_id": config_id},
+        )
+
         duration_ms = (time.time() - start_time) * 1000
         log_message(
             f"Configuration '{config_id}' updated successfully",
@@ -314,7 +398,10 @@ def modify_kb_config(
             duration_ms=duration_ms,
             extra_data={"config_id": config_id},
         )
-        return f"SUCCESS: Configuration '{config_id}' updated successfully."
+        success_msg = f"SUCCESS: Configuration '{config_id}' updated successfully."
+        if warnings:
+            success_msg += "\n" + "\n".join(warnings)
+        return success_msg
 
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
