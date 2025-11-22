@@ -2,6 +2,7 @@ package com.da.extractor.service;
 
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch.sql.*;
 import co.elastic.clients.elasticsearch.sql.query.SqlFormat;
 import co.elastic.clients.json.JsonpMapper;
@@ -34,13 +35,13 @@ public class ElasticService {
         return client.info().toString();
     }
 
-    /// Ejecuta una consulta ESQL y devuelve los resultados como un Map
+    /// Ejecuta una consulta SQL de Elastic y devuelve los resultados como un Map
     /// @param query La consulta ESQL a ejecutar
     /// @return Un Map que contiene los resultados de la consulta
     /// @throws IllegalArgumentException Si la respuesta contiene un error
     /// @throws IOException Si ocurre un error al ejecutar la consulta
     public QueryResponse executeQuery(String query, @Null String requestCursor)
-            throws IllegalArgumentException, IOException {
+            throws IllegalArgumentException, IOException, ElasticsearchException {
 
         IO.println("Executing ESQL Query: " + query);
 
