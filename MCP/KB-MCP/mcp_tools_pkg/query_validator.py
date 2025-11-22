@@ -11,31 +11,20 @@ from requests.exceptions import ConnectionError, RequestException, Timeout
 from mcp.server.fastmcp.exceptions import ToolError
 
 from utils import log_message as _utils_log_message
+from .config import (
+    ELASTICSEARCH_QUERY_TIMEOUT,
+    ELASTICSEARCH_SQL_PREVIEW_TIMEOUT,
+    EXTRACTOR_VALIDATION_TIMEOUT,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
-def _get_timeout_env(var_name: str, fallback: int) -> int:
-    raw_value = os.getenv(var_name)
-    if raw_value is None:
-        return fallback
-    try:
-        return int(raw_value)
-    except (TypeError, ValueError):
-        logger.warning(
-            "Invalid timeout override '%s' for %s; using default %s seconds",
-            raw_value,
-            var_name,
-            fallback,
-        )
-        return fallback
-
-
 VALIDATION_TIMEOUTS = {
-    "EXTRACTOR_VALIDATION_TIMEOUT": _get_timeout_env("EXTRACTOR_VALIDATION_TIMEOUT_SECONDS", 10),
-    "ELASTICSEARCH_SQL_PREVIEW_TIMEOUT": _get_timeout_env("ELASTICSEARCH_SQL_PREVIEW_TIMEOUT_SECONDS", 5),
-    "ELASTICSEARCH_SQL_QUERY_TIMEOUT": _get_timeout_env("ELASTICSEARCH_SQL_QUERY_TIMEOUT_SECONDS", 30),
+    "EXTRACTOR_VALIDATION_TIMEOUT": EXTRACTOR_VALIDATION_TIMEOUT,
+    "ELASTICSEARCH_SQL_PREVIEW_TIMEOUT": ELASTICSEARCH_SQL_PREVIEW_TIMEOUT,
+    "ELASTICSEARCH_SQL_QUERY_TIMEOUT": ELASTICSEARCH_QUERY_TIMEOUT,
 }
 
 logger.info(

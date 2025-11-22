@@ -6,7 +6,7 @@ created during the migration. That package performs I/O inside function
 bodies so importing this shim is fast and side-effect free.
 """
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 from typing import List
@@ -396,7 +396,7 @@ for more info, use the `describe_mcp_server` tool.
     """
 
 
-def create_da_config(
+async def create_da_config(
     name: str,
     description: str,
     training_query: str,
@@ -409,26 +409,29 @@ def create_da_config(
     detection_window: int,
     detection_frequency: str,
     detection_start: str,
-    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION)
+    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
+    ctx: Context | None = None
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "create_da_config"):
-        return pkg.create_da_config(name, 
-                                    description, 
-                                    training_query, 
-                                    detection_query,
-                                    training_from, 
-                                    training_to, 
-                                    training_is_active, 
-                                    detection_is_active,
-                                    training_window, 
-                                    detection_window, detection_frequency,
-                                    detection_start, 
-                                    algorithms)
+        return await pkg.create_da_config(name, 
+                                          description, 
+                                          training_query, 
+                                          detection_query,
+                                          training_from, 
+                                          training_to, 
+                                          training_is_active, 
+                                          detection_is_active,
+                                          training_window, 
+                                          detection_window, 
+                                          detection_frequency,
+                                          detection_start, 
+                                          algorithms,
+                                          ctx)
     raise ToolError("create_da_config is not implemented in the migration package yet")
 
 
-def modify_kb_config(
+async def modify_kb_config(
     config_id: str,
     description: str,
     training_query: str,
@@ -441,23 +444,25 @@ def modify_kb_config(
     detection_window: int,
     detection_frequency: str,
     detection_start: str,
-    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION)
+    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
+    ctx: Context | None = None
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "modify_kb_config"):
-        return pkg.modify_kb_config(config_id, 
-                                    description, 
-                                    training_query, 
-                                    detection_query,
-                                    training_from, 
-                                    training_to, 
-                                    training_is_active,
-                                    detection_is_active, 
-                                    training_window, 
-                                    detection_window,
-                                    detection_frequency, 
-                                    detection_start, 
-                                    algorithms)
+        return await pkg.modify_kb_config(config_id, 
+                                          description, 
+                                          training_query, 
+                                          detection_query,
+                                          training_from, 
+                                          training_to, 
+                                          training_is_active,
+                                          detection_is_active, 
+                                          training_window, 
+                                          detection_window,
+                                          detection_frequency, 
+                                          detection_start, 
+                                          algorithms,
+                                          ctx)
     raise ToolError("modify_kb_config is not implemented in the migration package yet")
 
 

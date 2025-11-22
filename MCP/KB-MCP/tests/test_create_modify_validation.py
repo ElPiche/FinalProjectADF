@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 from types import SimpleNamespace
@@ -71,7 +72,7 @@ class FakeClient:
         self.closed = True
 
 
-def fake_elasticsearch_success(*_args, **_kwargs):
+async def fake_elasticsearch_success(*_args, **_kwargs):
     return {"columns": [{"name": "response_time", "type": "long"}], "rows": []}
 
 
@@ -108,6 +109,37 @@ def test_create_da_config_stops_when_extractor_rejects(monkeypatch):
     monkeypatch.setattr(create_module.QueryValidator, "validate", fake_validate)
 
     with pytest.raises(ToolError):
+        asyncio.run(
+            create_da_config(
+                name="Config",
+                description="Desc",
+                training_query="SELECT response_time FROM metrics",
+                detection_query="SELECT response_time FROM metrics",
+                training_from="2025-01-01T00:00:00Z",
+                training_to="2025-01-02T00:00:00Z",
+                training_is_active=True,
+                detection_is_active=True,
+                training_window=3600,
+                detection_window=900,
+                detection_frequency="*/15 * * * *",
+                detection_start="2025-01-02T00:00:00Z",
+                algorithms=VALID_ALGORITHMS,
+            )
+        )
+
+
+def test_create_da_config_succeeds_after_extractor_validation(monkeypatch):
+    fake_collection = FakeCollection()
+
+    monkeypatch.setattr(
+        create_module.QueryValidator,
+        "validate",
+        lambda query, label: True,
+    )
+    monkeypatch.setattr(create_module, "elasticsearch_sql", fake_elasticsearch_success)
+    monkeypatch.setattr(create_module, "connect_mongodb", lambda: FakeClient(fake_collection))
+
+    result = asyncio.run(
         create_da_config(
             name="Config",
             description="Desc",
@@ -123,33 +155,6 @@ def test_create_da_config_stops_when_extractor_rejects(monkeypatch):
             detection_start="2025-01-02T00:00:00Z",
             algorithms=VALID_ALGORITHMS,
         )
-
-
-def test_create_da_config_succeeds_after_extractor_validation(monkeypatch):
-    fake_collection = FakeCollection()
-
-    monkeypatch.setattr(
-        create_module.QueryValidator,
-        "validate",
-        lambda query, label: True,
-    )
-    monkeypatch.setattr(create_module, "elasticsearch_sql", fake_elasticsearch_success)
-    monkeypatch.setattr(create_module, "connect_mongodb", lambda: FakeClient(fake_collection))
-
-    result = create_da_config(
-        name="Config",
-        description="Desc",
-        training_query="SELECT response_time FROM metrics",
-        detection_query="SELECT response_time FROM metrics",
-        training_from="2025-01-01T00:00:00Z",
-        training_to="2025-01-02T00:00:00Z",
-        training_is_active=True,
-        detection_is_active=True,
-        training_window=3600,
-        detection_window=900,
-        detection_frequency="*/15 * * * *",
-        detection_start="2025-01-02T00:00:00Z",
-        algorithms=VALID_ALGORITHMS,
     )
 
     assert "SUCCESS" in result
@@ -164,20 +169,22 @@ def test_create_config_duplicate_name_warns(monkeypatch):
     monkeypatch.setattr(create_module, "elasticsearch_sql", fake_elasticsearch_success)
     monkeypatch.setattr(create_module, "connect_mongodb", lambda: FakeClient(fake_collection))
 
-    result = create_da_config(
-        name="duplicate-config",
-        description="Desc",
-        training_query="SELECT response_time FROM metrics",
-        detection_query="SELECT response_time FROM metrics",
-        training_from="2025-01-01T00:00:00Z",
-        training_to="2025-01-02T00:00:00Z",
-        training_is_active=True,
-        detection_is_active=True,
-        training_window=3600,
-        detection_window=900,
-        detection_frequency="*/15 * * * *",
-        detection_start="2025-01-02T00:00:00Z",
-        algorithms=VALID_ALGORITHMS,
+    result = asyncio.run(
+        create_da_config(
+            name="duplicate-config",
+            description="Desc",
+            training_query="SELECT response_time FROM metrics",
+            detection_query="SELECT response_time FROM metrics",
+            training_from="2025-01-01T00:00:00Z",
+            training_to="2025-01-02T00:00:00Z",
+            training_is_active=True,
+            detection_is_active=True,
+            training_window=3600,
+            detection_window=900,
+            detection_frequency="*/15 * * * *",
+            detection_start="2025-01-02T00:00:00Z",
+            algorithms=VALID_ALGORITHMS,
+        )
     )
 
     assert "Warning" in result
@@ -191,20 +198,22 @@ def test_create_config_unique_name_has_no_warning(monkeypatch):
     monkeypatch.setattr(create_module, "elasticsearch_sql", fake_elasticsearch_success)
     monkeypatch.setattr(create_module, "connect_mongodb", lambda: FakeClient(fake_collection))
 
-    result = create_da_config(
-        name="unique-config",
-        description="Desc",
-        training_query="SELECT response_time FROM metrics",
-        detection_query="SELECT response_time FROM metrics",
-        training_from="2025-01-01T00:00:00Z",
-        training_to="2025-01-02T00:00:00Z",
-        training_is_active=True,
-        detection_is_active=True,
-        training_window=3600,
-        detection_window=900,
-        detection_frequency="*/15 * * * *",
-        detection_start="2025-01-02T00:00:00Z",
-        algorithms=VALID_ALGORITHMS,
+    result = asyncio.run(
+        create_da_config(
+            name="unique-config",
+            description="Desc",
+            training_query="SELECT response_time FROM metrics",
+            detection_query="SELECT response_time FROM metrics",
+            training_from="2025-01-01T00:00:00Z",
+            training_to="2025-01-02T00:00:00Z",
+            training_is_active=True,
+            detection_is_active=True,
+            training_window=3600,
+            detection_window=900,
+            detection_frequency="*/15 * * * *",
+            detection_start="2025-01-02T00:00:00Z",
+            algorithms=VALID_ALGORITHMS,
+        )
     )
 
     assert "Warning" not in result
@@ -224,9 +233,11 @@ def test_modify_kb_config_stops_when_extractor_rejects(monkeypatch):
     monkeypatch.setattr(modify_module.QueryValidator, "validate", raise_validation_error)
 
     with pytest.raises(ToolError):
-        modify_kb_config(
-            config_id=config_id,
-            detection_query="SELECT response_time FROM metrics WHERE foo=1",
+        asyncio.run(
+            modify_kb_config(
+                config_id=config_id,
+                detection_query="SELECT response_time FROM metrics WHERE foo=1",
+            )
         )
 
 
@@ -246,9 +257,11 @@ def test_modify_kb_config_runs_when_extractor_passes(monkeypatch):
     monkeypatch.setattr(modify_module.QueryValidator, "validate", record_validate)
     monkeypatch.setattr(modify_module, "elasticsearch_sql", fake_elasticsearch_success)
 
-    result = modify_kb_config(
-        config_id=config_id,
-        detection_query="SELECT response_time FROM metrics WHERE foo=1",
+    result = asyncio.run(
+        modify_kb_config(
+            config_id=config_id,
+            detection_query="SELECT response_time FROM metrics WHERE foo=1",
+        )
     )
 
     assert "SUCCESS" in result

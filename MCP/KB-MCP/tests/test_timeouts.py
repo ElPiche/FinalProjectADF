@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import os
 import sys
@@ -87,23 +88,29 @@ def test_create_da_config_logs_steps(monkeypatch, caplog):
     create_module = importlib.import_module("mcp_tools_pkg.create_da_config")
 
     monkeypatch.setattr(create_module.QueryValidator, "validate", lambda *_args, **_kwargs: True)
-    monkeypatch.setattr(create_module, "elasticsearch_sql", lambda query: {"columns": [{"name": "response_time"}], "rows": []})
+
+    async def _fake_elasticsearch_sql(*_args, **_kwargs):
+        return {"columns": [{"name": "response_time"}], "rows": []}
+
+    monkeypatch.setattr(create_module, "elasticsearch_sql", _fake_elasticsearch_sql)
     monkeypatch.setattr(create_module, "connect_mongodb", lambda: StubClient(collection))
 
-    result = create_da_config(
-        name="log-test",
-        description="Desc",
-        training_query="SELECT response_time FROM metrics",
-        detection_query="SELECT response_time FROM metrics",
-        training_from="2025-01-01T00:00:00Z",
-        training_to="2025-01-02T00:00:00Z",
-        training_is_active=True,
-        detection_is_active=True,
-        training_window=3600,
-        detection_window=900,
-        detection_frequency="*/15 * * * *",
-        detection_start="2025-01-02T00:00:00Z",
-        algorithms=DEFAULT_ALGORITHMS,
+    result = asyncio.run(
+        create_da_config(
+            name="log-test",
+            description="Desc",
+            training_query="SELECT response_time FROM metrics",
+            detection_query="SELECT response_time FROM metrics",
+            training_from="2025-01-01T00:00:00Z",
+            training_to="2025-01-02T00:00:00Z",
+            training_is_active=True,
+            detection_is_active=True,
+            training_window=3600,
+            detection_window=900,
+            detection_frequency="*/15 * * * *",
+            detection_start="2025-01-02T00:00:00Z",
+            algorithms=DEFAULT_ALGORITHMS,
+        )
     )
 
     assert "SUCCESS" in result

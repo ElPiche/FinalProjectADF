@@ -28,7 +28,7 @@ __all__ = [
 if __name__ == "__main__":
     # Check if this is being run as an MCP server (no arguments or --server flag)
     print(f"Starting KB-MCP with args: {sys.argv}", file=sys.stderr)
-    print("Elasticsearch host: ", "http://elasticsearch-dataset:9200")  # From db.py
+    print("Elasticsearch host: http://elasticsearch-dataset:9200", file=sys.stderr)  # From db.py
 
     if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == "--server"):
         # Start MCP server using stdio transport (default for FastMCP)

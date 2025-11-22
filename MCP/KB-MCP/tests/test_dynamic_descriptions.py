@@ -5,6 +5,7 @@ Tests that descriptions are generated from Pydantic models and contain expected 
 Run with: python -m pytest tests/test_dynamic_descriptions.py -v
 """
 
+import asyncio
 import sys
 import os
 import json
@@ -41,11 +42,10 @@ DEFAULT_CREATE_ARGS = {
 def _patch_create_da_config_dependencies(monkeypatch):
     create_module = importlib.import_module("mcp_tools_pkg.create_da_config")
     monkeypatch.setattr(create_module.QueryValidator, "validate", lambda *args, **kwargs: True)
-    monkeypatch.setattr(
-        create_module,
-        "elasticsearch_sql",
-        lambda query: {"columns": [{"name": "field", "type": "long"}], "rows": []},
-    )
+    async def _fake_elasticsearch_sql(*_args, **_kwargs):
+        return {"columns": [{"name": "field", "type": "long"}], "rows": []}
+
+    monkeypatch.setattr(create_module, "elasticsearch_sql", _fake_elasticsearch_sql)
     monkeypatch.setattr(create_module, "connect_mongodb", lambda: None)
 
 
@@ -55,7 +55,7 @@ def _invoke_create_da_config(monkeypatch, **overrides):
     _patch_create_da_config_dependencies(monkeypatch)
     params = DEFAULT_CREATE_ARGS.copy()
     params.update(overrides)
-    return create_da_config(**params)
+    return asyncio.run(create_da_config(**params))
 
 
 class TestDynamicDescriptions:
@@ -276,9 +276,11 @@ class TestDynamicDescriptions:
             
             # Test valid update
             try:
-                result = modify_kb_config(
-                    config_id="507f1f77bcf86cd799439011",
-                    description="updated description"
+                result = asyncio.run(
+                    modify_kb_config(
+                        config_id="507f1f77bcf86cd799439011",
+                        description="updated description"
+                    )
                 )
                 assert "updated successfully" in result
             except Exception as e:

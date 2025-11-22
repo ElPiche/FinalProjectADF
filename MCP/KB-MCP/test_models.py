@@ -89,14 +89,19 @@ def test_valid_zscore_config():
         alg_parameters=[{"dimension": "field1"}, {"dimension": "field2"}]
     )
     assert config.alg_name == "zscore"
-    assert config.alg_parameters == [{"dimension": "field1"}, {"dimension": "field2"}]
+    assert [param.model_dump() for param in config.alg_parameters] == [
+        {"dimension": "field1", "alg_metadata": None},
+        {"dimension": "field2", "alg_metadata": None},
+    ]
     print("PASS: test_valid_zscore_config")
 
 
 def test_zscore_config_single_dimension():
     """Test ZScoreConfig with single dimension."""
     config = ZScoreConfig(alg_parameters=[{"dimension": "field1"}])
-    assert config.alg_parameters == [{"dimension": "field1"}]
+    assert [param.model_dump() for param in config.alg_parameters] == [
+        {"dimension": "field1", "alg_metadata": None}
+    ]
     print("PASS: test_zscore_config_single_dimension")
 
 
