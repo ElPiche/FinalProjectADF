@@ -11,6 +11,8 @@ from db import connect_mongodb
 from validation import validate_algorithms
 from utils import log_message as _utils_log_message
 from .algorithms import parse_algorithms_to_internal_format, validate_algorithm_dimensions
+from .elasticsearch_sql import elasticsearch_sql
+from .query_validator import QueryValidator
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
@@ -114,9 +116,8 @@ def create_da_config(
         raise ToolError(error_msg)
 
     # Cross-validate algorithms against SQL queries
-    from .elasticsearch_sql import elasticsearch_sql
-
     if config.scheduling.training_config.training_query:
+        QueryValidator.validate(config.scheduling.training_config.training_query, "training")
         validation_result = elasticsearch_sql(config.scheduling.training_config.training_query + " LIMIT 0")
         if "ERROR" in validation_result:
             raise ToolError(f"Training SQL query validation failed: {validation_result}")
@@ -130,6 +131,7 @@ def create_da_config(
                 raise ToolError("Could not parse training SQL validation response")
 
     if config.scheduling.detection_config.detection_query:
+        QueryValidator.validate(config.scheduling.detection_config.detection_query, "detection")
         validation_result = elasticsearch_sql(config.scheduling.detection_config.detection_query + " LIMIT 0")
         if "ERROR" in validation_result:
             raise ToolError(f"Detection SQL query validation failed: {validation_result}")

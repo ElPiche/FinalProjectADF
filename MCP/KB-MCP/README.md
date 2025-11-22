@@ -65,6 +65,9 @@ docker exec kb-mcp python profile_after.py
 
 - **MongoDB**: `mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin&replicaSet=rs0`
 - **Elasticsearch**: `http://elasticsearch-dataset:9200`
+- **Extractor Validation**:
+   - `EXTRACTOR_HOST` (default `http://extractor:8080` inside Docker). Override to `http://localhost:<port>` when running unit tests outside containers so the validator reaches the extractor on the host network.
+   - `EXTRACTOR_VALIDATION_FALLBACK` (default `true`). Set to `false` to force extractor validation failures to raise errors instead of falling back to Elasticsearch-only validation.
 - **MCP Transport**: stdio (via Docker exec)
 
 ---

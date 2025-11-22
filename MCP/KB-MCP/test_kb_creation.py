@@ -6,6 +6,11 @@ from models import ZScoreConfig
 import json
 from unittest.mock import patch
 
+if __name__ != "__main__":
+    import pytest
+
+    pytest.skip("Manual test script; run directly instead of via pytest", allow_module_level=True)
+
 # Override MongoDB connection for local testing
 import db
 db.mongo_connection_string = "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin&replicaSet=rs0&directConnection=true"

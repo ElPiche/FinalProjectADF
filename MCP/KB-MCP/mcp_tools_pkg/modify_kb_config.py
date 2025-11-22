@@ -17,6 +17,7 @@ from models import (
 from validation import validate_algorithms
 from .algorithms import parse_algorithms_to_internal_format, validate_algorithm_dimensions
 from .elasticsearch_sql import elasticsearch_sql
+from .query_validator import QueryValidator
 from utils import log_message as _utils_log_message
 from db import connect_mongodb
 
@@ -250,6 +251,10 @@ def modify_kb_config(
         validate_detection_query = detection_query_updated or algorithms_updated
 
         if validate_training_query:
+            QueryValidator.validate(
+                new_config.scheduling.training_config.training_query,
+                "training",
+            )
             validation_result = elasticsearch_sql(
                 f"{new_config.scheduling.training_config.training_query} LIMIT 0"
             )
@@ -264,6 +269,10 @@ def modify_kb_config(
             validate_algorithm_dimensions(new_config.algorithms, available_fields, "training")
 
         if validate_detection_query:
+            QueryValidator.validate(
+                new_config.scheduling.detection_config.detection_query,
+                "detection",
+            )
             validation_result = elasticsearch_sql(
                 f"{new_config.scheduling.detection_config.detection_query} LIMIT 0"
             )
