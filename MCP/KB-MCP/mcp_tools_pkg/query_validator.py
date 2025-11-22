@@ -258,3 +258,46 @@ class QueryValidator:
             return override
         env_value = cls._get_env_value("EXTRACTOR_VALIDATION_FALLBACK", "true").lower()
         return env_value not in {"0", "false", "no"}
+
+
+def materialize_query_time_range(
+    query: str,
+    from_timestamp: Optional[str],
+    to_timestamp: Optional[str],
+    query_label: str,
+) -> str:
+    """Replace $from/$to placeholders with real timestamps before validation.
+
+    The extractor executes the provided SQL, so placeholder values must be
+    resolved to concrete ISO timestamps to avoid syntax errors during query
+    validation. This helper intentionally reuses the *training* window for both
+    training and detection queries because the goal is only to exercise the
+    statement structure, not the production detection schedule.
+    """
+
+    if not query:
+        return query
+
+    materialized = query
+
+    if "$from" in materialized:
+        if not from_timestamp:
+            raise ToolError(
+                f"Cannot validate {query_label} query because $from is present but training_from is missing."
+            )
+        materialized = materialized.replace("$from", from_timestamp)
+
+    if "$to" in materialized:
+        if not to_timestamp:
+            raise ToolError(
+                f"Cannot validate {query_label} query because $to is present but training_to is missing."
+            )
+        materialized = materialized.replace("$to", to_timestamp)
+
+    unresolved = [placeholder for placeholder in ("$from", "$to") if placeholder in materialized]
+    if unresolved:
+        raise ToolError(
+            f"Unable to resolve placeholder(s) {', '.join(unresolved)} in {query_label} query."
+        )
+
+    return materialized
