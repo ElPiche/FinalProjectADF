@@ -568,6 +568,7 @@ def detect_z_score(serie_to_detect):
             # send UTC ISO 8601 string (add 'Z' or include tzinfo)
             ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
+        # Agregar datos: ZScore (valor), desvacion, nombre kb,
         processed_data = {
             'algorithm': 'Z Score',
             'metric': serie_to_detect["metadata"]["dim"],
