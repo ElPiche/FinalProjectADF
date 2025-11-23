@@ -1,9 +1,12 @@
+<<<<<<< Updated upstream
 import json
+=======
+>>>>>>> Stashed changes
 import threading
 import time
 import traceback
 import requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from bson import json_util
 from pymongo import MongoClient
 import pandas as pd
@@ -86,7 +89,7 @@ class Algorithm:
                 observed_values = fetch_series_data_with_aggregation(
                     config, self)
 
-                print(observed_values)
+                #print(observed_values)
                 results = run_zscore_batch_training(config, observed_values, self.parameters.train_window)
                 # ----------------------------ENDING OF TRAINING ZSCORE----------------------------------------------------------------------------
 
@@ -130,39 +133,6 @@ class Config:
             algo.execute(self)
 
 
-def parse_iso(date_str: str) -> datetime:
-    """
-    Parses ISO 8601 timestamps that may include:
-      - a 'Z' suffix (UTC)
-      - a timezone offset like '+00:00'
-      - no timezone info (assumed UTC)
-      - missing milliseconds
-    """
-    if not date_str:
-        raise ValueError("Empty or None date string provided")
-
-    date_str = date_str.strip()
-
-    # Normalize 'Z' to '+00:00' for fromisoformat
-    if date_str.endswith("Z"):
-        date_str = date_str[:-1] + "+00:00"
-
-    try:
-        dt = datetime.fromisoformat(date_str)
-    except ValueError:
-        # Fallback for cases missing milliseconds
-        try:
-            dt = datetime.fromisoformat(date_str.split(".")[0] + "+00:00")
-        except Exception as e:
-            raise ValueError(f"Unrecognized date format: {date_str}") from e
-
-    # If no timezone info, assume UTC
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-
-    return dt
-
-
 def parse_config(data: dict) -> Config:
     return Config(
         _id=data["_id"],
@@ -192,7 +162,7 @@ def parse_config(data: dict) -> Config:
 
 def CreateConnectionToKB() -> MongoClient:
     # we establish the connection to the kb mongo db
-    mongo_kb_client = client = MongoClient(
+    mongo_kb_client = MongoClient(
         MONGO_KB_URL,
         serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
         connectTimeoutMS=MONGO_TIMEOUT_MS,
@@ -203,8 +173,6 @@ def CreateConnectionToKB() -> MongoClient:
         readPreference='primaryPreferred'
     )
 
-    kb_database = mongo_kb_client[MONGO_DB_NAME]
-    kb_collection = kb_database[TRAINING_COLLECTION_NAME]
     mongo_kb_client.admin.command("ping")
     print("Nos conectamos al Mongo de entrenamiento")
     return mongo_kb_client
@@ -212,7 +180,7 @@ def CreateConnectionToKB() -> MongoClient:
 
 def CreateConnectionToDA() -> MongoClient:
     # we establish the connection to the da mongo db
-    mongo_da_client = client = MongoClient(
+    mongo_da_client = MongoClient(
         MONGO_KB_URL,
         serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
         connectTimeoutMS=MONGO_TIMEOUT_MS,
@@ -222,12 +190,10 @@ def CreateConnectionToDA() -> MongoClient:
         # Allow reads from secondary if primary unavailable
         readPreference='primaryPreferred'
     )
-    da_database = mongo_da_client[MONGO_DB_NAME]
-    da_collection = da_database[SERIES_COLLECTION_NAME]
+
     mongo_da_client.admin.command("ping")
     print("Nos conectamos a la DA")
     return mongo_da_client
-
 
 def ExtractLatestConfigurationKB(client: MongoClient):
 
@@ -237,26 +203,17 @@ def ExtractLatestConfigurationKB(client: MongoClient):
     result = client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].find().sort(
         '_id', -1).limit(1).next()
 
-    print(result)
+    #print(result)
 
     # we parse with BSON cuz mongo brings some binary data inside, and we want to serialize it into JSON
     with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
         f.write(json_util.dumps(result, indent=2))
+
         """
         latest_document = collection.find().sort('created_at', -1).limit(1).next()print(latest_document)
         """
+
     return result
-
-
-def get_kb_block(doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Devuelve siempre el bloque kbConfig sin importar si viene en camelCase o PascalCase."""
-    return doc.get("kbConfig") or doc.get("KB_Config") or {}
-
-
-def get_kb_id(doc: Dict[str, Any]) -> Optional[str]:
-    kb = get_kb_block(doc)
-    return kb.get("id") or kb.get("Id")
-
 
 def run_zscore_batch_training(config: Config, observed_values, time_window: int = 60):
 
@@ -494,80 +451,6 @@ def fetch_series_data_with_aggregation(
 
     return observed_values
 
-
-def fetch_series_data_batch(
-    dimensions: List[str],
-    kb_id: str,
-    mode: str,
-    date_from: str,
-    date_to: str,
-    da_client: MongoClient,
-    db_name: str = "logsdb",
-    series_collection_name: str = "series"
-) -> Dict[str, pd.DataFrame]:
-    """
-    Alternative function to fetch series data when you have individual parameters
-    instead of a config document.
-    """
-
-    series_collection = da_client[db_name][series_collection_name]
-
-    print(f"\nFetching batch data for {len(dimensions)} dimensions...")
-
-    observed_values = {}
-
-    for dimension in dimensions:
-        pipeline = [
-            {
-                '$match': {
-                    'metadata.kbId': kb_id,
-                    'metadata.dim': dimension,
-                    'metadata.mode': mode.upper(),
-                    'timestamp': {
-                        '$gte': {'$date': date_from},
-                        '$lte': {'$date': date_to}
-                    }
-                }
-            },
-            {
-                '$project': {
-                    '_id': 0,
-                    'timestamp': 1,
-                    'value': 1
-                }
-            },
-            {
-                '$sort': {'timestamp': 1}
-            }
-        ]
-
-        try:
-            cursor = series_collection.aggregate(pipeline)
-            results = list(cursor)
-
-            if results:
-                df = pd.DataFrame(results)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                df['value'] = df['value'].apply(
-                    lambda x: float(x) if isinstance(x, (int, float))
-                    else float(x.get('$numberLong', 0)) if isinstance(x, dict)
-                    else 0
-                )
-                observed_values[dimension] = df
-                print(f"  ✓ {dimension}: {len(df)} records")
-            else:
-                observed_values[dimension] = pd.DataFrame(
-                    columns=['timestamp', 'value'])
-                print(f"  ✗ {dimension}: No data")
-
-        except Exception as e:
-            print(f"  ✗ {dimension}: Error - {str(e)}")
-            observed_values[dimension] = pd.DataFrame(
-                columns=['timestamp', 'value'])
-
-    return observed_values
-
-
 def watch_kb_changes(kb_client):
 
     while True:
@@ -603,9 +486,15 @@ def watch_kb_changes(kb_client):
 
 
 
+<<<<<<< Updated upstream
 # TODO: test how robust it is this with a lot of different datapoints sent at the same time
 # TODO: check how change stream works with threads
 def watch_detection_changes(kb_client):
+=======
+# TODO: test how robust it is this with a lot of different datapoints sent at the same time -> pretty robust, we tried it with 10400 entries
+# TODO: check how change stream works with threads -> works synchronously, fetches one at a time
+def watch_detection_changes(kb_client, workers: ProcessPoolExecutor, data_to_detect: Queue):
+>>>>>>> Stashed changes
 
     while True:
         try:
@@ -622,6 +511,7 @@ def watch_detection_changes(kb_client):
 
                         serie_to_detect = change.get("fullDocument")
 
+<<<<<<< Updated upstream
                         print(f"I am printing serie_to_detect: {serie_to_detect}")
 
                         pipeline = [{'$match':
@@ -704,6 +594,9 @@ def watch_detection_changes(kb_client):
                             print(r.status_code, r.text)
                             # for debugging, you can inspect what was actually sent:
                             print("REQUEST BODY:", r.request.body)  # will be a JSON string
+=======
+                        workers.submit(detect_z_score, serie_to_detect)
+>>>>>>> Stashed changes
 
         except PyMongoError as e:
             print(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
@@ -715,6 +608,98 @@ def watch_detection_changes(kb_client):
             traceback.print_exc()
             time.sleep(5)
 
+<<<<<<< Updated upstream
+=======
+
+def detect_z_score(serie_to_detect):
+
+    #print(f"I am printing serie_to_detect: {serie_to_detect}")
+    kb_client = CreateConnectionToDA()
+
+    pipeline = [
+        {'$match':
+             {
+                'kb_id': serie_to_detect["metadata"]["kbId"],
+                'dimension': serie_to_detect["metadata"]["dim"]
+             }
+        }
+    ]
+
+
+    result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
+        pipeline)
+
+    training_result = next(result, None)
+
+
+    # 2) flatten nested fields (metadata -> metadata.kbId etc.)
+    df = pd.json_normalize(serie_to_detect)
+
+    # optional: rename for convenience
+    df = df.rename(columns={
+        "metadata.kbId": "kbId",
+        "metadata.dim": "dim",
+        "metadata.mode": "mode"
+    })
+
+    # 3) make _id string (pandas doesn't like ObjectId)
+    if "_id" in df.columns:
+        df["_id"] = df["_id"].astype(str)
+
+    # 4) ensure timestamp is datetime dtype
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+
+    if training_result["work_day_enabled?"]:
+
+        # we add a boolean to know if it's a workday or not
+        df["is_workday"] = df["timestamp"].dt.dayofweek < 5
+
+        print("I am detecting Z score with work day enabled")
+        bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+
+        anomalies = anomaly_detection_workdayful(
+            df, training_result, training_result["time_window"], bucket_value)
+
+    else:
+
+        bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+        print("I am detecting Z score with work day disabled")
+
+        anomalies = anomaly_detection_workdayless(
+            df, training_result, training_result["time_window"], bucket_value)
+
+    if anomalies[0].get("is_anomaly"):
+        print(
+            "=========================================================================================================================")
+        print(f"\033[31m anomaly detected: {anomalies} \033[0m")
+        print(
+            "=========================================================================================================================")
+
+        url_post = ANOMALIES_INSIGHT_URL + "insights/insertDocument/" + serie_to_detect["metadata"]["kbId"]
+        headers = {'Accept': 'application/json', "Content-Type": "application/json"}
+
+        # convert values that might be datetimes into ISO strings
+        ts = anomalies[0].get("timestamp")
+
+        if isinstance(ts, datetime):
+            # send UTC ISO 8601 string (add 'Z' or include tzinfo)
+            ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+        processed_data = {
+            'algorithm': 'Z Score',
+            'metric': serie_to_detect["metadata"]["dim"],
+            'text': "Anomaly detected",
+            'timestamp': ts,
+            'value': anomalies[0].get("value"),
+            'created_at': datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat().replace(
+                "+00:00", "Z")
+        }
+
+        requests.post(url_post, json=processed_data, headers=headers)
+
+
+>>>>>>> Stashed changes
 def restartable_thread(target, *args, delay=5):
     """Runs the given target in a loop, restarting if it crashes."""
     while True:
@@ -730,6 +715,13 @@ def main():
     # Esto arma la conexión a MongoDB
     kb_client = CreateConnectionToKB()
 
+<<<<<<< Updated upstream
+=======
+    data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
+
+    workers : ProcessPoolExecutor = ProcessPoolExecutor()
+
+>>>>>>> Stashed changes
     # Start watcher in its own thread
     training_watcher = threading.Thread(
         target=restartable_thread,
@@ -751,7 +743,6 @@ def main():
 
     except KeyboardInterrupt:
         print("\nStopping watcher...")
-        # Let it end naturally when Mongo closes or you implement a stop condition
         pass
 
 
