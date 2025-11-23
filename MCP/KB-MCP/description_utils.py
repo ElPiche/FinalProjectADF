@@ -395,7 +395,7 @@ def generate_kb_config_example() -> str:
                     detection_query="SELECT * FROM index WHERE timestamp >= '$from'",
                     **{"from": "2025-01-08T00:00:00Z"},
                     frequency="*/15 * * * *",
-                    detectaon_window=3600,
+                    detection_window=3600,
                     is_active=True
                 )
             ),

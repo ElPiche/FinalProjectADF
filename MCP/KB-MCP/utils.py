@@ -27,6 +27,13 @@ BATCH_SIZE = 10
 FLUSH_INTERVAL = 1.0  # seconds
 
 
+def stderr_print(*args, sep: str = " ", end: str = "\n", file=None) -> None:
+    """Write output to stderr (or provided stream) without touching stdout."""
+    stream = file if file is not None else sys.stderr
+    message = sep.join(str(arg) for arg in args) + end
+    stream.write(message)
+
+
 @dataclass
 class LogEntry:
     """Structured log entry matching original MongoDB schema."""
@@ -106,7 +113,7 @@ class FileLogger:
                 
         except Exception as e:
             # Emergency fallback to stdout
-            print(f"[FILE_LOG_ERROR] {entry.message} (Error: {e})", file=sys.stderr)
+            stderr_print(f"[FILE_LOG_ERROR] {entry.message} (Error: {e})", file=sys.stderr)
 
 
 class MongoLogger:
@@ -123,7 +130,7 @@ class MongoLogger:
         try:
             from pymongo import MongoClient
             # Debug: show which connection string is being used
-            print(f"[MONGO_CONNECT_DEBUG] Attempting connect with: {repr(connection_string)}", file=sys.stderr)
+            stderr_print(f"[MONGO_CONNECT_DEBUG] Attempting connect with: {repr(connection_string)}", file=sys.stderr)
             self._connection_string = connection_string
             # Use a small serverSelectionTimeoutMS to fail fast when testing
             try:
@@ -140,22 +147,22 @@ class MongoLogger:
                 self.collection.create_index([("timestamp", DESCENDING), ("_id", DESCENDING)], background=True)
                 # Index for session-scoped latest documents: session_id asc, timestamp desc, _id desc
                 self.collection.create_index([("session_id", ASCENDING), ("timestamp", DESCENDING), ("_id", DESCENDING)], background=True)
-                print(f"[MONGO_CONNECT_DEBUG] Ensured compound indexes on 'timestamp' and ('session_id','timestamp')", file=sys.stderr)
+                stderr_print(f"[MONGO_CONNECT_DEBUG] Ensured compound indexes on 'timestamp' and ('session_id','timestamp')", file=sys.stderr)
             except Exception as e:
                 try:
                     # Fallback to numeric directions if constants not available
                     self.collection.create_index([("timestamp", -1), ("_id", -1)])
                     self.collection.create_index([("session_id", 1), ("timestamp", -1), ("_id", -1)])
-                    print(f"[MONGO_CONNECT_DEBUG] Ensured compound indexes (fallback)", file=sys.stderr)
+                    stderr_print(f"[MONGO_CONNECT_DEBUG] Ensured compound indexes (fallback)", file=sys.stderr)
                 except Exception as e2:
-                    print(f"[MONGO_CONNECT_DEBUG] Failed to create compound indexes: {e2}", file=sys.stderr)
+                    stderr_print(f"[MONGO_CONNECT_DEBUG] Failed to create compound indexes: {e2}", file=sys.stderr)
             # Test connection
             self.client.admin.command('ping')
             self.connected = True
             return True
         except Exception as e:
             # Emit detailed debug info so we can see why connect failed
-            print(f"[MONGO_CONNECT_DEBUG] Connection failed: {e}", file=sys.stderr)
+            stderr_print(f"[MONGO_CONNECT_DEBUG] Connection failed: {e}", file=sys.stderr)
             try:
                 import traceback
                 traceback.print_exc(file=sys.stderr)
@@ -167,25 +174,25 @@ class MongoLogger:
     def write_entry(self, entry: LogEntry) -> bool:
         """Write log entry to MongoDB. Returns success status."""
         if not self.connected or self.collection is None:
-            print(f"[MONGO_DEBUG] Not connected or no collection", file=sys.stderr)
+            stderr_print(f"[MONGO_DEBUG] Not connected or no collection", file=sys.stderr)
             return False
         
         try:
             # Insert a document with a native datetime 'timestamp' field
             doc = entry.to_mongo_document()
             result = self.collection.insert_one(doc)
-            print(f"[MONGO_DEBUG] Inserted entry with ID: {result.inserted_id}", file=sys.stderr)
+            stderr_print(f"[MONGO_DEBUG] Inserted entry with ID: {result.inserted_id}", file=sys.stderr)
             return True
         except Exception as e:
-            print(f"[MONGO_DEBUG] Insert failed: {e}", file=sys.stderr)
+            stderr_print(f"[MONGO_DEBUG] Insert failed: {e}", file=sys.stderr)
             # Try to reconnect once
             if self._connection_string and self.connect(self._connection_string):
                 try:
                     result = self.collection.insert_one(entry.to_dict())
-                    print(f"[MONGO_DEBUG] Reconnect successful, inserted ID: {result.inserted_id}", file=sys.stderr)
+                    stderr_print(f"[MONGO_DEBUG] Reconnect successful, inserted ID: {result.inserted_id}", file=sys.stderr)
                     return True
                 except Exception as e2:
-                    print(f"[MONGO_DEBUG] Reconnect insert failed: {e2}", file=sys.stderr)
+                    stderr_print(f"[MONGO_DEBUG] Reconnect insert failed: {e2}", file=sys.stderr)
             self.connected = False
             return False
     
@@ -200,7 +207,7 @@ class MongoLogger:
             result = self.collection.insert_many(documents)
             return len(result.inserted_ids)
         except Exception as e:
-            print(f"[MONGO_DEBUG] Batch insert failed: {e}", file=sys.stderr)
+            stderr_print(f"[MONGO_DEBUG] Batch insert failed: {e}", file=sys.stderr)
             try:
                 import traceback
                 traceback.print_exc(file=sys.stderr)
@@ -213,7 +220,7 @@ class MongoLogger:
                     if self.write_entry(entry):
                         success_count += 1
                 except Exception as e2:
-                    print(f"[MONGO_DEBUG] Individual write also failed: {e2}", file=sys.stderr)
+                    stderr_print(f"[MONGO_DEBUG] Individual write also failed: {e2}", file=sys.stderr)
             return success_count
 
 
@@ -235,7 +242,7 @@ class LogQueue:
         
         # Try to connect to MongoDB if connection string provided
         # Debug: print the connection string received by LogQueue.start
-        print(f"[LOGQUEUE_START_DEBUG] received mongo_connection_string: {repr(mongo_connection_string)}", file=sys.stderr)
+        stderr_print(f"[LOGQUEUE_START_DEBUG] received mongo_connection_string: {repr(mongo_connection_string)}", file=sys.stderr)
         if mongo_connection_string:
             self.mongo_logger.connect(mongo_connection_string)
         
@@ -260,7 +267,7 @@ class LogQueue:
             self.queue.put_nowait(entry)
         except queue.Full:
             # Emergency fallback - write directly to stdout
-            print(f"[QUEUE_FULL] {entry.message}", file=sys.stderr)
+            stderr_print(f"[QUEUE_FULL] {entry.message}", file=sys.stderr)
     
     def _process_queue(self):
         """Background thread that processes log entries."""
@@ -300,7 +307,7 @@ class LogQueue:
                     last_flush = time.time()
             except Exception as e:
                 # Log error and continue
-                print(f"[LOG_QUEUE_ERROR] {e}", file=sys.stderr)
+                stderr_print(f"[LOG_QUEUE_ERROR] {e}", file=sys.stderr)
         
         # Process any remaining entries
         if batch:
@@ -308,20 +315,20 @@ class LogQueue:
     
     def _process_batch(self, batch: list[LogEntry]):
         """Process a batch of log entries."""
-        print(f"[PROCESS_BATCH_DEBUG] Processing batch of {len(batch)} entries", file=sys.stderr)
+        stderr_print(f"[PROCESS_BATCH_DEBUG] Processing batch of {len(batch)} entries", file=sys.stderr)
         
         # Always write to file first (guaranteed to work)
         for entry in batch:
             self.file_logger.write_entry(entry)
         
         # Attempt MongoDB batch write (best effort)
-        print(f"[PROCESS_BATCH_DEBUG] MongoDB connected: {self.mongo_logger.connected}", file=sys.stderr)
+        stderr_print(f"[PROCESS_BATCH_DEBUG] MongoDB connected: {self.mongo_logger.connected}", file=sys.stderr)
         if self.mongo_logger.connected:
-            print(f"[PROCESS_BATCH_DEBUG] Attempting MongoDB batch write", file=sys.stderr)
+            stderr_print(f"[PROCESS_BATCH_DEBUG] Attempting MongoDB batch write", file=sys.stderr)
             result = self.mongo_logger.write_batch(batch)
-            print(f"[PROCESS_BATCH_DEBUG] MongoDB batch write result: {result}", file=sys.stderr)
+            stderr_print(f"[PROCESS_BATCH_DEBUG] MongoDB batch write result: {result}", file=sys.stderr)
         else:
-            print(f"[PROCESS_BATCH_DEBUG] MongoDB not connected, skipping", file=sys.stderr)
+            stderr_print(f"[PROCESS_BATCH_DEBUG] MongoDB not connected, skipping", file=sys.stderr)
 
 
 # Global logging infrastructure
@@ -341,10 +348,10 @@ def initialize_logging(mongo_connection_string: Optional[str] = None) -> str:
                 try:
                     from db import mongo_connection_string as db_mongo_conn
                     mongo_connection_string = db_mongo_conn
-                    print(f"[INIT_LOGGING_DEBUG] initialize_logging found db.mongo_connection_string: {repr(mongo_connection_string)}", file=sys.stderr)
+                    stderr_print(f"[INIT_LOGGING_DEBUG] initialize_logging found db.mongo_connection_string: {repr(mongo_connection_string)}", file=sys.stderr)
                 except Exception:
                     # Leave as None if not available
-                    print("[INIT_LOGGING_DEBUG] initialize_logging: no mongo_connection_string provided and db import failed", file=sys.stderr)
+                    stderr_print("[INIT_LOGGING_DEBUG] initialize_logging: no mongo_connection_string provided and db import failed", file=sys.stderr)
 
             _log_queue.start(mongo_connection_string)
 

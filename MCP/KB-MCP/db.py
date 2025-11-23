@@ -6,13 +6,17 @@ from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure, OperationFailure
 from elasticsearch import Elasticsearch
 from instrumentation import timed
+from mcp_tools_pkg.config import (
+    ELASTICSEARCH_QUERY_TIMEOUT,
+    MONGODB_OPERATION_TIMEOUT,
+)
 
 # Global Configuration Variables (moved from main)
 db_kb_name = "knowledge_base"
 db_kb_collection_name = "kb_configs"
 db_logger_name = "knowledge_base_mcp_logs"
 mongo_connection_string = "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin&replicaSet=rs0"
-mongo_timeout_ms = 2000  # Reduced timeout for faster startup
+mongo_timeout_ms = max(MONGODB_OPERATION_TIMEOUT, 1) * 1000
 
 # Elasticsearch Configuration
 es_host = "http://elasticsearch-dataset:9200"
@@ -87,7 +91,7 @@ def connect_elasticsearch() -> Elasticsearch:
         log_message(f"Attempting to connect to Elasticsearch at {es_host}", "info", "connect_elasticsearch", "connection")
 
         # Create client with timeout
-        es = Elasticsearch(es_host, timeout=5)  # 5 second timeout
+        es = Elasticsearch(es_host, timeout=ELASTICSEARCH_QUERY_TIMEOUT)
 
         # Test connection
         if es.ping():

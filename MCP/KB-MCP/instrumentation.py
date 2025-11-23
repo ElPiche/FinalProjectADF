@@ -1,8 +1,9 @@
 # instrumentation.py - Lightweight instrumentation decorators for KB-MCP
 
-import time
 import functools
-from typing import Callable, Any
+import inspect
+import time
+from typing import Any, Callable
 
 def timed(func: Callable) -> Callable:
     """
@@ -14,6 +15,25 @@ def timed(func: Callable) -> Callable:
     Returns:
         Wrapped function that logs timing information
     """
+    if inspect.iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs) -> Any:
+            start_time = time.perf_counter()
+            try:
+                return await func(*args, **kwargs)
+            finally:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                from utils import log_message
+                log_message(
+                    f"Function {func.__name__} completed",
+                    "info",
+                    func.__module__,
+                    func.__name__,
+                    duration_ms=duration_ms,
+                )
+
+        return async_wrapper
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs) -> Any:
         start_time = time.perf_counter()
@@ -23,8 +43,13 @@ def timed(func: Callable) -> Callable:
         finally:
             duration_ms = (time.perf_counter() - start_time) * 1000
             from utils import log_message
-            log_message(f"Function {func.__name__} completed", "info", func.__module__, func.__name__,
-                       duration_ms=duration_ms)
+            log_message(
+                f"Function {func.__name__} completed",
+                "info",
+                func.__module__,
+                func.__name__,
+                duration_ms=duration_ms,
+            )
     return wrapper
 
 

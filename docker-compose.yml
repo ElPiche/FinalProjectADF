@@ -267,7 +267,7 @@ services:
       context: ./anomalies-insights-module
       dockerfile: Dockerfile
     container_name: anomalies-insights
-    # restart: unless-stopped
+    restart: unless-stopped
     depends_on:
       elasticsearch-anomalies:
         condition: service_healthy
@@ -291,7 +291,7 @@ services:
       - CMD
       - curl
       - -f
-      - http://localhost:8080/actuator/health
+      - http://localhost:8081/actuator/health
       interval: 30s
       timeout: 10s
       retries: 5
@@ -320,6 +320,43 @@ services:
     #   - ./logs/dispatcher:/app/logs
     #   - ./MotorDA:/app/MotorDA
 
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.15.0
+    container_name: logstash
+    depends_on:
+      - elasticsearch-dataset
+    restart: unless-stopped
+    networks:
+    - adf-network
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+        reservations:
+          memory: 512m
+    volumes:
+    # Pipelines
+    - ./logstash/pipeline:/usr/share/logstash/pipeline
+    # Config de logstash (para hot reload)
+    - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+    # Carpeta de logs del host, montada dentro del contenedor
+    - ./logs:/var/log/app-logs
+     # Carpeta para data interna (sincedb) evita perder data al reiniciar el contenedor
+    - ./logstash/data:/usr/share/logstash/data #genera carpeta data en logstash en maquina host
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
+      - LS_JAVA_OPTS=-Xms256m -Xmx512m 
+    ports:
+       - "5044:5044"
+       - "9600:9600"
+    healthcheck:
+     test: ["CMD", "curl", "-f", "http://elasticsearch-dataset:9200"]
+     interval: 10s
+     timeout: 5s
+     retries: 10
+
+
 volumes:
   mongo_data: null
   elastic_data: null
@@ -332,25 +369,3 @@ networks:
     name: adf-network
     driver: bridge
 
-#  logstash:
-#    build:
-#      context: .
-#      dockerfile: Dockerfile.logstash
-#    container_name: logstash
-#    depends_on:
-#      - elasticsearch-dataset
-#      - mongodb
-#      # (kibana ya no es requerido para ejecución)
-#    restart: unless-stopped
-#    volumes:
-#      - ./pipeline:/usr/share/logstash/pipeline
-#    environment:
-#      - ELASTICSEARCH_HOSTS=http://elasticsearch-dataset:9200
-#    ports:
-#       - "5044:5044"
-#       - "9600:9600"
-#    healthcheck:
-#     test: ["CMD", "curl", "-f", "http://localhost:9600"]
-#     interval: 10s
-#     timeout: 5s
-#     retries: 10

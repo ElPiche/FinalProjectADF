@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 from pymongo import MongoClient
 import sys
@@ -5,14 +6,19 @@ import sys
 # Use the working connection string
 connection_string = 'mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin&replicaSet=rs0'
 
-print('Testing KB configuration creation from kb-mcp container...')
+if __name__ != "__main__":
+    import pytest
+
+    pytest.skip("Manual MongoDB test; run directly instead of via pytest", allow_module_level=True)
+
+stderr_print('Testing KB configuration creation from kb-mcp container...')
 try:
     client = MongoClient(connection_string)
-    
+
     # Access the knowledge_base database (same as existing configs)
     kb_db = client['knowledge_base']
     kb_collection = kb_db['kb_configs']
-    
+
     # Create a simple KB configuration entry
     kb_config = {
         'name': 'test-kb-from-container',
@@ -43,19 +49,19 @@ try:
             }
         ]
     }
-    
+
     # Insert the KB configuration
     insert_result = kb_collection.insert_one(kb_config)
-    print('KB configuration inserted with ID:', insert_result.inserted_id)
-    
+    stderr_print('KB configuration inserted with ID:', insert_result.inserted_id)
+
     # Verify the entry was inserted
     found_config = kb_collection.find_one({'_id': insert_result.inserted_id})
-    print('Retrieved KB config name:', found_config['name'])
-    print('Retrieved KB config description:', found_config['description'])
-    
-    print('SUCCESS: KB configuration saved to MongoDB from kb-mcp container!')
-    
+    stderr_print('Retrieved KB config name:', found_config['name'])
+    stderr_print('Retrieved KB config description:', found_config['description'])
+
+    stderr_print('SUCCESS: KB configuration saved to MongoDB from kb-mcp container!')
+
 except Exception as e:
-    print('ERROR:', str(e))
+    stderr_print('ERROR:', str(e))
     import traceback
     traceback.print_exc()

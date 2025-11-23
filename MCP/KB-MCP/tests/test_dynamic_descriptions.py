@@ -5,18 +5,57 @@ Tests that descriptions are generated from Pydantic models and contain expected 
 Run with: python -m pytest tests/test_dynamic_descriptions.py -v
 """
 
+import asyncio
 import sys
 import os
+import json
 # Ensure package root (KB-MCP) is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest
+import importlib
 from description_utils import (
     generate_kb_config_description,
     generate_kb_config_example,
     ALGORITHM_CONFIG_DESCRIPTION
 )
 from models import KBConfig, ZScoreConfig
+
+
+DEFAULT_CREATE_ARGS = {
+    "name": "test",
+    "description": "test",
+    "training_query": "SELECT * FROM test",
+    "detection_query": "SELECT * FROM test",
+    "training_from": "2025-01-01T00:00:00Z",
+    "training_to": "2025-01-02T00:00:00Z",
+    "training_is_active": True,
+    "detection_is_active": True,
+    "training_window": 3600,
+    "detection_window": 3600,
+    "detection_frequency": "* * * * *",
+    "detection_start": "2025-01-03T00:00:00Z",
+    "algorithms": [{"alg_name": "zscore", "alg_parameters": [{"dimension": "field"}]}],
+}
+
+
+def _patch_create_da_config_dependencies(monkeypatch):
+    create_module = importlib.import_module("mcp_tools_pkg.create_da_config")
+    monkeypatch.setattr(create_module.QueryValidator, "validate", lambda *args, **kwargs: True)
+    async def _fake_elasticsearch_sql(*_args, **_kwargs):
+        return {"columns": [{"name": "field", "type": "long"}], "rows": []}
+
+    monkeypatch.setattr(create_module, "elasticsearch_sql", _fake_elasticsearch_sql)
+    monkeypatch.setattr(create_module, "connect_mongodb", lambda: None)
+
+
+def _invoke_create_da_config(monkeypatch, **overrides):
+    from mcp_tools_pkg.create_da_config import create_da_config
+
+    _patch_create_da_config_dependencies(monkeypatch)
+    params = DEFAULT_CREATE_ARGS.copy()
+    params.update(overrides)
+    return asyncio.run(create_da_config(**params))
 
 
 class TestDynamicDescriptions:
@@ -237,9 +276,11 @@ class TestDynamicDescriptions:
             
             # Test valid update
             try:
-                result = modify_kb_config(
-                    config_id="507f1f77bcf86cd799439011",
-                    description="updated description"
+                result = asyncio.run(
+                    modify_kb_config(
+                        config_id="507f1f77bcf86cd799439011",
+                        description="updated description"
+                    )
                 )
                 assert "updated successfully" in result
             except Exception as e:
@@ -247,47 +288,28 @@ class TestDynamicDescriptions:
                 assert "Input validation failed" not in str(e)
                 assert "Invalid" not in str(e) or "not found" in str(e)
 
-    def test_create_da_config_rejects_invalid_cron_expression(self):
+    def test_create_da_config_rejects_invalid_cron_expression(self, monkeypatch):
         """Test that create_da_config rejects invalid CRON expressions."""
-        from mcp_tools_pkg.create_da_config import create_da_config
-        
         with pytest.raises(Exception) as exc_info:
-            create_da_config(
-                name="test",
-                description="test",
-                training_query="SELECT * FROM test",
-                detection_query="SELECT * FROM test",
-                training_from="2025-01-01T00:00:00Z",
-                training_to="2025-01-02T00:00:00Z",
+            _invoke_create_da_config(
+                monkeypatch,
                 detection_frequency="invalid cron expression",
-                detection_start="2025-01-03T00:00:00Z",
-                algorithms=[{"alg_name": "zscore", "alg_parameters": [{"dimension": "field"}]}]
             )
         
         assert "Invalid CRON expression" in str(exc_info.value)
 
-    def test_create_da_config_rejects_invalid_timestamp(self):
+    def test_create_da_config_rejects_invalid_timestamp(self, monkeypatch):
         """Test that create_da_config rejects invalid ISO 8601 timestamps."""
-        from mcp_tools_pkg.create_da_config import create_da_config
-        
         with pytest.raises(Exception) as exc_info:
-            create_da_config(
-                name="test",
-                description="test",
-                training_query="SELECT * FROM test",
-                detection_query="SELECT * FROM test",
+            _invoke_create_da_config(
+                monkeypatch,
                 training_from="invalid timestamp",
-                training_to="2025-01-02T00:00:00Z",
-                detection_frequency="* * * * *",
-                detection_start="2025-01-03T00:00:00Z",
-                algorithms=[{"alg_name": "zscore", "alg_parameters": [{"dimension": "field"}]}]
             )
         
         assert "Invalid ISO 8601 timestamp" in str(exc_info.value)
 
-    def test_create_da_config_rejects_incorrect_algorithm_format(self):
+    def test_create_da_config_rejects_incorrect_algorithm_format(self, monkeypatch):
         """Test that create_da_config rejects incorrect algorithm field names."""
-        from mcp_tools_pkg.create_da_config import create_da_config
         from models import ZScoreConfig
         
         # Test with old/incorrect ZScoreConfig format (this test is now obsolete since we fixed the model)
@@ -301,60 +323,33 @@ class TestDynamicDescriptions:
         algorithms = [OldZScoreConfig()]
         
         with pytest.raises(Exception) as exc_info:
-            create_da_config(
-                name="test",
-                description="test",
+            _invoke_create_da_config(
+                monkeypatch,
                 training_query="SELECT field FROM test",
                 detection_query="SELECT field FROM test",
-                training_from="2025-01-01T00:00:00Z",
-                training_to="2025-01-02T00:00:00Z",
-                detection_frequency="* * * * *",
-                detection_start="2025-01-03T00:00:00Z",
-                algorithms=algorithms
+                algorithms=algorithms,
             )
         
         assert "Unsupported algorithm format" in str(exc_info.value)
         
-        with pytest.raises(Exception) as exc_info:
-            create_da_config(
-                name="test",
-                description="test",
-                training_query="SELECT field FROM test",
-                detection_query="SELECT field FROM test",
-                training_from="2025-01-01T00:00:00Z",
-                training_to="2025-01-02T00:00:00Z",
-                detection_frequency="* * * * *",
-                detection_start="2025-01-03T00:00:00Z",
-                algorithms=algorithms
-            )
-        
-        assert "Unsupported algorithm format" in str(exc_info.value)
-
-    def test_create_da_config_rejects_incorrect_algorithm_dict_format(self):
+    def test_create_da_config_rejects_incorrect_algorithm_dict_format(self, monkeypatch):
         """Test that create_da_config rejects incorrect algorithm dictionary structure."""
-        from mcp_tools_pkg.create_da_config import create_da_config
         
         # Test with incorrect dictionary format
         algorithms = [{"algorithm": "zscore", "dimensions": ["field"]}]
         
         with pytest.raises(Exception) as exc_info:
-            create_da_config(
-                name="test",
-                description="test",
+            _invoke_create_da_config(
+                monkeypatch,
                 training_query="SELECT field FROM test",
                 detection_query="SELECT field FROM test",
-                training_from="2025-01-01T00:00:00Z",
-                training_to="2025-01-02T00:00:00Z",
-                detection_frequency="* * * * *",
-                detection_start="2025-01-03T00:00:00Z",
-                algorithms=algorithms
+                algorithms=algorithms,
             )
         
         assert "Algorithm validation error" in str(exc_info.value)
 
-    def test_create_da_config_accepts_correct_algorithm_format(self):
+    def test_create_da_config_accepts_correct_algorithm_format(self, monkeypatch):
         """Test that create_da_config accepts the correct algorithm format."""
-        from mcp_tools_pkg.create_da_config import create_da_config
         from models import ZScoreConfig
         
         # Test with ZScoreConfig object (correct format)
@@ -362,16 +357,11 @@ class TestDynamicDescriptions:
         
         # Should pass validation and only fail at MongoDB connection
         with pytest.raises(Exception) as exc_info:
-            create_da_config(
-                name="test",
-                description="test",
+            _invoke_create_da_config(
+                monkeypatch,
                 training_query="SELECT field FROM test",
                 detection_query="SELECT field FROM test",
-                training_from="2025-01-01T00:00:00Z",
-                training_to="2025-01-02T00:00:00Z",
-                detection_frequency="* * * * *",
-                detection_start="2025-01-03T00:00:00Z",
-                algorithms=algorithms
+                algorithms=algorithms,
             )
         
         # Should fail at MongoDB/Elasticsearch, not validation

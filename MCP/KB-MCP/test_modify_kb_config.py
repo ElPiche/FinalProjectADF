@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 import sys
 sys.path.insert(0, '/app')
@@ -15,7 +16,7 @@ zscore_config = ZScoreConfig(alg_parameters=[{"dimension": "bytes"}])
 test_config_id = "69080ca0fa82d20eb549daec"
 
 # Run the test
-print("Testing modify_kb_config with algorithm update...")
+stderr_print("Testing modify_kb_config with algorithm update...")
 
 try:
     result = modify_kb_config(
@@ -23,8 +24,8 @@ try:
         description="Updated test configuration via modify_kb_config",
         algorithms=[zscore_config]
     )
-    print('SUCCESS: modify_kb_config test passed')
-    print(result)
+    stderr_print('SUCCESS: modify_kb_config test passed')
+    stderr_print(result)
 except Exception as e:
-    print(f'ERROR: modify_kb_config test failed: {e}')
-    print('Note: This test requires a valid config_id from a previously created configuration')
+    stderr_print(f'ERROR: modify_kb_config test failed: {e}')
+    stderr_print('Note: This test requires a valid config_id from a previously created configuration')

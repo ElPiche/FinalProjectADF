@@ -1,0 +1,84 @@
+//DESCRIBE ALL THE ELEMENTS IN THIS JSON
+// "name" : Name of the configuration for geographic traffic pattern analysis
+// "description" : Description of the configuration's purpose and focus
+// "change_flag" : A flag indicating if there have been changes to the configuration
+// "scheduling" : Object containing scheduling details for training and detection queries
+//   "training_config" : Object containing training query details
+//     "from" : Start date for training data
+//     "to" : End date for training data
+//     "is_active" : Boolean indicating if training is active
+//   "detection_config" : Object containing detection query details
+//     "from" : Start date for detection data
+//     "frequency" : Cron expression for how often detection runs
+//     "detection_window" : Time window in seconds for detection
+//     "is_active" : Boolean indicating if detection is active
+// "buckets" : Placeholder for bucket configuration
+// "algorithms" : Array of algorithm configurations
+//   Each algorithm object contains:
+//     "alg_name" : Name of the algorithm (e.g., zscore, k-means)
+//     "alg_parameters" : Array of parameters for the algorithm
+//       Each parameter object contains:
+//         "dimension" : The dimension the algorithm operates on
+//         "alg_metadata" : Optional metadata for the algorithm parameter specific to each dimension
+
+{
+  "name": "Geographic Traffic Pattern Analysis",
+  "description": "Analyze traffic patterns based on geographic data to identify anomalies in specific regions. This configuration focuses on monitoring traffic volume and speed across different geographic locations using Elasticsearch SQL queries.",
+  "change_flag": 0,
+  "elasticsearch_sql_query":"SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
+  "scheduling": {
+    "training_config": {
+      "from": "2025-11-01T00:00:00Z",
+      "to": "2025-12-01T00:00:00Z",
+      "is_active": true
+    },
+    "detection_config": {
+      "from": "2025-11-01T00:00:00Z",
+      "frequency": "*/1 * * * *",
+      "detection_window": 3600, // en segundos, representa la ventana de detección aka que tan atras tomar datos
+      "is_active": true
+    }
+  },
+  "bucket_id": "mongo_id",
+  "algorithm": {
+    "name": "kmeans",
+    "parameters": [
+      {
+        "dimension": "status_code_5xx_counter",
+        "metadata": [
+          {"key": "clusters", "values": "3"}
+        ]
+      }
+    ]
+  }
+  // "algorithms": [
+  //   {
+  //     "alg_name": "zscore",
+  //     "alg_parameters": [
+  //       { 
+  //         "dimension": "status_code_200_counter"
+  //       },
+  //       { 
+  //         "dimension": "status_code_5xx_counter" 
+  //       }
+  //     ]
+  //   },
+  //   {
+  //     "alg_name": "kmeans",
+  //     "alg_parameters": [
+  //       {
+  //         "dimension": "status_code_5xx_counter",
+  //         "alg_metadata": [
+  //           {"key": "clusters", "values": "3"}
+  //         ]
+  //       },
+  //       {
+  //         "dimension": "status_code_5xx_counter",
+  //         "alg_metadata": [
+  //           {"key": "clusters", "values": "5"}
+  //         ]
+  //       }
+  //     ]
+  //   }
+  // ]
+}

@@ -216,3 +216,5 @@ MotorDA/MongoConnection.py
 .kilocode/mcp.json
 MCP/KB-MCP/logs/log.txt
 MCP/KB-MCP/logs/structured_logs.jsonl
+logs/*
+logstash/data/*

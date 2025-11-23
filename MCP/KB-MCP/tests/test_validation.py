@@ -1,12 +1,19 @@
+from utils import stderr_print
 # test_validation.py - Unit tests for validation functions
 
 import sys
 import os
+import pytest
 
 # Ensure package root (KB-MCP) is on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from validation import extract_sql_output_fields, extract_sql_select_fields, validate_algorithms
+from validation import (
+    extract_sql_output_fields,
+    extract_sql_select_fields,
+    validate_algorithms,
+    validate_window_size,
+)
 
 def test_extract_sql_output_fields():
     """Test extraction of output fields from SQL queries."""
@@ -30,7 +37,7 @@ def test_extract_sql_output_fields():
     result4 = extract_sql_output_fields(query4)
     assert result4 == [], f"Expected [], got {result4}"
 
-    print("PASS: test_extract_sql_output_fields")
+    stderr_print("PASS: test_extract_sql_output_fields")
 
 def test_extract_sql_select_fields():
     """Test extraction of select fields from SQL queries."""
@@ -54,7 +61,7 @@ def test_extract_sql_select_fields():
     result4 = extract_sql_select_fields(query4)
     assert result4 == [], f"Expected [], got {result4}"
 
-    print("PASS: test_extract_sql_select_fields")
+    stderr_print("PASS: test_extract_sql_select_fields")
 
 def test_validate_algorithms():
     """Test validation of algorithms array."""
@@ -100,10 +107,35 @@ def test_validate_algorithms():
     errors_missing_dim = validate_algorithms(missing_dimension)
     assert len(errors_missing_dim) == 1 and "missing dimension" in errors_missing_dim[0], f"Expected missing dimension error, got {errors_missing_dim}"
 
-    print("PASS: test_validate_algorithms")
+    stderr_print("PASS: test_validate_algorithms")
+
+
+def test_validate_window_size_valid_no_warning():
+    result = validate_window_size(3600, "training")
+    assert result["valid"] is True
+    assert result["warning"] is None
+
+
+def test_validate_window_size_too_small():
+    with pytest.raises(ValueError):
+        validate_window_size(0, "training")
+
+
+def test_validate_window_size_non_integer():
+    with pytest.raises(ValueError):
+        validate_window_size(3.5, "detection")
+
+
+def test_validate_window_size_large_warning(monkeypatch):
+    import validation as validation_module
+
+    monkeypatch.setitem(validation_module.VALIDATION_CONSTANTS, "LARGE_WINDOW_THRESHOLD_DAYS", 1)
+    result = validation_module.validate_window_size(200000, "training")
+    assert result["warning"] is not None
+
 
 if __name__ == "__main__":
     test_extract_sql_output_fields()
     test_extract_sql_select_fields()
     test_validate_algorithms()
-    print("All validation tests passed!")
+    stderr_print("All validation tests passed!")

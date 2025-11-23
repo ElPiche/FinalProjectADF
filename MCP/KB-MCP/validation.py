@@ -1,7 +1,77 @@
 # validation.py - SQL parsing and validation functions for KB-MCP
 
+import logging
+import os
 import re
-from typing import List
+
+logger = logging.getLogger(__name__)
+
+
+def _get_int_env(var_name: str, default: int) -> int:
+    """Return integer env override while shielding import-time failures."""
+    raw_value = os.getenv(var_name)
+    if raw_value is None:
+        return default
+    try:
+        return int(raw_value)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid value '%s' for %s; falling back to default %s",
+            raw_value,
+            var_name,
+            default,
+        )
+        return default
+
+
+VALIDATION_CONSTANTS = {
+    "MIN_TRAINING_WINDOW_SECONDS": _get_int_env("MIN_TRAINING_WINDOW_SECONDS", 1),
+    "MIN_DETECTION_WINDOW_SECONDS": _get_int_env("MIN_DETECTION_WINDOW_SECONDS", 1),
+    "LARGE_WINDOW_THRESHOLD_DAYS": _get_int_env("LARGE_WINDOW_THRESHOLD_DAYS", 30),
+}
+
+
+def validate_window_size(window_seconds: int, window_type: str = "training") -> dict:
+    """Validate configured window size. Returns dict with optional warning.
+
+    Args:
+        window_seconds: Window duration in seconds.
+        window_type: "training" or "detection".
+
+    Raises:
+        ValueError: If the window is invalid.
+    """
+
+    min_key = f"MIN_{window_type.upper()}_WINDOW_SECONDS"
+    min_value = VALIDATION_CONSTANTS.get(min_key, 1)
+
+    if not isinstance(window_seconds, int):
+        raise ValueError(
+            f"{window_type.capitalize()} window must be an integer (got {type(window_seconds).__name__})."
+        )
+
+    if window_seconds < min_value:
+        if min_value >= 60:
+            human_min = f"{min_value // 60} minute(s)"
+        else:
+            human_min = f"{min_value} second(s)"
+        raise ValueError(
+            f"{window_type.capitalize()} window must be >= {min_value} seconds ({human_min}); got {window_seconds}."
+        )
+
+    threshold_days = VALIDATION_CONSTANTS.get("LARGE_WINDOW_THRESHOLD_DAYS", 30)
+    threshold_seconds = threshold_days * 86400
+    warning = None
+
+    if window_seconds > threshold_seconds:
+        window_days = window_seconds / 86400
+        warning = (
+            f"Large {window_type} window requested: {window_days:.1f} days (threshold: {threshold_days} days). "
+            "Very large windows may slow Elasticsearch queries, increase MongoDB document size, and impact ETL/dispatcher performance."
+        )
+        logger.warning(warning)
+
+    return {"valid": True, "warning": warning}
 
 def extract_sql_output_fields(sql_query: str) -> list[str]:
     """
@@ -275,6 +345,16 @@ def _extract_field_name_from_definition(field_definition: str) -> str:
         return match.group(1).strip()
 
     return ""
+
+
+def validate_cron_expression(cron_expression: str) -> None:
+    """Validate CRON expressions without duplicating croniter usage sites."""
+    from models import CRON  # Local import to avoid circular import at module load
+
+    try:
+        CRON(cron_expression)
+    except ValueError as exc:  # pragma: no cover - exercised by callers
+        raise ValueError(f"Invalid CRON expression: {cron_expression}") from exc
 
 
 def validate_algorithms(algorithms: list[dict]) -> list[str]:

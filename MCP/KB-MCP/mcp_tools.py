@@ -6,7 +6,7 @@ created during the migration. That package performs I/O inside function
 bodies so importing this shim is fast and side-effect free.
 """
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 from typing import List
@@ -15,7 +15,7 @@ import time
 import json
 
 from models import AlgorithmConfig
-from utils import log_message as _utils_log_message
+from utils import log_message as _utils_log_message, stderr_print
 from instrumentation import timed
 from description_utils import ALGORITHM_CONFIG_DESCRIPTION, AVAILABLE_ALGORITHMS_DESCRIPTION, SUPPORTED_ALGORITHMS, SUPPORTED_ALGORITHMS_INLINE, SUPPORTED_ALGORITHMS_QUOTED, generate_tool_list_for_describe_mcp, get_tool_count, generate_kb_config_template_description, generate_kb_config_fields_description, generate_kb_config_description, generate_kb_config_example, generate_kb_config_description, generate_kb_config_example, generate_algorithm_config_example
 
@@ -26,6 +26,48 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
 
 # Global MCP server instance
 mcp = FastMCP("KB-MCP")
+
+
+def _format_elasticsearch_sql_result(result: dict) -> str:
+    columns = result.get("columns") or []
+    rows = result.get("rows") or []
+    cursor = result.get("cursor")
+    duration_ms = result.get("duration_ms")
+
+    column_lines = [
+        f"- {col.get('name', '<unnamed>')} ({col.get('type', 'unknown')})"
+        for col in columns
+    ]
+    if not column_lines:
+        column_lines = ["- (no columns returned)"]
+
+    max_preview_rows = 5
+    preview_rows = rows[:max_preview_rows]
+    row_lines = [f"{idx}. {row}" for idx, row in enumerate(preview_rows, 1)]
+    if not row_lines:
+        row_lines = ["(no rows returned)"]
+    elif len(rows) > max_preview_rows:
+        row_lines.append(f"... {len(rows) - max_preview_rows} more rows not shown")
+
+    metadata_lines = [
+        f"- Duration: {duration_ms if duration_ms is not None else 'unknown'} ms",
+        f"- Cursor: {cursor if cursor else 'None'}",
+        f"- Total Rows: {len(rows)}",
+    ]
+
+    pretty_json = json.dumps(result, indent=2)
+
+    return (
+        "Elasticsearch SQL query executed successfully.\n\n"
+        "Columns:\n"
+        + "\n".join(column_lines)
+        + "\n\nSample rows (up to 5):\n"
+        + "\n".join(row_lines)
+        + "\n\nMetadata:\n"
+        + "\n".join(metadata_lines)
+        + "\n\nRaw JSON response:\n"
+        + pretty_json
+    )
 
 
 def _lazy_import_pkg():
@@ -396,7 +438,7 @@ for more info, use the `describe_mcp_server` tool.
     """
 
 
-def create_da_config(
+async def create_da_config(
     name: str,
     description: str,
     training_query: str,
@@ -409,26 +451,29 @@ def create_da_config(
     detection_window: int,
     detection_frequency: str,
     detection_start: str,
-    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION)
+    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
+    ctx: Context | None = None
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "create_da_config"):
-        return pkg.create_da_config(name, 
-                                    description, 
-                                    training_query, 
-                                    detection_query,
-                                    training_from, 
-                                    training_to, 
-                                    training_is_active, 
-                                    detection_is_active,
-                                    training_window, 
-                                    detection_window, detection_frequency,
-                                    detection_start, 
-                                    algorithms)
+        return await pkg.create_da_config(name, 
+                                          description, 
+                                          training_query, 
+                                          detection_query,
+                                          training_from, 
+                                          training_to, 
+                                          training_is_active, 
+                                          detection_is_active,
+                                          training_window, 
+                                          detection_window, 
+                                          detection_frequency,
+                                          detection_start, 
+                                          algorithms,
+                                          ctx)
     raise ToolError("create_da_config is not implemented in the migration package yet")
 
 
-def modify_kb_config(
+async def modify_kb_config(
     config_id: str,
     description: str,
     training_query: str,
@@ -441,23 +486,25 @@ def modify_kb_config(
     detection_window: int,
     detection_frequency: str,
     detection_start: str,
-    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION)
+    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
+    ctx: Context | None = None
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "modify_kb_config"):
-        return pkg.modify_kb_config(config_id, 
-                                    description, 
-                                    training_query, 
-                                    detection_query,
-                                    training_from, 
-                                    training_to, 
-                                    training_is_active,
-                                    detection_is_active, 
-                                    training_window, 
-                                    detection_window,
-                                    detection_frequency, 
-                                    detection_start, 
-                                    algorithms)
+        return await pkg.modify_kb_config(config_id, 
+                                          description, 
+                                          training_query, 
+                                          detection_query,
+                                          training_from, 
+                                          training_to, 
+                                          training_is_active,
+                                          detection_is_active, 
+                                          training_window, 
+                                          detection_window,
+                                          detection_frequency, 
+                                          detection_start, 
+                                          algorithms,
+                                          ctx)
     raise ToolError("modify_kb_config is not implemented in the migration package yet")
 
 
@@ -495,23 +542,38 @@ def ping_elasticsearch() -> str:
         log_message(f"ping_elasticsearch tool completed: {success}", "info",
                     "ping_elasticsearch", "completion", request_id=request_id,
                     duration_ms=duration_ms, extra_data={"ping_success": success})
-        print(f"[KB-MCP] ping_elasticsearch result: {success}")
+        stderr_print(f"[KB-MCP] ping_elasticsearch result: {success}")
         return json.dumps({"ping_success": success, "duration_ms": duration_ms})
     except Exception as e:
         duration_ms = (time.time() - start) * 1000
         log_message(f"ping_elasticsearch tool error: {str(e)}", "error",
                     "ping_elasticsearch", "error", request_id=request_id,
                     duration_ms=duration_ms, extra_data={"error_type": type(e).__name__})
-        print(f"[KB-MCP] ping_elasticsearch error: {e}")
+        stderr_print(f"[KB-MCP] ping_elasticsearch error: {e}")
         return json.dumps({"ping_success": False, "error": str(e), "duration_ms": duration_ms})
 
 
 @timed
-def elasticsearch_sql(query: str) -> str:
+async def elasticsearch_sql(query: str, ctx: Context | None = None) -> str:
+    """Run elasticsearch SQL and return a single formatted string for MCP output."""
     request_id = str(uuid.uuid4())[:8]
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "elasticsearch_sql"):
-        return pkg.elasticsearch_sql(query)
+        result = await pkg.elasticsearch_sql(query, ctx=ctx)
+        if isinstance(result, dict):
+            return _format_elasticsearch_sql_result(result)
+
+        # Attempt to parse stringified JSON responses for consistency
+        if isinstance(result, str):
+            try:
+                parsed = json.loads(result)
+            except Exception:
+                return result
+            else:
+                return _format_elasticsearch_sql_result(parsed)
+
+        return str(result)
+
     raise ToolError("elasticsearch_sql is not implemented in the migration package yet")
 
 
@@ -549,4 +611,3 @@ mcp.add_tool(
     elasticsearch_sql,
     description=_elasticsearch_sql_docstring()
 )
-

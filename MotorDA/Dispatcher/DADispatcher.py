@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 import traceback
@@ -25,6 +26,7 @@ from ZScore.standalone_da_algorithm_z_score import (
     anomaly_detection_workdayful,
     get_closest_bucket
 )
+
 
 # Dispatcher: Tiene como objetivo recibir el documento de configuración desde MongoDB y despachar la ejecución del algoritmo correspondiente.
 # Tiene que en base al documento de configuración, identificar qué algoritmo se debe ejecutar y llamar a la función correspondiente,
@@ -135,7 +137,6 @@ class Config:
         for algo in self.algorithms:
             algo.execute(self)
 
-
 def parse_config(data: dict) -> Config:
     return Config(
         _id=data["_id"],
@@ -197,6 +198,7 @@ def CreateConnectionToDA() -> MongoClient:
     mongo_da_client.admin.command("ping")
     print("Nos conectamos a la DA")
     return mongo_da_client
+
 
 def ExtractLatestConfigurationKB(client: MongoClient):
 
@@ -483,7 +485,7 @@ def watch_detection_changes(kb_client, workers: ProcessPoolExecutor, data_to_det
 
                         serie_to_detect = change.get("fullDocument")
 
-                        workers.submit(detect_z_score, serie_to_detect)
+                        workers.submit(detect_z_score, (serie_to_detect))
 
         except PyMongoError as e:
             print(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
@@ -498,24 +500,19 @@ def watch_detection_changes(kb_client, workers: ProcessPoolExecutor, data_to_det
 
 def detect_z_score(serie_to_detect):
 
-    #print(f"I am printing serie_to_detect: {serie_to_detect}")
+    print(f"I am printing serie_to_detect: {serie_to_detect}")
     kb_client = CreateConnectionToDA()
 
-    pipeline = [
-        {'$match':
-             {
-                'kb_id': serie_to_detect["metadata"]["kbId"],
-                'dimension': serie_to_detect["metadata"]["dim"]
-             }
-        }
-    ]
-
+    pipeline = [{'$match':
+                     {'kb_id': serie_to_detect["metadata"]["kbId"],
+                      'dimension': serie_to_detect["metadata"]["dim"]}
+                 }]
 
     result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
         pipeline)
 
     training_result = next(result, None)
-
+    # print(f"I am printing the result of training:  {training_result}")
 
     # 2) flatten nested fields (metadata -> metadata.kbId etc.)
     df = pd.json_normalize(serie_to_detect)
@@ -601,6 +598,14 @@ def main():
 
     data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
 
+    # we automatically use max amount of (Cores - 1) and then create workers
+    num_cpu_workers = max(1, multiprocessing.cpu_count() - 1)
+
+    workers : ProcessPoolExecutor = ProcessPoolExecutor()
+    #workers : ThreadPoolExecutor = ProcessPoolExecutor(50)
+
+    data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
+
     workers : ProcessPoolExecutor = ProcessPoolExecutor()
 
     # Start watcher in its own thread
@@ -624,6 +629,7 @@ def main():
 
     except KeyboardInterrupt:
         print("\nStopping watcher...")
+        # Let it end naturally when Mongo closes or you implement a stop condition
         pass
 
 

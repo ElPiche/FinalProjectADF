@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 import json
 import uuid
@@ -79,7 +80,7 @@ class StructuredLogger:
             self.mongo_client.admin.command('ping')
             return True
         except Exception as e:
-            print(f"Failed to connect to logs database: {e}")
+            stderr_print(f"Failed to connect to logs database: {e}")
             self.file_fallback = True
             return False
 
@@ -147,7 +148,7 @@ class StructuredLogger:
         human_readable += f" [SESSION:{self.session_id[:8]}]"
 
         # Write human-readable to console and file
-        print(human_readable)
+        stderr_print(human_readable)
 
         log_file_path = os.path.join(logs_dir_path, log_file)
         with open(log_file_path, "a", encoding="utf-8") as f:
@@ -705,8 +706,8 @@ class UUID:
 
 
 # Initialize MCP server quickly without blocking on MongoDB
-print("Initializing KB-MCP server...")
-print("Skipping structured logger initialization for faster startup...")
+stderr_print("Initializing KB-MCP server...")
+stderr_print("Skipping structured logger initialization for faster startup...")
 
 # Set up basic logging for now
 logger.info("KB-MCP server starting...")
@@ -717,10 +718,10 @@ logger.info("KB-MCP server starting...")
 #     log_message("KB-MCP session started", "info", "kb_mcp", "startup")
 #     log_message("KB-MCP session initialized", "info", "structured_logger", "init",
 #                 extra_data={"session_id": structured_logger.session_id})
-#     print(f"Structured logger initialized successfully - Session ID: {structured_logger.session_id[:8]}...")
+#     stderr_print(f"Structured logger initialized successfully - Session ID: {structured_logger.session_id[:8]}...")
 # except Exception as e:
-#     print(f"Structured logger initialization failed: {e}")
-#     print("Continuing with basic logging only...")
+#     stderr_print(f"Structured logger initialization failed: {e}")
+#     stderr_print("Continuing with basic logging only...")
 #     # Fallback to basic logging if structured logger fails
 #     logger.error(f"Structured logger initialization failed: {e}")
 #     # Reset structured logger to prevent further connection attempts
@@ -948,9 +949,9 @@ def create_da_config(
                 "create_da_config", "validation", request_id=request_id)
 
     # Print configuration preview
-    print("\nConfiguration Preview:")
-    print(json.dumps(config_to_store, indent=2))
-    print()
+    stderr_print("\nConfiguration Preview:")
+    stderr_print(json.dumps(config_to_store, indent=2))
+    stderr_print()
 
     # Save to MongoDB
     client = connect_mongodb()
@@ -1741,46 +1742,46 @@ def elasticsearch_sql(query: str) -> str:
 if __name__ == "__main__":
     # Check if this is being run as an MCP server (no arguments or --server flag)
     import sys
-    print(f"Starting KB-MCP with args: {sys.argv}", file=sys.stderr)
-    print("Elasticsearch host: ", es_host)
+    stderr_print(f"Starting KB-MCP with args: {sys.argv}", file=sys.stderr)
+    stderr_print("Elasticsearch host: ", es_host)
     
     if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == "--server"):
         # Start MCP server using stdio transport (default for FastMCP)
-        print("Starting MCP server with stdio transport...", file=sys.stderr)
-        print("Attempting to initialize MongoDB connection...", file=sys.stderr)
+        stderr_print("Starting MCP server with stdio transport...", file=sys.stderr)
+        stderr_print("Attempting to initialize MongoDB connection...", file=sys.stderr)
         
         # Test MongoDB connection
         mongo_client = connect_mongodb()
         if mongo_client:
-            print("MongoDB connection successful", file=sys.stderr)
+            stderr_print("MongoDB connection successful", file=sys.stderr)
             mongo_client.close()
         else:
-            print("MongoDB connection failed, continuing anyway...", file=sys.stderr)
+            stderr_print("MongoDB connection failed, continuing anyway...", file=sys.stderr)
         
         try:
-            print("MCP server initialized, starting main loop...", file=sys.stderr)
+            stderr_print("MCP server initialized, starting main loop...", file=sys.stderr)
             # FastMCP run() should handle stdio transport and keep the process alive
             mcp.run()
         except KeyboardInterrupt:
-            print("MCP server interrupted by user", file=sys.stderr)
+            stderr_print("MCP server interrupted by user", file=sys.stderr)
             sys.exit(0)
         except Exception as e:
-            print(f"Error starting MCP server: {e}", file=sys.stderr)
+            stderr_print(f"Error starting MCP server: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
             sys.exit(1)
     elif len(sys.argv) == 2 and sys.argv[1] == "--daemon":
         # Run HTTP server for Docker container using simple HTTP handler
-        print("Starting KB-MCP HTTP server...", file=sys.stderr)
-        print("Attempting to initialize MongoDB connection...", file=sys.stderr)
+        stderr_print("Starting KB-MCP HTTP server...", file=sys.stderr)
+        stderr_print("Attempting to initialize MongoDB connection...", file=sys.stderr)
         
         # Test MongoDB connection
         mongo_client = connect_mongodb()
         if mongo_client:
-            print("MongoDB connection successful", file=sys.stderr)
+            stderr_print("MongoDB connection successful", file=sys.stderr)
             mongo_client.close()
         else:
-            print("MongoDB connection failed", file=sys.stderr)
+            stderr_print("MongoDB connection failed", file=sys.stderr)
         
         try:
             # Create a simple HTTP server for MCP
@@ -1843,28 +1844,28 @@ if __name__ == "__main__":
                     pass
             
             server = HTTPServer(('0.0.0.0', 8000), MCPHandler)
-            print("HTTP server started on port 8000...", file=sys.stderr)
+            stderr_print("HTTP server started on port 8000...", file=sys.stderr)
             server.serve_forever()
             
         except KeyboardInterrupt:
-            print("KB-MCP HTTP server interrupted by user", file=sys.stderr)
+            stderr_print("KB-MCP HTTP server interrupted by user", file=sys.stderr)
             sys.exit(0)
         except Exception as e:
-            print(f"Error starting KB-MCP HTTP server: {e}", file=sys.stderr)
+            stderr_print(f"Error starting KB-MCP HTTP server: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
             
             # Fallback to simple daemon mode
-            print("Falling back to daemon mode...", file=sys.stderr)
-            print("KB-MCP daemon is running and ready to accept connections", file=sys.stderr)
+            stderr_print("Falling back to daemon mode...", file=sys.stderr)
+            stderr_print("KB-MCP daemon is running and ready to accept connections", file=sys.stderr)
             
             # Keep the process alive
             try:
                 while True:
                     time.sleep(30)
-                    print("KB-MCP daemon heartbeat", file=sys.stderr)
+                    stderr_print("KB-MCP daemon heartbeat", file=sys.stderr)
             except KeyboardInterrupt:
-                print("KB-MCP daemon interrupted by user", file=sys.stderr)
+                stderr_print("KB-MCP daemon interrupted by user", file=sys.stderr)
                 sys.exit(0)
     else:
         # Run test with command line arguments
@@ -1897,7 +1898,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
 
         # Run test with parameters
-        print("Testing create_da_config function...")
+        stderr_print("Testing create_da_config function...")
 
         # Build KB config from arguments
         if args.kb_config:
@@ -1905,7 +1906,7 @@ if __name__ == "__main__":
                 kb_data = json.loads(args.kb_config)
                 kb_config = KBConfig(**kb_data)
             except json.JSONDecodeError as e:
-                print(f"Error parsing kb-config JSON: {e}")
+                stderr_print(f"Error parsing kb-config JSON: {e}")
                 exit(1)
         else:
             # Build from individual arguments with defaults
@@ -1938,7 +1939,7 @@ if __name__ == "__main__":
                 try:
                     algorithms = json.loads(args.algorithms)
                 except json.JSONDecodeError as e:
-                    print(f"Error parsing algorithms JSON: {e}")
+                    stderr_print(f"Error parsing algorithms JSON: {e}")
                     exit(1)
             else:
                 # Build from individual algorithm arguments
@@ -1991,6 +1992,6 @@ if __name__ == "__main__":
 
         # Call the function
         result = create_da_config(kb_config=kb_config_dict, algorithms=algorithms)
-        print("Function result:")
-        print(result)
-        print("\nTest completed.")
+        stderr_print("Function result:")
+        stderr_print(result)
+        stderr_print("\nTest completed.")

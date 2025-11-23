@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 # Import from our modules
 from mcp_tools import mcp, create_da_config, modify_kb_config, list_kb_configurations, describe_mcp_server, list_available_algorithms, elasticsearch_sql
-from utils import structured_logger, log_message, initialize_logging, shutdown_logging
+from utils import structured_logger, log_message, initialize_logging, shutdown_logging, stderr_print
 from db import connect_mongodb
 
 # Re-export for backward compatibility
@@ -27,19 +27,19 @@ __all__ = [
 
 if __name__ == "__main__":
     # Check if this is being run as an MCP server (no arguments or --server flag)
-    print(f"Starting KB-MCP with args: {sys.argv}", file=sys.stderr)
-    print("Elasticsearch host: ", "http://elasticsearch-dataset:9200")  # From db.py
+    stderr_print(f"Starting KB-MCP with args: {sys.argv}", file=sys.stderr)
+    stderr_print("Elasticsearch host: http://elasticsearch-dataset:9200", file=sys.stderr)  # From db.py
 
     if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == "--server"):
         # Start MCP server using stdio transport (default for FastMCP)
-        print("Starting MCP server with stdio transport...", file=sys.stderr)
-        print("Attempting to initialize MongoDB connection...", file=sys.stderr)
+        stderr_print("Starting MCP server with stdio transport...", file=sys.stderr)
+        stderr_print("Attempting to initialize MongoDB connection...", file=sys.stderr)
 
         # Test MongoDB connection and get connection string
         mongo_client = connect_mongodb()
         mongo_connection_string = None
         if mongo_client:
-            print("MongoDB connection successful", file=sys.stderr)
+            stderr_print("MongoDB connection successful", file=sys.stderr)
             # Get connection string from db module
             try:
                 from db import mongo_connection_string as mongo_conn_str
@@ -49,15 +49,15 @@ if __name__ == "__main__":
                 mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
             mongo_client.close()
         else:
-            print("MongoDB connection failed, continuing anyway...", file=sys.stderr)
+            stderr_print("MongoDB connection failed, continuing anyway...", file=sys.stderr)
             # Still try to initialize logging with MongoDB attempt
             mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
 
         # Initialize dual logging system (file + MongoDB)
-        print("Initializing dual logging system...", file=sys.stderr)
-        print(f"[INIT_LOGGING_DEBUG] initialize_logging will receive: {repr(mongo_connection_string)}", file=sys.stderr)
+        stderr_print("Initializing dual logging system...", file=sys.stderr)
+        stderr_print(f"[INIT_LOGGING_DEBUG] initialize_logging will receive: {repr(mongo_connection_string)}", file=sys.stderr)
         session_id = initialize_logging(mongo_connection_string)
-        print(f"Logging initialized with session ID: {session_id[:8]}", file=sys.stderr)
+        stderr_print(f"Logging initialized with session ID: {session_id[:8]}", file=sys.stderr)
         
         # Log session startup
         log_message("KB-MCP session started", "info", "kb_mcp", "startup")
@@ -65,16 +65,16 @@ if __name__ == "__main__":
                    extra_data={"session_id": session_id})
 
         try:
-            print("MCP server initialized, starting main loop...", file=sys.stderr)
+            stderr_print("MCP server initialized, starting main loop...", file=sys.stderr)
             # FastMCP run() should handle stdio transport and keep the process alive
             mcp.run()
         except KeyboardInterrupt:
-            print("MCP server interrupted by user", file=sys.stderr)
+            stderr_print("MCP server interrupted by user", file=sys.stderr)
             log_message("KB-MCP session ended by user", "info", "kb_mcp", "shutdown")
             shutdown_logging()
             sys.exit(0)
         except Exception as e:
-            print(f"Error starting MCP server: {e}", file=sys.stderr)
+            stderr_print(f"Error starting MCP server: {e}", file=sys.stderr)
             log_message(f"KB-MCP server error: {str(e)}", "error", "kb_mcp", "startup_error", 
                        extra_data={"error_type": type(e).__name__})
             import traceback
@@ -83,14 +83,14 @@ if __name__ == "__main__":
             sys.exit(1)
     elif len(sys.argv) == 2 and sys.argv[1] == "--daemon":
         # Run HTTP server for Docker container using simple HTTP handler
-        print("Starting KB-MCP HTTP server...", file=sys.stderr)
-        print("Attempting to initialize MongoDB connection...", file=sys.stderr)
+        stderr_print("Starting KB-MCP HTTP server...", file=sys.stderr)
+        stderr_print("Attempting to initialize MongoDB connection...", file=sys.stderr)
 
         # Test MongoDB connection and get connection string
         mongo_client = connect_mongodb()
         mongo_connection_string = None
         if mongo_client:
-            print("MongoDB connection successful", file=sys.stderr)
+            stderr_print("MongoDB connection successful", file=sys.stderr)
             # Get connection string from db module
             try:
                 from db import mongo_connection_string as mongo_conn_str
@@ -100,14 +100,14 @@ if __name__ == "__main__":
                 mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
             mongo_client.close()
         else:
-            print("MongoDB connection failed", file=sys.stderr)
+            stderr_print("MongoDB connection failed", file=sys.stderr)
             # Still try to initialize logging with MongoDB attempt
             mongo_connection_string = "mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0"
 
         # Initialize dual logging system (file + MongoDB)
-        print("Initializing dual logging system...", file=sys.stderr)
+        stderr_print("Initializing dual logging system...", file=sys.stderr)
         session_id = initialize_logging(mongo_connection_string)
-        print(f"Logging initialized with session ID: {session_id[:8]}", file=sys.stderr)
+        stderr_print(f"Logging initialized with session ID: {session_id[:8]}", file=sys.stderr)
         
         # Log session startup
         log_message("KB-MCP HTTP server started", "info", "kb_mcp", "startup")
@@ -175,29 +175,29 @@ if __name__ == "__main__":
                     pass
 
             server = HTTPServer(('0.0.0.0', 8000), MCPHandler)
-            print("HTTP server started on port 8000...", file=sys.stderr)
+            stderr_print("HTTP server started on port 8000...", file=sys.stderr)
             server.serve_forever()
 
         except KeyboardInterrupt:
-            print("KB-MCP HTTP server interrupted by user", file=sys.stderr)
+            stderr_print("KB-MCP HTTP server interrupted by user", file=sys.stderr)
             sys.exit(0)
         except Exception as e:
-            print(f"Error starting KB-MCP HTTP server: {e}", file=sys.stderr)
+            stderr_print(f"Error starting KB-MCP HTTP server: {e}", file=sys.stderr)
             import traceback
             traceback.print_exc(file=sys.stderr)
 
             # Fallback to simple daemon mode
-            print("Falling back to daemon mode...", file=sys.stderr)
-            print("KB-MCP daemon is running and ready to accept connections", file=sys.stderr)
+            stderr_print("Falling back to daemon mode...", file=sys.stderr)
+            stderr_print("KB-MCP daemon is running and ready to accept connections", file=sys.stderr)
 
             # Keep the process alive
             try:
                 while True:
                     import time
                     time.sleep(30)
-                    print("KB-MCP daemon heartbeat", file=sys.stderr)
+                    stderr_print("KB-MCP daemon heartbeat", file=sys.stderr)
             except KeyboardInterrupt:
-                print("KB-MCP daemon interrupted by user", file=sys.stderr)
+                stderr_print("KB-MCP daemon interrupted by user", file=sys.stderr)
                 sys.exit(0)
     else:
         # Run test with command line arguments
@@ -230,7 +230,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
 
         # Run test with parameters
-        print("Testing create_da_config function...")
+        stderr_print("Testing create_da_config function...")
 
         # Build KB config from arguments
         if args.kb_config:
@@ -240,7 +240,7 @@ if __name__ == "__main__":
                 from models import KBConfig
                 kb_config = KBConfig(**kb_data)
             except json.JSONDecodeError as e:
-                print(f"Error parsing kb-config JSON: {e}")
+                stderr_print(f"Error parsing kb-config JSON: {e}")
                 exit(1)
         else:
             # Build from individual arguments with defaults
@@ -273,7 +273,7 @@ if __name__ == "__main__":
                 try:
                     algorithms = json.loads(args.algorithms)
                 except json.JSONDecodeError as e:
-                    print(f"Error parsing algorithms JSON: {e}")
+                    stderr_print(f"Error parsing algorithms JSON: {e}")
                     exit(1)
             else:
                 # Build from individual algorithm arguments
@@ -327,6 +327,6 @@ if __name__ == "__main__":
 
         # Call the function
         result = create_da_config(kb_config=kb_config_dict, algorithms=algorithms)
-        print("Function result:")
-        print(result)
-        print("\nTest completed.")
+        stderr_print("Function result:")
+        stderr_print(result)
+        stderr_print("\nTest completed.")

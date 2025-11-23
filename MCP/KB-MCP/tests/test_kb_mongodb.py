@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 """
 This script was a container-integration test that inserts a KB config directly into MongoDB.
@@ -16,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 connection_string = 'mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin&replicaSet=rs0'
 
 def main():
-    print('Testing KB configuration creation from kb-mcp test script...')
+    stderr_print('Testing KB configuration creation from kb-mcp test script...')
     try:
         client = MongoClient(connection_string)
         kb_db = client['knowledge_base']
@@ -53,16 +54,16 @@ def main():
         }
 
         insert_result = kb_collection.insert_one(kb_config)
-        print('KB configuration inserted with ID:', insert_result.inserted_id)
+        stderr_print('KB configuration inserted with ID:', insert_result.inserted_id)
 
         found_config = kb_collection.find_one({'_id': insert_result.inserted_id})
-        print('Retrieved KB config name:', found_config['name'])
-        print('Retrieved KB config description:', found_config['description'])
+        stderr_print('Retrieved KB config name:', found_config['name'])
+        stderr_print('Retrieved KB config description:', found_config['description'])
 
-        print('SUCCESS: KB configuration saved to MongoDB from tests script!')
+        stderr_print('SUCCESS: KB configuration saved to MongoDB from tests script!')
 
     except Exception as e:
-        print('ERROR:', str(e))
+        stderr_print('ERROR:', str(e))
         import traceback
         traceback.print_exc()
 

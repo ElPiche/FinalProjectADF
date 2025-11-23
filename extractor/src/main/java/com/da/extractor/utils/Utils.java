@@ -15,8 +15,8 @@ public class Utils {
 
         return switch (className){
             case "string", "text" -> String.class;
-            case "long" -> Long.class;
-            case "double" -> Double.class;
+//            case "long" -> Long.class;
+            case "double", "long" -> Double.class;
             case "boolean" -> Boolean.class;
             case "datetime" -> Date.class;
             default -> Object.class;
@@ -25,7 +25,10 @@ public class Utils {
 
     /// Extrae el nombre del índice de una consulta Elasticsearch SQL
     public static String extractIndexName(String query) {
-        Pattern pattern = Pattern.compile("FROM\\s+\"?([^\"]+)\"?", Pattern.CASE_INSENSITIVE);
+        Pattern pattern = Pattern.compile(
+                "FROM\\s+\"?([a-zA-Z0-9_.]+)\"?",
+                Pattern.CASE_INSENSITIVE
+        );
         Matcher matcher = pattern.matcher(query);
         if (matcher.find()) {
             return matcher.group(1);

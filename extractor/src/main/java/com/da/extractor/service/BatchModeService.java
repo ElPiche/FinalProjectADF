@@ -86,10 +86,10 @@ public class BatchModeService {
 
                 HttpRequest request = HttpRequest.newBuilder()
                         .header("Accept", "application/json")
-                        .uri(URI.create(anomalyModuleUrl + "/insights/createMapping"))
+                        .uri(URI.create(anomalyModuleUrl + "/insights/dashboards"))
                         .header("Content-Type", "application/json")
                         .timeout(Duration.of(30, ChronoUnit.SECONDS))
-                        .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                        .PUT(HttpRequest.BodyPublishers.ofString(requestBody))
                         .build();
 
                 var response = httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString());

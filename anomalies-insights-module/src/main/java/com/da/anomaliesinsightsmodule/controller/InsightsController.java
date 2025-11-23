@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.NoSuchElementException;
+
 @RestController
 @RequestMapping("/api/insights")
 public class InsightsController {
@@ -27,7 +29,7 @@ public class InsightsController {
         return ResponseEntity.ok("hello world");
     }
 
-    @PostMapping("/createMapping")
+    @PutMapping("/dashboards")
     public ResponseEntity createMapping(@RequestBody CreateMappingRequestDto kbIdMapping){
 
         try{
@@ -42,13 +44,22 @@ public class InsightsController {
 
             return ResponseEntity.ok(kbIdMapping.getKbId());
 
-        }catch (Exception e){
-            logger.error("Error al crear el mapping para kbId: {}", kbIdMapping.getKbId(), e);
+        }
+        catch (IllegalArgumentException e){
+
+            logger.error("Error creating mapping for kbId: {}", kbIdMapping.getKbId(), e);
+            return ResponseEntity.status(409).body(e.getMessage());
+
+        }
+        catch (Exception e){
+
+            logger.error("Error creating mapping for kbId: {}", kbIdMapping.getKbId(), e);
             return ResponseEntity.status(500).body("Internal Server Error creating mapping");
+
         }
     }
 
-    @PostMapping("/insertDocument/{kbId}")
+    @PostMapping("/dashboard/{kbId}/anomalies")
     public ResponseEntity insertDocument(@PathVariable String kbId, @RequestBody DocumentDto doc){
 
         try{
@@ -57,14 +68,25 @@ public class InsightsController {
 
             return ResponseEntity.ok(kbId);
 
-        }catch (Exception e){
-            e.printStackTrace();
+        }catch (IllegalArgumentException e){
+
+            logger.error("Document already exists: {}", kbId, e);
+            return ResponseEntity.status(409).body(e.getMessage());
+
+        }
+        catch (NoSuchElementException e){
+
+            logger.error("Mapping does not exists: {}", kbId, e);
+            return ResponseEntity.status(404).body(e.getMessage());
+
+        }
+        catch (Exception e){
+
+            logger.error("Error inserting document in ElasticSearch anomalies instance: {}", kbId, e);
+            return ResponseEntity.status(500).body("Internal Server Error creating mapping");
+
         }
 
-        return null;
     }
-
-
-
 
 }

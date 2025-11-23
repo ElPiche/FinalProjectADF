@@ -1,3 +1,4 @@
+from utils import stderr_print
 #!/usr/bin/env python3
 """
 Basic unit tests for KB-MCP models.
@@ -49,7 +50,7 @@ def test_valid_kb_config():
     assert config.description == "Test description"
     assert config.change_flag == 0
     assert len(config.algorithms) == 1
-    print("PASS: test_valid_kb_config")
+    stderr_print("PASS: test_valid_kb_config")
 
 
 def test_invalid_kb_config_empty_name():
@@ -64,7 +65,7 @@ def test_invalid_kb_config_empty_name():
         )
         assert False, "Should have raised ValueError"
     except ValueError:
-        print("PASS: test_invalid_kb_config_empty_name")
+        stderr_print("PASS: test_invalid_kb_config_empty_name")
 
 
 def test_invalid_kb_config_empty_description():
@@ -79,7 +80,7 @@ def test_invalid_kb_config_empty_description():
         )
         assert False, "Should have raised ValueError"
     except ValueError:
-        print("PASS: test_invalid_kb_config_empty_description")
+        stderr_print("PASS: test_invalid_kb_config_empty_description")
 
 
 def test_valid_zscore_config():
@@ -89,15 +90,20 @@ def test_valid_zscore_config():
         alg_parameters=[{"dimension": "field1"}, {"dimension": "field2"}]
     )
     assert config.alg_name == "zscore"
-    assert config.alg_parameters == [{"dimension": "field1"}, {"dimension": "field2"}]
-    print("PASS: test_valid_zscore_config")
+    assert [param.model_dump() for param in config.alg_parameters] == [
+        {"dimension": "field1", "alg_metadata": None},
+        {"dimension": "field2", "alg_metadata": None},
+    ]
+    stderr_print("PASS: test_valid_zscore_config")
 
 
 def test_zscore_config_single_dimension():
     """Test ZScoreConfig with single dimension."""
     config = ZScoreConfig(alg_parameters=[{"dimension": "field1"}])
-    assert config.alg_parameters == [{"dimension": "field1"}]
-    print("PASS: test_zscore_config_single_dimension")
+    assert [param.model_dump() for param in config.alg_parameters] == [
+        {"dimension": "field1", "alg_metadata": None}
+    ]
+    stderr_print("PASS: test_zscore_config_single_dimension")
 
 
 def test_valid_cron():
@@ -112,7 +118,7 @@ def test_valid_cron():
     for cron_expr in valid_crons:
         cron = CRON(cron_expr)
         assert str(cron) == cron_expr
-    print("PASS: test_valid_cron")
+    stderr_print("PASS: test_valid_cron")
 
 
 def test_invalid_cron():
@@ -130,12 +136,12 @@ def test_invalid_cron():
             assert False, f"Should have raised ValueError for {cron_expr}"
         except ValueError:
             pass
-    print("PASS: test_invalid_cron")
+    stderr_print("PASS: test_invalid_cron")
 
 
 if __name__ == "__main__":
     # Run basic tests if executed directly
-    print("Running basic model tests...")
+    stderr_print("Running basic model tests...")
 
     test_valid_kb_config()
     test_invalid_kb_config_empty_name()
@@ -145,4 +151,4 @@ if __name__ == "__main__":
     test_valid_cron()
     test_invalid_cron()
 
-    print("All basic tests completed successfully!")
+    stderr_print("All basic tests completed successfully!")
