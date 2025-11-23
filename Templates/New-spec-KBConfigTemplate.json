@@ -39,35 +39,46 @@
       "is_active": true
     }
   },
-  "buckets": "TO BE DECIDED",
-  "algorithms": [
-    {
-      "alg_name": "zscore",
-      "alg_parameters": [
-        { 
-          "dimension": "status_code_200_counter"
-        },
-        { 
-          "dimension": "status_code_5xx_counter" 
-        }
-      ]
-    },
-    {
-      "alg_name": "kmeans",
-      "alg_parameters": [
-        {
-          "dimension": "status_code_5xx_counter",
-          "alg_metadata": [
-            {"key": "clusters", "values": "3"}
-          ]
-        },
-        {
-          "dimension": "status_code_5xx_counter",
-          "alg_metadata": [
-            {"key": "clusters", "values": "5"}
-          ]
-        }
-      ]
-    }
-  ]
+  "bucket_id": "mongo_id",
+  "algorithm": {
+    "name": "kmeans",
+    "parameters": [
+      {
+        "dimension": "status_code_5xx_counter",
+        "metadata": [
+          {"key": "clusters", "values": "3"}
+        ]
+      }
+    ]
+  }
+  // "algorithms": [
+  //   {
+  //     "alg_name": "zscore",
+  //     "alg_parameters": [
+  //       { 
+  //         "dimension": "status_code_200_counter"
+  //       },
+  //       { 
+  //         "dimension": "status_code_5xx_counter" 
+  //       }
+  //     ]
+  //   },
+  //   {
+  //     "alg_name": "kmeans",
+  //     "alg_parameters": [
+  //       {
+  //         "dimension": "status_code_5xx_counter",
+  //         "alg_metadata": [
+  //           {"key": "clusters", "values": "3"}
+  //         ]
+  //       },
+  //       {
+  //         "dimension": "status_code_5xx_counter",
+  //         "alg_metadata": [
+  //           {"key": "clusters", "values": "5"}
+  //         ]
+  //       }
+  //     ]
+  //   }
+  // ]
 }
