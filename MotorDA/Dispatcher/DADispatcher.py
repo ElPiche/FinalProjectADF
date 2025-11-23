@@ -467,7 +467,7 @@ def watch_kb_changes(kb_client):
 
 # TODO: test how robust it is this with a lot of different datapoints sent at the same time -> pretty robust, we tried it with 10400 entries
 # TODO: check how change stream works with threads -> works synchronously, fetches one at a time
-def watch_detection_changes(kb_client, workers: ProcessPoolExecutor, data_to_detect: Queue):
+def watch_detection_changes(kb_client, workers: ProcessPoolExecutor):
 
     while True:
         try:
@@ -598,14 +598,6 @@ def main():
 
     data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
 
-    # we automatically use max amount of (Cores - 1) and then create workers
-    num_cpu_workers = max(1, multiprocessing.cpu_count() - 1)
-
-    workers : ProcessPoolExecutor = ProcessPoolExecutor()
-    #workers : ThreadPoolExecutor = ProcessPoolExecutor(50)
-
-    data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
-
     workers : ProcessPoolExecutor = ProcessPoolExecutor()
 
     # Start watcher in its own thread
@@ -616,7 +608,7 @@ def main():
 
     detection_watcher = threading.Thread(
         target=restartable_thread,
-        args=(watch_detection_changes,kb_client, workers, data_to_detect),
+        args=(watch_detection_changes,kb_client, workers),
         daemon=True
     )
 
