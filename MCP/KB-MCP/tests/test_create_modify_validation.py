@@ -161,6 +161,57 @@ def test_create_da_config_succeeds_after_extractor_validation(monkeypatch):
     assert fake_collection.inserted is not None
 
 
+def test_create_da_config_replaces_placeholders_before_validation(monkeypatch):
+    fake_collection = FakeCollection()
+    captured_queries = []
+    preview_queries = []
+
+    def fake_validate(query, label):
+        captured_queries.append((label, query))
+        return True
+
+    async def fake_elastic(query, ctx=None):  # noqa: D401 - simple stub
+        preview_queries.append(query)
+        return {"columns": [{"name": "response_time", "type": "long"}], "rows": []}
+
+    monkeypatch.setattr(create_module.QueryValidator, "validate", fake_validate)
+    monkeypatch.setattr(create_module, "elasticsearch_sql", fake_elastic)
+    monkeypatch.setattr(create_module, "connect_mongodb", lambda: FakeClient(fake_collection))
+
+    training_query = "SELECT DATE_TRUNC('HOUR', '@timestamp') AS es_timestamp FROM logs WHERE '@timestamp' >= '$from' AND '@timestamp' < '$to'"
+    detection_query = "SELECT COUNT(*) AS total FROM logs WHERE '@timestamp' >= '$from' AND '@timestamp' < '$to'"
+
+    result = asyncio.run(
+        create_da_config(
+            name="placeholder-config",
+            description="Desc",
+            training_query=training_query,
+            detection_query=detection_query,
+            training_from="2025-01-01T00:00:00Z",
+            training_to="2025-01-02T00:00:00Z",
+            training_is_active=True,
+            detection_is_active=True,
+            training_window=3600,
+            detection_window=900,
+            detection_frequency="*/15 * * * *",
+            detection_start="2025-01-02T00:00:00Z",
+            algorithms=VALID_ALGORITHMS,
+        )
+    )
+
+    assert "SUCCESS" in result
+    assert captured_queries
+    assert preview_queries
+    for label, query in captured_queries:
+        assert "$from" not in query
+        assert "$to" not in query
+        assert "2025-01-01T00:00:00Z" in query
+        assert "2025-01-02T00:00:00Z" in query
+    for query in preview_queries:
+        assert "$from" not in query
+        assert "$to" not in query
+
+
 def test_create_config_duplicate_name_warns(monkeypatch):
     existing = {"_id": ObjectId(), "name": "duplicate-config"}
     fake_collection = FakeCollection(document=existing)
@@ -218,6 +269,50 @@ def test_create_config_unique_name_has_no_warning(monkeypatch):
 
     assert "Warning" not in result
     assert "SUCCESS" in result
+
+
+def test_modify_config_replaces_placeholders_before_validation(monkeypatch):
+    object_id = ObjectId()
+    existing_document = build_existing_document(object_id)
+    existing_document["_id"] = object_id
+    existing_document["scheduling"]["training_config"]["training_query"] = (
+        "SELECT count(*) FROM logs WHERE '@timestamp' >= '$from' AND '@timestamp' < '$to'"
+    )
+    fake_collection = FakeCollection(document=existing_document)
+
+    captured_queries = []
+    preview_queries = []
+
+    def fake_validate(query, label):
+        captured_queries.append((label, query))
+        return True
+
+    async def fake_elastic(query, ctx=None):
+        preview_queries.append(query)
+        return {"columns": [{"name": "response_time", "type": "long"}], "rows": []}
+
+    monkeypatch.setattr(modify_module.QueryValidator, "validate", fake_validate)
+    monkeypatch.setattr(modify_module, "elasticsearch_sql", fake_elastic)
+    monkeypatch.setattr(modify_module, "connect_mongodb", lambda: FakeClient(fake_collection))
+
+    result = asyncio.run(
+        modify_kb_config(
+            config_id=str(object_id),
+            detection_query="SELECT max(response_time) FROM logs WHERE '@timestamp' >= '$from' AND '@timestamp' < '$to'",
+        )
+    )
+
+    assert "SUCCESS" in result
+    assert captured_queries
+    label, detection_query = captured_queries[0]
+    assert label == "detection"
+    assert "$from" not in detection_query
+    assert "$to" not in detection_query
+    assert "2025-01-01T00:00:00Z" in detection_query
+    assert "2025-01-02T00:00:00Z" in detection_query
+    for query in preview_queries:
+        assert "$from" not in query
+        assert "$to" not in query
 
 
 def test_modify_kb_config_stops_when_extractor_rejects(monkeypatch):

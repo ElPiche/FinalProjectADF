@@ -17,7 +17,7 @@ from .algorithms import parse_algorithms_to_internal_format, validate_algorithm_
 from .config import ENABLE_PROGRESS_REPORTING, MAX_TOOL_EXECUTION_TIME
 from .context_helpers import ContextReporter
 from .elasticsearch_sql import elasticsearch_sql
-from .query_validator import QueryValidator
+from .query_validator import QueryValidator, materialize_query_time_range
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
@@ -162,8 +162,14 @@ async def create_da_config(
                 raise ToolError(error_msg)
 
             async def _validate_query(query: str, label: str):
-                await asyncio.to_thread(QueryValidator.validate, query, label)
-                preview = await elasticsearch_sql(f"{query} LIMIT 0", ctx=ctx)
+                materialized_query = materialize_query_time_range(
+                    query,
+                    training_from,
+                    training_to,
+                    label,
+                )
+                await asyncio.to_thread(QueryValidator.validate, materialized_query, label)
+                preview = await elasticsearch_sql(f"{materialized_query} LIMIT 0", ctx=ctx)
                 available_fields = [col.get("name") for col in preview.get("columns", []) if col.get("name")]
                 validate_algorithm_dimensions(config.algorithms, available_fields, label)
 
