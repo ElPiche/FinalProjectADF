@@ -30,16 +30,16 @@
     "training_config": {
       "from": "2025-11-01T00:00:00Z",
       "to": "2025-12-01T00:00:00Z",
-      "is_active": true
+      "is_active": true //false if an algorithm does not require training (ARMA, etc.) OR if training is to be paused
     },
     "detection_config": {
       "from": "2025-11-01T00:00:00Z",
       "frequency": "*/1 * * * *",
       "detection_window": 3600, // en segundos, representa la ventana de detección aka que tan atras tomar datos
-      "is_active": true
+      "is_active": true // turns detection on or off
     }
   },
-  "bucket_id": "mongo_id",
+  "bucket_id": "mongo_id", //if null, no bucket is used
   "algorithm": {
     "name": "kmeans",
     "parameters": [
