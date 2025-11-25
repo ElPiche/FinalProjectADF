@@ -17,4 +17,7 @@ public class DocumentDto {
     public String timestamp;
     public Double value;
     public String created_at;
+    //public Double ZScore;
+    //public Double Std;
+    //public String kbName;
 }
