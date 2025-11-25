@@ -1,78 +1,230 @@
-# models.py - Pydantic models and data structures for KB-MCP
+"""Pydantic models and helpers for KB-MCP."""
 
-from pydantic import BaseModel, Field, field_validator
-from typing import List, Dict, Any, Optional
 from datetime import datetime
 import re
+from typing import Any, Dict, List, Optional
 
-# Knowledge Base Configuration Models
-class TrainingConfig(BaseModel):
-    training_query: str = Field(description="Elasticsearch SQL query for training data")
-    from_: str = Field(alias="from", description="Training data start timestamp (ISO 8601)")
-    to: str = Field(description="Training data end timestamp (ISO 8601)")
-    training_window: int = Field(description="Training window in seconds")
-    is_active: bool = Field(description="Whether training is active")
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
-    @field_validator('from_', 'to')
+
+SUPPORTED_ALGORITHMS = {"zscore"}
+
+
+class QueryMode(BaseModel):
+    """Represents how Elasticsearch data is materialized for training/detection."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str = Field(description="Data extraction mode: 'raw' or 'aggregated'.")
+    timestamp_field: str = Field(description="Timestamp column returned by the SQL query.")
+
+    @field_validator("type")
     @classmethod
-    def validate_timestamps(cls, v):
+    def validate_type(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"raw", "aggregated"}:
+            raise ValueError("query_mode.type must be either 'raw' or 'aggregated'")
+        return normalized
+
+    @field_validator("timestamp_field")
+    @classmethod
+    def validate_timestamp_field(cls, value: str) -> str:
+        if not value or not isinstance(value, str):
+            raise ValueError("timestamp_field must be a non-empty string")
+        return value
+
+
+class TrainingConfig(BaseModel):
+    """Training schedule metadata (legacy query fields kept for migration)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    type: str = Field(default="static", description="Training scope strategy (static|rolling).")
+    from_: str = Field(alias="from", description="Training data start timestamp (ISO 8601).")
+    to: str = Field(description="Training data end timestamp (ISO 8601).")
+    is_active: bool = Field(default=True, description="Enable or pause training jobs.")
+    training_window: Optional[int] = Field(
+        default=None,
+        description="Legacy window duration in seconds. Retained for backward compatibility.",
+    )
+    training_query: Optional[str] = Field(
+        default=None,
+        description="Legacy per-phase training query. Use elasticsearch_sql_query instead.",
+    )
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in {"static", "rolling"}:
+            raise ValueError("training_config.type must be 'static' or 'rolling'")
+        return normalized
+
+    @field_validator("from_", "to")
+    @classmethod
+    def validate_timestamps(cls, value: str) -> str:
         try:
-            datetime.fromisoformat(v.replace('Z', '+00:00'))
-            return v
-        except ValueError:
-            raise ValueError(f"Invalid ISO 8601 timestamp: {v}")
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"Invalid ISO 8601 timestamp: {value}") from exc
+        return value
+
 
 class DetectionConfig(BaseModel):
-    detection_query: str = Field(description="Elasticsearch SQL query for detection")
-    from_: str = Field(alias="from", description="Detection start timestamp (ISO 8601)")
-    frequency: str = Field(description="Detection frequency (CRON expression)")
-    detection_window: int = Field(description="Detection window in seconds")
-    is_active: bool = Field(description="Whether detection is active")
+    """Detection schedule metadata (legacy query fields kept for migration)."""
 
-    @field_validator('frequency')
-    @classmethod
-    def validate_frequency(cls, v):
-        if not CRON._is_valid_cron(v):
-            raise ValueError(f"Invalid CRON expression: {v}")
-        return v
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
-    @field_validator('from_')
+    frequency: str = Field(description="Detection frequency (CRON expression).")
+    detection_window: int = Field(description="Detection window in seconds.")
+    is_active: bool = Field(default=True, description="Enable or pause detection jobs.")
+    from_: Optional[str] = Field(default=None, alias="from", description="Detection start timestamp (ISO 8601).")
+    detection_query: Optional[str] = Field(
+        default=None,
+        description="Legacy per-phase detection query. Use elasticsearch_sql_query instead.",
+    )
+
+    @field_validator("frequency")
     @classmethod
-    def validate_from_timestamp(cls, v):
+    def validate_frequency(cls, value: str) -> str:
+        if not CRON._is_valid_cron(value):
+            raise ValueError(f"Invalid CRON expression: {value}")
+        return value
+
+    @field_validator("from_")
+    @classmethod
+    def validate_from_timestamp(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
         try:
-            datetime.fromisoformat(v.replace('Z', '+00:00'))
-            return v
-        except ValueError:
-            raise ValueError(f"Invalid ISO 8601 timestamp: {v}")
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(f"Invalid ISO 8601 timestamp: {value}") from exc
+        return value
+
+    @field_validator("detection_window")
+    @classmethod
+    def validate_detection_window(cls, value: int) -> int:
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError("detection_window must be a positive integer")
+        return value
+
 
 class SchedulingConfig(BaseModel):
     training_config: TrainingConfig = Field(description="Training configuration")
     detection_config: DetectionConfig = Field(description="Detection configuration")
 
+
 class AlgorithmParameter(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     dimension: str = Field(description="Column name to monitor for anomalies")
-    alg_metadata: Optional[List[Dict[str, str]]] = Field(default=None, description="Algorithm-specific metadata")
+    is_active: bool = Field(default=True, description="Toggle anomaly detection for this dimension.")
+    metadata: Optional[List[Dict[str, str]]] = Field(
+        default=None,
+        validation_alias=AliasChoices("metadata", "alg_metadata"),
+        serialization_alias="metadata",
+        description="Algorithm-specific metadata entries.",
+    )
 
-class AlgorithmConfigItem(BaseModel):
-    alg_name: str = Field(description="Algorithm name (e.g., 'zscore', 'kmeans')")
-    alg_parameters: List[AlgorithmParameter] = Field(description="Algorithm parameters")
 
-# Knowledge Base Configuration
+class AlgorithmConfig(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    name: str = Field(
+        validation_alias=AliasChoices("name", "alg_name"),
+        serialization_alias="name",
+        description="Algorithm name (e.g., 'zscore').",
+    )
+    parameters: List[AlgorithmParameter] = Field(
+        validation_alias=AliasChoices("parameters", "alg_parameters"),
+        serialization_alias="parameters",
+        description="Algorithm parameters",
+    )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        normalized = (value or "").strip().lower()
+        if normalized not in SUPPORTED_ALGORITHMS:
+            raise ValueError(
+                f"Algorithm '{value}' is not supported. Supported algorithms: {sorted(SUPPORTED_ALGORITHMS)}"
+            )
+        return normalized
+
+    @field_validator("parameters")
+    @classmethod
+    def validate_parameters(cls, value: List[AlgorithmParameter]) -> List[AlgorithmParameter]:
+        if not value:
+            raise ValueError("algorithm.parameters cannot be empty")
+        return value
+
+
+# Backwards-compatible alias for legacy imports
+AlgorithmConfigItem = AlgorithmConfig
+
+
 class KBConfig(BaseModel):
-    # No id field - MongoDB will auto-generate _id
+    """Top-level configuration consumed by dispatcher and extractor services."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
     name: str = Field(description="Configuration name")
     description: str = Field(description="Human-readable description")
     change_flag: int = Field(default=0, description="Change flag for triggering change streams")
+    elasticsearch_sql_query: str = Field(description="Unified Elasticsearch SQL query for training and detection")
+    query_mode: QueryMode = Field(description="Query mode metadata")
+    bucket_profile_id: Optional[str] = Field(
+        default=None,
+        description="Optional reference to a bucket_profiles document (time-context definition).",
+    )
+    algorithm: AlgorithmConfig = Field(description="Algorithm configuration")
     scheduling: SchedulingConfig = Field(description="Scheduling configuration")
-    algorithms: List[AlgorithmConfigItem] = Field(description="List of algorithm configurations")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_schema(cls, data: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(data, dict):
+            return data
+
+        migrated: Dict[str, Any] = dict(data)
+
+        if "algorithm" not in migrated:
+            legacy_algorithms = migrated.get("algorithms") or []
+            if legacy_algorithms:
+                migrated["algorithm"] = legacy_algorithms[0]
+
+        if not migrated.get("query_mode"):
+            migrated["query_mode"] = {"type": "raw", "timestamp_field": "@timestamp"}
+
+        if "elasticsearch_sql_query" not in migrated:
+            scheduling = migrated.get("scheduling") or {}
+            training_cfg = (scheduling.get("training_config") or {}) if isinstance(scheduling, dict) else {}
+            detection_cfg = (scheduling.get("detection_config") or {}) if isinstance(scheduling, dict) else {}
+            fallback_query = training_cfg.get("training_query") or detection_cfg.get("detection_query")
+            migrated["elasticsearch_sql_query"] = fallback_query or ""
+
+        return migrated
 
     def __init__(self, **data):
         super().__init__(**data)
-        # Basic validation - detailed validation happens in tools
         if not self.name or not isinstance(self.name, str):
             raise ValueError("Name must be a non-empty string")
         if not self.description or not isinstance(self.description, str):
             raise ValueError("Description must be a non-empty string")
+
+    @property
+    def algorithms(self) -> List[AlgorithmConfig]:
+        """Legacy helper to expose singular algorithm as list."""
+
+        return [self.algorithm]
 
 # CRON class moved before classes that use it
 class CRON:
@@ -122,18 +274,11 @@ class schedulingDetectionConfig(BaseModel):
             data['window'] = data['window'].value
         super().__init__(**data)
 
-# Supported algorithms - only fully implemented ones
-SUPPORTED_ALGORITHMS = {"zscore"}
-
 # Algorithm configuration models for FastMCP tool parameters
 class ZScoreConfig(AlgorithmConfigItem):
     """Z-score algorithm configuration used by FastMCP tool schemas."""
 
-    alg_name: str = Field(default="zscore", description="Algorithm name (must be 'zscore')")
-
-
-# Union type for all supported algorithms (expand when more algorithms are added)
-AlgorithmConfig = AlgorithmConfigItem  # Add KMeansConfig, ARMAConfig, etc. when implemented
+    name: str = Field(default="zscore", description="Algorithm name (must be 'zscore')")
 
 # SQL class for validating SQL queries
 class SQL:

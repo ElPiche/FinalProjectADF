@@ -357,67 +357,75 @@ def validate_cron_expression(cron_expression: str) -> None:
         raise ValueError(f"Invalid CRON expression: {cron_expression}") from exc
 
 
-def validate_algorithms(algorithms: list[dict]) -> list[str]:
-    """
-    Validate algorithms array structure and supported algorithms.
+def validate_algorithms(algorithms: list[dict] | dict | None) -> list[str]:
+    """Validate algorithm configuration payloads (legacy list or new singular format)."""
 
-    Args:
-        algorithms: List of algorithm configuration dictionaries
+    errors: list[str] = []
 
-    Returns:
-        List of validation error messages (empty if valid)
-    """
-    errors = []
+    if algorithms is None:
+        errors.append("algorithm configuration cannot be empty")
+        return errors
 
-    if not algorithms:
-        errors.append("algorithms array cannot be empty")
+    if isinstance(algorithms, dict):
+        algorithm_items = [algorithms]
+    else:
+        algorithm_items = list(algorithms)
+
+    if not algorithm_items:
+        errors.append("algorithm configuration list cannot be empty")
         return errors
 
     from models import SUPPORTED_ALGORITHMS
 
-    for i, alg in enumerate(algorithms):
+    for i, alg in enumerate(algorithm_items):
         if not isinstance(alg, dict):
             errors.append(f"algorithm {i}: must be a dictionary")
             continue
 
-        alg_name = alg.get("alg_name")
-        if not alg_name:
-            errors.append(f"algorithm {i}: missing alg_name")
+        name = alg.get("name") or alg.get("alg_name")
+        if not name:
+            errors.append(f"algorithm {i}: missing algorithm name")
             continue
 
-        if alg_name not in SUPPORTED_ALGORITHMS:
-            errors.append(f"algorithm {i}: '{alg_name}' is not supported. Supported algorithms: {list(SUPPORTED_ALGORITHMS)}")
+        normalized_name = str(name).strip().lower()
+        if normalized_name not in SUPPORTED_ALGORITHMS:
+            errors.append(
+                f"algorithm {i}: '{name}' is not supported. Supported algorithms: {sorted(SUPPORTED_ALGORITHMS)}"
+            )
             continue
 
-        if "alg_parameters" not in alg:
-            errors.append(f"algorithm {i}: missing alg_parameters")
-            continue
-
-        params = alg["alg_parameters"]
+        params = alg.get("parameters") or alg.get("alg_parameters")
         if not isinstance(params, list):
-            errors.append(f"algorithm {i}: alg_parameters must be a list")
+            errors.append(f"algorithm {i}: parameters must be a list")
+            continue
+
+        if not params:
+            errors.append(f"algorithm {i}: parameters cannot be empty")
             continue
 
         for j, param in enumerate(params):
             if not isinstance(param, dict):
                 errors.append(f"algorithm {i}, parameter {j}: must be a dictionary")
                 continue
-            if "dimension" not in param:
+
+            if not param.get("dimension"):
                 errors.append(f"algorithm {i}, parameter {j}: missing dimension")
-            
-            # Validate optional alg_metadata
-            if "alg_metadata" in param:
-                metadata = param["alg_metadata"]
-                if not isinstance(metadata, list):
-                    errors.append(f"algorithm {i}, parameter {j}: alg_metadata must be a list")
+
+            metadata = param.get("metadata") or param.get("alg_metadata")
+            if metadata is None:
+                continue
+
+            if not isinstance(metadata, list):
+                errors.append(f"algorithm {i}, parameter {j}: metadata must be a list")
+                continue
+
+            for k, meta in enumerate(metadata):
+                if not isinstance(meta, dict):
+                    errors.append(f"algorithm {i}, parameter {j}, metadata {k}: must be a dictionary")
                     continue
-                for k, meta in enumerate(metadata):
-                    if not isinstance(meta, dict):
-                        errors.append(f"algorithm {i}, parameter {j}, metadata {k}: must be a dictionary")
-                        continue
-                    if "key" not in meta:
-                        errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing key")
-                    if "values" not in meta:
-                        errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing values")
+                if "key" not in meta:
+                    errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing key")
+                if "values" not in meta:
+                    errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing values")
 
     return errors

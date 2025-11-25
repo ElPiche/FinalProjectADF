@@ -4,12 +4,14 @@ import os
 import sys
 import time
 import uuid
-from typing import List
+from datetime import datetime, timezone
+from typing import Optional
 
 from mcp.server.fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
+from pydantic import ValidationError
 
-from models import AlgorithmConfig
+from models import AlgorithmConfig, DetectionConfig, KBConfig, QueryMode, SchedulingConfig, TrainingConfig
 from db import connect_mongodb
 from validation import validate_algorithms, validate_cron_expression, validate_window_size
 from utils import log_message as _utils_log_message
@@ -24,20 +26,48 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
     return _utils_log_message(message, level, component, method, **kwargs)
 
 
+MIN_DETECTION_FREQUENCY_SECONDS = {
+    "raw": 60,
+    "aggregated": 10,
+}
+
+
+def _enforce_detection_frequency_floor(query_mode_type: str, cron_expression: str) -> None:
+    """Ensure CRON schedules obey minimum per-mode frequencies."""
+
+    from croniter import croniter
+
+    reference = datetime.now(timezone.utc)
+    try:
+        iterator = croniter(cron_expression, reference)
+        next_fire = iterator.get_next(datetime)
+    except Exception as exc:  # pragma: no cover - croniter raises descriptive errors
+        raise ToolError(f"Unable to evaluate detection_frequency '{cron_expression}': {exc}") from exc
+
+    interval_seconds = (next_fire - reference).total_seconds()
+    minimum = MIN_DETECTION_FREQUENCY_SECONDS.get((query_mode_type or "raw").lower(), 60)
+
+    if interval_seconds < minimum:
+        raise ToolError(
+            f"Detection frequency '{cron_expression}' executes every {interval_seconds:.0f} seconds, "
+            f"which is faster than the minimum {minimum} seconds allowed for query_mode '{query_mode_type}'."
+        )
+
+
 async def create_da_config(
     name: str,
     description: str,
-    training_query: str,
-    detection_query: str,
+    elasticsearch_sql_query: str,
+    query_mode: QueryMode,
     training_from: str,
     training_to: str,
     training_is_active: bool,
     detection_is_active: bool,
-    training_window: int,
-    detection_window: int,
     detection_frequency: str,
+    detection_window: int,
     detection_start: str,
-    algorithms: List[AlgorithmConfig],
+    algorithm: AlgorithmConfig,
+    bucket_profile_id: Optional[str] = None,
     ctx: Context | None = None,
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
@@ -53,27 +83,25 @@ async def create_da_config(
         "create_da_config",
         "entry",
         request_id=request_id,
-        extra_data={"config_name": name, "algorithm_count": len(algorithms) if algorithms else 0},
+        extra_data={"config_name": name, "algorithm_name": getattr(algorithm, "name", None)},
     )
 
     try:
         async with asyncio.timeout(MAX_TOOL_EXECUTION_TIME):
             # Step 1: Window validation
             step_start = time.time()
-            await reporter.step(1, "Step 1/5: Validating window sizes")
-            log_message("Step 1/5: Validating window sizes", "info", "create_da_config", "step", request_id=request_id)
+            await reporter.step(1, "Step 1/5: Validating detection window")
+            log_message("Step 1/5: Validating detection window", "info", "create_da_config", "step", request_id=request_id)
             try:
-                training_window_result = validate_window_size(training_window, "training")
                 detection_window_result = validate_window_size(detection_window, "detection")
             except ValueError as exc:
                 raise ToolError(f"Invalid window size: {exc}") from exc
 
-            for result in (training_window_result, detection_window_result):
-                if result.get("warning"):
-                    warning_text = f"⚠️  Warning: {result['warning']}"
-                    warnings.append(warning_text)
-                    await reporter.warning(warning_text)
-                    log_message(warning_text, "warning", "create_da_config", "step", request_id=request_id)
+            if detection_window_result.get("warning"):
+                warning_text = f"⚠️  Warning: {detection_window_result['warning']}"
+                warnings.append(warning_text)
+                await reporter.warning(warning_text)
+                log_message(warning_text, "warning", "create_da_config", "step", request_id=request_id)
 
             log_message(
                 f"✓ Step 1 completed in {time.time() - step_start:.2f}s",
@@ -87,52 +115,64 @@ async def create_da_config(
             step_start = time.time()
             await reporter.step(2, "Step 2/5: Validating configuration payload")
             log_message("Step 2/5: Validating configuration payload", "info", "create_da_config", "step", request_id=request_id)
-            from pydantic import ValidationError
-            from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem
 
-            algorithm_items = []
-            for alg in algorithms or []:
-                try:
-                    if isinstance(alg, AlgorithmConfigItem):
-                        algorithm_items.append(AlgorithmConfigItem.model_validate(alg.model_dump()))
-                    elif isinstance(alg, dict):
-                        algorithm_items.append(AlgorithmConfigItem.model_validate(alg))
-                    else:
-                        raise ToolError(
-                            f"Unsupported algorithm format: {type(alg)}. Expected AlgorithmConfigItem or dict with 'alg_name' and 'alg_parameters'."
-                        )
-                except ValidationError as exc:
-                    raise ToolError(f"Algorithm validation error: {exc}") from exc
+            if not isinstance(elasticsearch_sql_query, str) or not elasticsearch_sql_query.strip():
+                raise ToolError("elasticsearch_sql_query must be a non-empty string")
+
+            cleaned_query = elasticsearch_sql_query.strip()
 
             try:
                 validate_cron_expression(detection_frequency)
             except ValueError as exc:
                 raise ToolError(str(exc)) from exc
 
+            normalized_bucket_profile_id = bucket_profile_id.strip() if bucket_profile_id else None
+
+            try:
+                validated_query_mode = (
+                    query_mode
+                    if isinstance(query_mode, QueryMode)
+                    else QueryMode.model_validate(query_mode)
+                )
+            except ValidationError as exc:
+                raise ToolError(f"Invalid query_mode payload: {exc}") from exc
+
+            try:
+                validated_algorithm = (
+                    algorithm
+                    if isinstance(algorithm, AlgorithmConfig)
+                    else AlgorithmConfig.model_validate(algorithm)
+                )
+            except ValidationError as exc:
+                raise ToolError(f"Algorithm validation error: {exc}") from exc
+
+            _enforce_detection_frequency_floor(validated_query_mode.type, detection_frequency)
+
+            training_kwargs = {"from": training_from}
+            detection_kwargs = {"from": detection_start} if detection_start else {}
+
             config = KBConfig(
                 name=name,
                 description=description,
                 change_flag=0,
+                elasticsearch_sql_query=cleaned_query,
+                query_mode=validated_query_mode,
+                bucket_profile_id=normalized_bucket_profile_id,
+                algorithm=validated_algorithm,
                 scheduling=SchedulingConfig(
                     training_config=TrainingConfig(
-                        training_query=training_query,
-                        **{"from": training_from},
+                        **training_kwargs,
                         to=training_to,
-                        training_window=training_window,
                         is_active=training_is_active,
                     ),
                     detection_config=DetectionConfig(
-                        detection_query=detection_query,
-                        **{"from": detection_start},
+                        **detection_kwargs,
                         frequency=detection_frequency,
                         detection_window=detection_window,
                         is_active=detection_is_active,
                     ),
                 ),
-                algorithms=algorithm_items,
             )
-
-            from datetime import datetime
 
             try:
                 training_from_dt = datetime.fromisoformat(training_from.replace("Z", "+00:00"))
@@ -153,31 +193,40 @@ async def create_da_config(
 
             # Step 3: Algorithm + SQL validation
             step_start = time.time()
-            await reporter.step(3, "Step 3/5: Validating algorithms and SQL queries")
-            log_message("Step 3/5: Validating algorithms and SQL queries", "info", "create_da_config", "step", request_id=request_id)
-            internal_algorithms = parse_algorithms_to_internal_format(config.algorithms)
-            algorithm_errors = validate_algorithms(internal_algorithms)
+            await reporter.step(3, "Step 3/5: Validating algorithms and SQL query")
+            log_message("Step 3/5: Validating algorithms and SQL query", "info", "create_da_config", "step", request_id=request_id)
+
+            internal_algorithms = parse_algorithms_to_internal_format(config.algorithm)
+            algorithm_payload = internal_algorithms[0] if len(internal_algorithms) == 1 else internal_algorithms
+            algorithm_errors = validate_algorithms(algorithm_payload)
             if algorithm_errors:
                 error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
                 raise ToolError(error_msg)
 
-            async def _validate_query(query: str, label: str):
+            async def _validate_unified_query() -> None:
                 materialized_query = materialize_query_time_range(
-                    query,
+                    config.elasticsearch_sql_query,
                     training_from,
                     training_to,
-                    label,
+                    "elasticsearch_sql_query",
                 )
-                await asyncio.to_thread(QueryValidator.validate, materialized_query, label)
+                await asyncio.to_thread(
+                    QueryValidator.validate,
+                    materialized_query,
+                    "unified",
+                    query_mode=config.query_mode.type,
+                    timestamp_field=config.query_mode.timestamp_field,
+                )
                 preview = await elasticsearch_sql(f"{materialized_query} LIMIT 0", ctx=ctx)
                 available_fields = [col.get("name") for col in preview.get("columns", []) if col.get("name")]
-                validate_algorithm_dimensions(config.algorithms, available_fields, label)
+                if config.query_mode.timestamp_field not in available_fields:
+                    raise ToolError(
+                        f"timestamp_field '{config.query_mode.timestamp_field}' was not returned by the query. "
+                        f"Available fields: {available_fields}"
+                    )
+                validate_algorithm_dimensions(config.algorithm, available_fields, "unified")
 
-            if config.scheduling.training_config.training_query:
-                await _validate_query(config.scheduling.training_config.training_query, "training")
-
-            if config.scheduling.detection_config.detection_query:
-                await _validate_query(config.scheduling.detection_config.detection_query, "detection")
+            await _validate_unified_query()
 
             log_message(
                 f"✓ Step 3 completed in {time.time() - step_start:.2f}s",
@@ -188,7 +237,7 @@ async def create_da_config(
             )
 
             # Prepare config dict for persistence
-            config_to_store = config.model_dump(by_alias=True)
+            config_to_store = config.model_dump(by_alias=True, exclude_none=True)
             sys.stderr.write("\n[KB-MCP] Configuration Preview:\n")
             sys.stderr.write(json.dumps(config_to_store, indent=2) + "\n\n")
             sys.stderr.flush()
@@ -205,6 +254,9 @@ async def create_da_config(
 
             db_instance = client[db.db_kb_name]
             collection = db_instance[db.db_kb_collection_name]
+            # Bucket profiles are stored in anomaly_detection database (via get_db())
+            anomaly_detection_db = client["anomaly_detection"]
+            bucket_profiles_collection = anomaly_detection_db.get_collection("bucket_profiles")
             enforce_unique = os.getenv("ENFORCE_UNIQUE_CONFIG_NAMES", "false").lower() == "true"
             existing = await asyncio.to_thread(collection.find_one, {"name": name})
             if existing:
@@ -217,6 +269,17 @@ async def create_da_config(
                 warnings.append(warning_text)
                 await reporter.warning(warning_text)
                 log_message(warning_text, "warning", "create_da_config", "step", request_id=request_id)
+
+            if config.bucket_profile_id:
+                bucket_profile = await asyncio.to_thread(
+                    bucket_profiles_collection.find_one,
+                    {"_id": config.bucket_profile_id},
+                    {"_id": 1},
+                )
+                if bucket_profile is None:
+                    raise ToolError(
+                        f"bucket_profile_id '{config.bucket_profile_id}' does not exist in bucket_profiles collection"
+                    )
 
             log_message(
                 f"✓ Step 4 completed in {time.time() - step_start:.2f}s",

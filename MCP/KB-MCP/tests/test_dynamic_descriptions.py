@@ -25,17 +25,16 @@ from models import KBConfig, ZScoreConfig
 DEFAULT_CREATE_ARGS = {
     "name": "test",
     "description": "test",
-    "training_query": "SELECT * FROM test",
-    "detection_query": "SELECT * FROM test",
+    "elasticsearch_sql_query": "SELECT @timestamp, field FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+    "query_mode": {"type": "raw", "timestamp_field": "@timestamp"},
     "training_from": "2025-01-01T00:00:00Z",
     "training_to": "2025-01-02T00:00:00Z",
     "training_is_active": True,
     "detection_is_active": True,
-    "training_window": 3600,
     "detection_window": 3600,
-    "detection_frequency": "* * * * *",
+    "detection_frequency": "*/5 * * * *",  # Every 5 minutes, valid for raw mode
     "detection_start": "2025-01-03T00:00:00Z",
-    "algorithms": [{"alg_name": "zscore", "alg_parameters": [{"dimension": "field"}]}],
+    "algorithm": {"name": "zscore", "parameters": [{"dimension": "field"}]},
 }
 
 
@@ -43,7 +42,13 @@ def _patch_create_da_config_dependencies(monkeypatch):
     create_module = importlib.import_module("mcp_tools_pkg.create_da_config")
     monkeypatch.setattr(create_module.QueryValidator, "validate", lambda *args, **kwargs: True)
     async def _fake_elasticsearch_sql(*_args, **_kwargs):
-        return {"columns": [{"name": "field", "type": "long"}], "rows": []}
+        return {
+            "columns": [
+                {"name": "@timestamp", "type": "date"},
+                {"name": "field", "type": "long"},
+            ],
+            "rows": [],
+        }
 
     monkeypatch.setattr(create_module, "elasticsearch_sql", _fake_elasticsearch_sql)
     monkeypatch.setattr(create_module, "connect_mongodb", lambda: None)
@@ -75,9 +80,9 @@ class TestDynamicDescriptions:
         # Check for main KBConfig fields
         assert "name" in description
         assert "description" in description
-        assert "training_query" in description
-        assert "detection_query" in description
-        assert "algorithms" in description
+        assert "elasticsearch_sql_query" in description
+        assert "query_mode" in description
+        assert "algorithm" in description
 
         # Check for nested config fields (using aliases from the model)
         assert "from" in description  # This is the alias for from_ field
@@ -110,7 +115,7 @@ class TestDynamicDescriptions:
         assert "name" in example
         assert "description" in example
         assert "scheduling" in example
-        assert "algorithms" in example
+        assert "algorithm" in example
 
         # Check nested scheduling fields
         scheduling = example["scheduling"]
@@ -118,21 +123,18 @@ class TestDynamicDescriptions:
         assert "detection_config" in scheduling
 
         training_config = scheduling["training_config"]
-        assert "training_query" in training_config
         assert "from" in training_config
         assert "to" in training_config
 
         detection_config = scheduling["detection_config"]
-        assert "detection_query" in detection_config
         assert "from" in detection_config
         assert "frequency" in detection_config
 
-        # Check algorithms structure
-        algorithms = example["algorithms"]
-        assert isinstance(algorithms, list)
-        assert len(algorithms) > 0
-        assert "alg_name" in algorithms[0]
-        assert "alg_parameters" in algorithms[0]
+        # Check algorithm structure
+        algorithm = example["algorithm"]
+        assert isinstance(algorithm, dict)
+        assert "name" in algorithm
+        assert "parameters" in algorithm
 
     def test_algorithm_config_description_contains_zscore(self):
         """Test that ALGORITHM_CONFIG_DESCRIPTION contains zscore algorithm info."""
@@ -169,66 +171,69 @@ class TestDynamicDescriptions:
 
     def test_pydantic_validation_works(self):
         """Test that Pydantic models properly validate input data."""
-        from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem, AlgorithmParameter
-        
-        # Test valid configuration
+        from models import (
+            KBConfig,
+            TrainingConfig,
+            DetectionConfig,
+            SchedulingConfig,
+            AlgorithmConfig,
+            AlgorithmParameter,
+        )
+
         config = KBConfig(
-            name='test_config',
-            description='test description',
+            name="test_config",
+            description="test description",
             change_flag=0,
+            elasticsearch_sql_query="SELECT @timestamp, value FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+            query_mode={"type": "raw", "timestamp_field": "@timestamp"},
+            algorithm=AlgorithmConfig(
+                name="zscore",
+                parameters=[AlgorithmParameter(dimension="test_field")],
+            ),
             scheduling=SchedulingConfig(
                 training_config=TrainingConfig(
-                    training_query='SELECT * FROM test',
-                    **{"from": '2025-01-01T00:00:00Z'},
-                    to='2025-01-02T00:00:00Z',
-                    training_window=3600,
-                    is_active=True
+                    **{"from": "2025-01-01T00:00:00Z"},
+                    to="2025-01-02T00:00:00Z",
+                    is_active=True,
                 ),
                 detection_config=DetectionConfig(
-                    detection_query='SELECT * FROM test',
-                    **{"from": '2025-01-03T00:00:00Z'},
-                    frequency='* * * * *',
+                    **{"from": "2025-01-03T00:00:00Z"},
+                    frequency="* * * * *",
                     detection_window=3600,
-                    is_active=False
-                )
+                    is_active=False,
+                ),
             ),
-            algorithms=[AlgorithmConfigItem(
-                alg_name='zscore',
-                alg_parameters=[AlgorithmParameter(dimension='test_field')]
-            )]
         )
-        
-        assert config.name == 'test_config'
-        assert config.description == 'test description'
-        assert len(config.algorithms) == 1
+
+        assert config.name == "test_config"
+        assert config.description == "test description"
+        assert config.algorithm.name == "zscore"
 
     def test_pydantic_validation_rejects_invalid_input(self):
         """Test that Pydantic models reject invalid input."""
         from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig
-        
-        # Test empty name
-        with pytest.raises(Exception):  # Should raise validation error
+
+        with pytest.raises(Exception):
             KBConfig(
-                name='',  # Invalid: empty string
-                description='test desc',
+                name="",
+                description="test desc",
                 change_flag=0,
+                elasticsearch_sql_query="SELECT @timestamp FROM test",
+                query_mode={"type": "raw", "timestamp_field": "@timestamp"},
+                algorithm={"name": "zscore", "parameters": [{"dimension": "field"}]},
                 scheduling=SchedulingConfig(
                     training_config=TrainingConfig(
-                        training_query='SELECT * FROM test',
-                        **{"from": '2025-01-01T00:00:00Z'},
-                        to='2025-01-02T00:00:00Z',
-                        training_window=3600,
-                        is_active=True
+                        **{"from": "2025-01-01T00:00:00Z"},
+                        to="2025-01-02T00:00:00Z",
+                        is_active=True,
                     ),
                     detection_config=DetectionConfig(
-                        detection_query='SELECT * FROM test',
-                        **{"from": '2025-01-03T00:00:00Z'},
-                        frequency='* * * * *',
+                        **{"from": "2025-01-03T00:00:00Z"},
+                        frequency="* * * * *",
                         detection_window=3600,
-                        is_active=False
-                    )
+                        is_active=False,
+                    ),
                 ),
-                algorithms=[]
             )
 
     def test_modify_kb_config_uses_pydantic_validation(self):
@@ -237,29 +242,27 @@ class TestDynamicDescriptions:
         import unittest.mock
         from mcp_tools_pkg.modify_kb_config import modify_kb_config
         
-        # Mock existing config document
         mock_config = {
             "_id": "507f1f77bcf86cd799439011",
             "name": "existing_config",
             "description": "existing description",
             "change_flag": 0,
+            "elasticsearch_sql_query": "SELECT @timestamp, value FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+            "query_mode": {"type": "raw", "timestamp_field": "@timestamp"},
+            "algorithm": {"name": "zscore", "parameters": [{"dimension": "value"}]},
             "scheduling": {
                 "training_config": {
-                    "training_query": "SELECT * FROM existing",
                     "from": "2025-01-01T00:00:00Z",
                     "to": "2025-01-02T00:00:00Z",
-                    "training_window": 3600,
-                    "is_active": True
+                    "is_active": True,
                 },
                 "detection_config": {
-                    "detection_query": "SELECT * FROM existing",
                     "from": "2025-01-03T00:00:00Z",
                     "frequency": "* * * * *",
                     "detection_window": 3600,
-                    "is_active": False
-                }
+                    "is_active": False,
+                },
             },
-            "algorithms": []
         }
         
         with unittest.mock.patch('db.connect_mongodb') as mock_connect:
@@ -304,6 +307,8 @@ class TestDynamicDescriptions:
             _invoke_create_da_config(
                 monkeypatch,
                 training_from="invalid timestamp",
+                # Use aggregated mode to avoid frequency validation error
+                query_mode={"type": "aggregated", "timestamp_field": "@timestamp"},
             )
         
         assert "Invalid ISO 8601 timestamp" in str(exc_info.value)
@@ -319,32 +324,23 @@ class TestDynamicDescriptions:
             def __init__(self):
                 self.algorithm = "zscore"
                 self.dimensions = ["field"]
-        
-        algorithms = [OldZScoreConfig()]
-        
+
+        bad_algorithm = OldZScoreConfig()
+
         with pytest.raises(Exception) as exc_info:
-            _invoke_create_da_config(
-                monkeypatch,
-                training_query="SELECT field FROM test",
-                detection_query="SELECT field FROM test",
-                algorithms=algorithms,
-            )
+            _invoke_create_da_config(monkeypatch, algorithm=bad_algorithm)
         
-        assert "Unsupported algorithm format" in str(exc_info.value)
+        # The actual error is "Algorithm validation error" from Pydantic
+        assert "Algorithm validation error" in str(exc_info.value)
         
     def test_create_da_config_rejects_incorrect_algorithm_dict_format(self, monkeypatch):
         """Test that create_da_config rejects incorrect algorithm dictionary structure."""
         
         # Test with incorrect dictionary format
-        algorithms = [{"algorithm": "zscore", "dimensions": ["field"]}]
-        
+        algorithm = {"algorithm": "zscore", "dimensions": ["field"]}
+
         with pytest.raises(Exception) as exc_info:
-            _invoke_create_da_config(
-                monkeypatch,
-                training_query="SELECT field FROM test",
-                detection_query="SELECT field FROM test",
-                algorithms=algorithms,
-            )
+            _invoke_create_da_config(monkeypatch, algorithm=algorithm)
         
         assert "Algorithm validation error" in str(exc_info.value)
 
@@ -353,16 +349,10 @@ class TestDynamicDescriptions:
         from models import ZScoreConfig
         
         # Test with ZScoreConfig object (correct format)
-        algorithms = [ZScoreConfig(alg_name="zscore", alg_parameters=[{"dimension": "field"}])]
-        
-        # Should pass validation and only fail at MongoDB connection
+        algorithm = ZScoreConfig(parameters=[{"dimension": "field"}])
+
         with pytest.raises(Exception) as exc_info:
-            _invoke_create_da_config(
-                monkeypatch,
-                training_query="SELECT field FROM test",
-                detection_query="SELECT field FROM test",
-                algorithms=algorithms,
-            )
+            _invoke_create_da_config(monkeypatch, algorithm=algorithm)
         
         # Should fail at MongoDB/Elasticsearch, not validation
         error_str = str(exc_info.value)

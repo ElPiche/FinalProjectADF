@@ -27,30 +27,25 @@ def main():
             'name': 'test-kb-from-tests-folder',
             'description': 'Test KB config created from tests/test_kb_mongodb.py',
             'change_flag': 0,
+            'elasticsearch_sql_query': 'SELECT @timestamp, bytes FROM ".ds-kibana_sample_data_logs-2025.11.02-000001" WHERE @timestamp >= "$from" AND @timestamp < "$to"',
+            'query_mode': {'type': 'raw', 'timestamp_field': '@timestamp'},
+            'algorithm': {
+                'name': 'zscore',
+                'parameters': [{'dimension': 'bytes'}]
+            },
             'scheduling': {
                 'training_config': {
-                    'training_query': 'SELECT @timestamp, bytes FROM ".ds-kibana_sample_data_logs-2025.11.02-000001" WHERE @timestamp >= "2025-10-01" AND @timestamp < "2025-11-01"',
                     'from': '2025-10-01T00:00:00Z',
                     'to': '2025-10-31T23:59:59Z',
-                    'training_window': 3600,
                     'is_active': True
                 },
                 'detection_config': {
-                    'detection_query': 'SELECT @timestamp, bytes FROM ".ds-kibana_sample_data_logs-2025.11.02-000001" WHERE @timestamp >= NOW() - INTERVAL 1 HOUR',
                     'from': '2025-11-02T20:00:00Z',
                     'frequency': '0 */10 * * * *',
                     'detection_window': 3600,
                     'is_active': False
                 }
-            },
-            'algorithms': [
-                {
-                    'alg_name': 'zscore',
-                    'alg_parameters': [
-                        {'dimension': 'bytes'}
-                    ]
-                }
-            ]
+            }
         }
 
         insert_result = kb_collection.insert_one(kb_config)

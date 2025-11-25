@@ -24,13 +24,13 @@ def generate_algorithm_config_description() -> str:
         if not supported_algorithms:
             supported_algorithms = ["zscore"]
 
-        main_desc = f"List of algorithm configurations. Currently supports: {', '.join(supported_algorithms)}."
+        main_desc = f"Algorithm configuration payload. Currently supports: {', '.join(supported_algorithms)}."
 
         format_details = []
         for alg in supported_algorithms:
             format_details.append(
-                f"**{alg}** algorithm format:\n- alg_parameters: List of parameter objects. "
-                "Each parameter requires a 'dimension' key and may include optional 'alg_metadata'."
+                f"**{alg}** algorithm format:\n- parameters: List of parameter objects. "
+                "Each parameter requires a 'dimension' key, optional 'metadata', and an 'is_active' toggle."
             )
 
         return f"{main_desc}\n\n" + "\n\n".join(format_details)
@@ -185,7 +185,10 @@ def generate_kb_config_template_description() -> str:
         import os
 
         # Path to the template file - relative to this module
-        template_path = os.path.join(os.path.dirname(__file__), '..', '..', 'Templates', 'KBConfigTemplate.json')
+        base_templates = os.path.join(os.path.dirname(__file__), '..', '..', 'Templates')
+        template_path = os.path.join(base_templates, 'KBConfigTemplate.json')
+        if not os.path.exists(template_path):
+            template_path = os.path.join(base_templates, 'New-spec-KBConfigTemplate.json')
 
         with open(template_path, 'r', encoding='utf-8') as f:
             template = json.load(f)
@@ -262,58 +265,32 @@ def generate_kb_config_fields_description() -> str:
     """
     return """
 **Required Fields**:
-- name (string): Unique configuration name
-- description (string): Human-readable description of what this monitors
-- training_query (string): 
-    SQL query for training data.
-    This query should return historical data used to train the anomaly detection models.
-    Timestamp values in the query should be filtered using placeholders `$from` and `$to` to define the training period.
-    The query result must always include countable integer numeric columns for the algorithms to monitor which going to be the dimensions.
-- detection_query (string):
-    SQL query for detection
-    This query should return recent or real-time data used for anomaly detection.
-    Timestamp values in the query should be filtered using placeholders `$from` and `$to` and the extractor process will be the one to set these values based on the detection schedule.
-- training_from (string): 
-    Training start timestamp (ISO format),
-    Defines the beginning of the historical data period used for training the models.
-    Will be substituted for `$from` in the training_query during model training.
-- training_to (string): 
-    Training end timestamp (ISO format).
-    Defines the end of the historical data period used for training the models.
-    Will be substituted for `$to` in the training_query during model training.
-- training_is_active (boolean):
-    Flag to indicate if training is active.
-    If training is not active, the extractor process will skip the training phase.
-- detection_is_active (boolean):
-    Flag to indicate if detection is active.
-    If detection is not active, the extractor process will skip the detection phase.
-- training_window (integer):
-    Training window in seconds.
-    Defines the time window size for training data aggregation.
-    This value helps the algorithms to process data points within the specified window.
-- detection_window (integer):
-    Detection window in seconds.
-    Defines the time window size for detection data aggregation.
-    The extractor process will take this value to extract the last N seconds of data for anomaly detection.
-- detection_frequency (string): 
-    Detection frequency (CRON format)
-    Defines how often the anomaly detection process should run.
-    The extractor process will use this CRON expression to schedule detection runs.
-    Make sure to provide a valid CRON expression to ensure proper scheduling.
-- detection_start (string):
-    Detection start timestamp (ISO format).
-    Is a configurable value that defines the beginning of the time range for training data.
-    Extractor process will not start training if this value is greater than the current time.
-    This field depends on user input and should be set according to the desired training period.
-    If the value is not provided, the system will start training from the earliest available data.
-- algorithms (List[AlgorithmConfig]): Algorithm configurations
+- name (string): Unique configuration name shown in MCP tooling.
+- description (string): Human-readable summary of what the configuration monitors.
+- elasticsearch_sql_query (string): Unified SQL query used for both training and detection phases. Must include `$from`/`$to` placeholders.
+- query_mode (object): Describes how the SQL query returns data.
+  - type ("raw" | "aggregated"): Raw returns individual events; aggregated expects `GROUP BY` output.
+  - timestamp_field (string): Column alias in the SQL output that contains ISO 8601 timestamps.
+- scheduling.training_config:
+  - type ("static" | "rolling"): Training strategy.
+  - from (ISO 8601 string): Historical start time for training data.
+  - to (ISO 8601 string): Historical end time for training data.
+  - is_active (bool): Toggle to pause training jobs.
+- scheduling.detection_config:
+  - frequency (CRON string): Detection cadence. Must satisfy query-mode minimums (raw ≥ 60s, aggregated ≥ 10s).
+  - detection_window (int): Time window in seconds that each detection covers.
+  - is_active (bool): Toggle to pause detection jobs.
+- algorithm (AlgorithmConfig): Singular algorithm definition with at least one monitored dimension.
 
 **Optional Fields**:
-- change_flag (integer): Change flag for triggering change streams (default: 0)
+- change_flag (int): Increment to trigger change-stream processing (default 0).
+- scheduling.detection_config.from (ISO 8601 string): Optional detection start timestamp.
+- bucket_profile_id (string): References a document in `bucket_profiles` to enable time-context bucketing. Null disables the resolver.
+- algorithm.parameters[].metadata (list): Algorithm-specific key/value metadata pairs.
 
-**Scheduling Fields** (automatically derived from the above):
-- scheduling.training_config: Training configuration section
-- scheduling.detection_config: Detection configuration section
+**Derived Fields**:
+- scheduling.training_config and scheduling.detection_config are constructed automatically from the individual inputs above.
+- Dimensions listed inside algorithm.parameters must exactly match column aliases returned by the unified SQL query.
 """
 
 
@@ -377,58 +354,54 @@ def generate_kb_config_example() -> str:
     Generate an example JSON structure based on the KBConfig model.
     """
     try:
-        from models import KBConfig, TrainingConfig, DetectionConfig, SchedulingConfig, AlgorithmConfigItem, AlgorithmParameter
+        from models import (
+            AlgorithmConfig,
+            AlgorithmParameter,
+            DetectionConfig,
+            KBConfig,
+            QueryMode,
+            SchedulingConfig,
+            TrainingConfig,
+        )
+        import json
 
         example = KBConfig(
             name="Example Configuration",
             description="Example anomaly detection configuration",
             change_flag=0,
+            elasticsearch_sql_query="SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, AVG(latency) AS avg_latency, COUNT(*) AS es_event_count FROM logs WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
+            query_mode=QueryMode(type="aggregated", timestamp_field="es_timestamp"),
+            bucket_profile_id="business_hours_v1",
             scheduling=SchedulingConfig(
                 training_config=TrainingConfig(
-                    training_query="SELECT * FROM index WHERE timestamp >= '$from' AND timestamp < '$to'",
                     **{"from": "2025-01-01T00:00:00Z"},
-                    to="2025-01-07T23:59:59Z",
-                    training_window=3600,
-                    is_active=True
+                    to="2025-01-14T23:59:59Z",
+                    is_active=True,
                 ),
                 detection_config=DetectionConfig(
-                    detection_query="SELECT * FROM index WHERE timestamp >= '$from'",
-                    **{"from": "2025-01-08T00:00:00Z"},
-                    frequency="*/15 * * * *",
+                    **{"from": "2025-01-15T00:00:00Z"},
+                    frequency="*/5 * * * *",
                     detection_window=3600,
-                    is_active=True
-                )
+                    is_active=True,
+                ),
             ),
-            algorithms=[
-                AlgorithmConfigItem(
-                    alg_name="zscore",
-                    alg_parameters=[
-                        AlgorithmParameter(dimension="response_time"),
-                        AlgorithmParameter(dimension="error_count")
-                    ]
-                )
-            ]
+            algorithm=AlgorithmConfig(
+                name="zscore",
+                parameters=[
+                    AlgorithmParameter(dimension="avg_latency", is_active=True),
+                    AlgorithmParameter(
+                        dimension="es_event_count",
+                        is_active=False,
+                        metadata=[{"key": "threshold", "values": "99.5"}],
+                    ),
+                ],
+            ),
         )
 
-        # Convert to dict and handle aliases
-        example_dict = example.model_dump(by_alias=True)
-
-        # Pretty print as JSON
-        import json
-        return json.dumps(example_dict, indent=2)
+        return json.dumps(example.model_dump(by_alias=True), indent=2)
 
     except Exception as e:
-        return f"Error generating example: {e}"
-
-
-# Pre-computed descriptions for performance
-ALGORITHM_CONFIG_DESCRIPTION = generate_algorithm_config_description()
-AVAILABLE_ALGORITHMS_DESCRIPTION = generate_available_algorithms_description()
-SUPPORTED_ALGORITHMS = get_supported_algorithms_list()
-
-# Formatted strings for inline docstring usage
-SUPPORTED_ALGORITHMS_INLINE = ', '.join(SUPPORTED_ALGORITHMS)
-SUPPORTED_ALGORITHMS_QUOTED = ', '.join(f'"{alg}"' for alg in SUPPORTED_ALGORITHMS)
+        return f"Error generating KBConfig example: {e}"
 
 
 def generate_tool_list_for_describe_mcp() -> str:
@@ -445,7 +418,10 @@ def generate_tool_list_for_describe_mcp() -> str:
         "4) describe_mcp_server",
         "5) list_available_algorithms",
         "6) ping_elasticsearch",
-        "7) elasticsearch_sql"
+        "7) elasticsearch_sql",
+        "8) create_bucket_profile",
+        "9) list_bucket_profiles",
+        "10) delete_bucket_profile"
     ]
     return "\n".join(tools)
 
@@ -455,7 +431,7 @@ def get_tool_count() -> int:
     Get the current number of registered MCP tools.
     """
     # Hardcoded count to avoid circular import issues
-    return 7
+    return 10
 
 
 def generate_algorithm_config_example() -> str:
@@ -468,23 +444,49 @@ def generate_algorithm_config_example() -> str:
 
         # Create an example instance that mirrors the canonical schema
         example = AlgorithmConfig(
-            alg_name="zscore",
-            alg_parameters=[
-                AlgorithmParameter(dimension="status_code_200_counter"),
-                AlgorithmParameter(dimension="status_code_5xx_counter")
+            name="zscore",
+            parameters=[
+                AlgorithmParameter(dimension="status_code_200_counter", is_active=True),
+                AlgorithmParameter(
+                    dimension="status_code_5xx_counter",
+                    is_active=True,
+                    metadata=[{"key": "percentile", "values": "99.5"}],
+                ),
             ]
         )
 
         # Convert to dict and then to JSON string
-        example_dict = example.model_dump()
+        example_dict = example.model_dump(by_alias=True)
         return json.dumps(example_dict, indent=2)
 
     except Exception:
         # Fallback example that still uses the canonical schema
         return '''{
-  "alg_name": "zscore",
-  "alg_parameters": [
-    {"dimension": "status_code_200_counter"},
-    {"dimension": "status_code_5xx_counter"}
+  "name": "zscore",
+  "parameters": [
+    {"dimension": "status_code_200_counter", "is_active": true},
+    {"dimension": "status_code_5xx_counter", "is_active": true}
   ]
 }'''
+
+
+# ============================================================================
+# MODULE-LEVEL CONSTANTS
+# These are generated at module import time for use in docstrings and Field()
+# ============================================================================
+
+# Pre-generate descriptions to avoid runtime overhead
+ALGORITHM_CONFIG_DESCRIPTION = generate_algorithm_config_description()
+AVAILABLE_ALGORITHMS_DESCRIPTION = generate_available_algorithms_description()
+
+# Get supported algorithms list
+try:
+    from models import SUPPORTED_ALGORITHMS as _SUPPORTED_ALGORITHMS
+    SUPPORTED_ALGORITHMS = _SUPPORTED_ALGORITHMS
+except ImportError:
+    SUPPORTED_ALGORITHMS = {"zscore"}
+
+# Formatted versions for different contexts
+SUPPORTED_ALGORITHMS_LIST = get_supported_algorithms_list()
+SUPPORTED_ALGORITHMS_INLINE = ", ".join(SUPPORTED_ALGORITHMS_LIST)
+SUPPORTED_ALGORITHMS_QUOTED = ", ".join(f"'{alg}'" for alg in SUPPORTED_ALGORITHMS_LIST)

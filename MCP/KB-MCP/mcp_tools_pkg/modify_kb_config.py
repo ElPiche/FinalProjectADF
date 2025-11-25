@@ -2,7 +2,7 @@ import asyncio
 import time
 import uuid
 from datetime import datetime
-from typing import List
+from typing import Optional
 
 from bson import ObjectId
 from mcp.server.fastmcp import Context
@@ -13,15 +13,16 @@ import db
 from db import connect_mongodb
 from models import (
     AlgorithmConfig,
-    AlgorithmConfigItem,
     DetectionConfig,
     KBConfig,
+    QueryMode,
     SchedulingConfig,
     TrainingConfig,
 )
 from utils import log_message as _utils_log_message
 from validation import validate_algorithms, validate_cron_expression, validate_window_size
-from .algorithms import parse_algorithms_to_internal_format, validate_algorithm_dimensions
+from .algorithms import validate_algorithm_dimensions
+from .create_da_config import _enforce_detection_frequency_floor
 from .config import ENABLE_PROGRESS_REPORTING, MAX_TOOL_EXECUTION_TIME
 from .context_helpers import ContextReporter
 from .elasticsearch_sql import elasticsearch_sql
@@ -34,18 +35,18 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
 
 async def modify_kb_config(
     config_id: str,
-    description: str = None,
-    training_query: str = None,
-    detection_query: str = None,
-    training_from: str = None,
-    training_to: str = None,
-    training_is_active: bool = None,
-    detection_is_active: bool = None,
-    training_window: int = None,
-    detection_window: int = None,
-    detection_frequency: str = None,
-    detection_start: str = None,
-    algorithms: List[AlgorithmConfig] = None,
+    description: Optional[str] = None,
+    elasticsearch_sql_query: Optional[str] = None,
+    query_mode: Optional[QueryMode] = None,
+    training_from: Optional[str] = None,
+    training_to: Optional[str] = None,
+    training_is_active: Optional[bool] = None,
+    detection_is_active: Optional[bool] = None,
+    detection_frequency: Optional[str] = None,
+    detection_window: Optional[int] = None,
+    detection_start: Optional[str] = None,
+    algorithm: Optional[AlgorithmConfig] = None,
+    bucket_profile_id: Optional[str] = None,
     ctx: Context | None = None,
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
@@ -73,6 +74,9 @@ async def modify_kb_config(
         async with asyncio.timeout(MAX_TOOL_EXECUTION_TIME):
             db_instance = client[db.db_kb_name]
             collection = db_instance[db.db_kb_collection_name]
+            # Bucket profiles are stored in anomaly_detection database (via get_db())
+            anomaly_detection_db = client["anomaly_detection"]
+            bucket_profiles_collection = anomaly_detection_db.get_collection("bucket_profiles")
 
             step_start = time.time()
             await reporter.step(1, "Step 1/4: Loading configuration")
@@ -120,11 +124,12 @@ async def modify_kb_config(
             )
 
             updates_applied = False
-            algorithms_updated = False
-            training_query_updated = False
-            detection_query_updated = False
+            query_updated = False
+            algorithm_updated = False
+            query_mode_updated = False
+            time_range_updated = False
 
-            updated_name = existing_config.name
+            updated_description = existing_config.description
             if description is not None:
                 if not isinstance(description, str) or not description.strip():
                     raise ToolError("description must be a non-empty string")
@@ -132,73 +137,87 @@ async def modify_kb_config(
                 if cleaned_description != existing_config.description:
                     updated_description = cleaned_description
                     updates_applied = True
-                else:
-                    updated_description = existing_config.description
-            else:
-                updated_description = existing_config.description
-            updated_change_flag = existing_config.change_flag + 1
 
-            training_config_updates: dict[str, object] = {}
-            if training_query is not None:
-                if not isinstance(training_query, str) or not training_query.strip():
-                    raise ToolError("training_query must be a non-empty string")
-                cleaned_training_query = training_query.strip()
-                if cleaned_training_query != existing_config.scheduling.training_config.training_query:
-                    training_config_updates["training_query"] = cleaned_training_query
+            updated_query = existing_config.elasticsearch_sql_query
+            if elasticsearch_sql_query is not None:
+                if not isinstance(elasticsearch_sql_query, str) or not elasticsearch_sql_query.strip():
+                    raise ToolError("elasticsearch_sql_query must be a non-empty string")
+                cleaned_query = elasticsearch_sql_query.strip()
+                if cleaned_query != existing_config.elasticsearch_sql_query:
+                    updated_query = cleaned_query
                     updates_applied = True
-                    training_query_updated = True
+                    query_updated = True
 
-            if training_window is not None:
-                if not isinstance(training_window, int):
-                    raise ToolError("training_window must be an integer")
+            resulting_query_mode = existing_config.query_mode
+            if query_mode is not None:
                 try:
-                    validation_result = validate_window_size(training_window, "training")
-                except ValueError as exc:
-                    raise ToolError(f"Invalid window size: {exc}") from exc
-                training_config_updates["training_window"] = training_window
-                updates_applied = True
-                if validation_result.get("warning"):
-                    warning_text = f"⚠️  Warning: {validation_result['warning']}"
-                    warnings.append(warning_text)
-                    await reporter.warning(warning_text)
-                    log_message(warning_text, "warning", "modify_kb_config", "step", request_id=request_id)
+                    validated_query_mode = (
+                        query_mode if isinstance(query_mode, QueryMode) else QueryMode.model_validate(query_mode)
+                    )
+                except ValidationError as exc:
+                    raise ToolError(f"Invalid query_mode payload: {exc}") from exc
+                if validated_query_mode.model_dump() != existing_config.query_mode.model_dump():
+                    resulting_query_mode = validated_query_mode
+                    updates_applied = True
+                    query_mode_updated = True
 
+            algorithm_to_use = existing_config.algorithm
+            if algorithm is not None:
+                try:
+                    validated_algorithm = (
+                        algorithm if isinstance(algorithm, AlgorithmConfig) else AlgorithmConfig.model_validate(algorithm)
+                    )
+                except ValidationError as exc:
+                    raise ToolError(f"Algorithm validation error: {exc}") from exc
+                if validated_algorithm.model_dump(by_alias=True) != existing_config.algorithm.model_dump(by_alias=True):
+                    algorithm_to_use = validated_algorithm
+                    updates_applied = True
+                    algorithm_updated = True
+
+            updated_bucket_profile_id = existing_config.bucket_profile_id
+            if bucket_profile_id is not None:
+                if not isinstance(bucket_profile_id, str):
+                    raise ToolError("bucket_profile_id must be a string")
+                cleaned_bucket_profile_id = bucket_profile_id.strip()
+                if cleaned_bucket_profile_id == "":
+                    cleaned_bucket_profile_id = None
+                if cleaned_bucket_profile_id != existing_config.bucket_profile_id:
+                    updated_bucket_profile_id = cleaned_bucket_profile_id
+                    updates_applied = True
+
+            training_payload = existing_config.scheduling.training_config.model_dump(by_alias=True)
             if training_from is not None:
                 if not isinstance(training_from, str) or not training_from.strip():
                     raise ToolError("training_from must be a non-empty ISO timestamp string")
-                if training_from != existing_config.scheduling.training_config.from_:
-                    training_config_updates["from"] = training_from
+                cleaned_training_from = training_from.strip()
+                if cleaned_training_from != training_payload.get("from"):
+                    training_payload["from"] = cleaned_training_from
                     updates_applied = True
+                    time_range_updated = True
 
             if training_to is not None:
                 if not isinstance(training_to, str) or not training_to.strip():
                     raise ToolError("training_to must be a non-empty ISO timestamp string")
-                if training_to != existing_config.scheduling.training_config.to:
-                    training_config_updates["to"] = training_to
+                cleaned_training_to = training_to.strip()
+                if cleaned_training_to != training_payload.get("to"):
+                    training_payload["to"] = cleaned_training_to
                     updates_applied = True
+                    time_range_updated = True
 
             if training_is_active is not None:
                 if not isinstance(training_is_active, bool):
                     raise ToolError("training_is_active must be a boolean")
-                if training_is_active != existing_config.scheduling.training_config.is_active:
-                    training_config_updates["is_active"] = training_is_active
+                if training_is_active != training_payload.get("is_active"):
+                    training_payload["is_active"] = training_is_active
                     updates_applied = True
 
-            detection_config_updates: dict[str, object] = {}
-            if detection_query is not None:
-                if not isinstance(detection_query, str) or not detection_query.strip():
-                    raise ToolError("detection_query must be a non-empty string")
-                cleaned_detection_query = detection_query.strip()
-                if cleaned_detection_query != existing_config.scheduling.detection_config.detection_query:
-                    detection_config_updates["detection_query"] = cleaned_detection_query
-                    updates_applied = True
-                    detection_query_updated = True
-
+            detection_payload = existing_config.scheduling.detection_config.model_dump(by_alias=True)
             if detection_start is not None:
                 if not isinstance(detection_start, str) or not detection_start.strip():
                     raise ToolError("detection_start must be a non-empty ISO timestamp string")
-                if detection_start != existing_config.scheduling.detection_config.from_:
-                    detection_config_updates["from"] = detection_start
+                cleaned_detection_start = detection_start.strip()
+                if cleaned_detection_start != detection_payload.get("from"):
+                    detection_payload["from"] = cleaned_detection_start
                     updates_applied = True
 
             if detection_frequency is not None:
@@ -209,21 +228,22 @@ async def modify_kb_config(
                     validate_cron_expression(cleaned_detection_frequency)
                 except ValueError as exc:
                     raise ToolError(str(exc)) from exc
-                if cleaned_detection_frequency != existing_config.scheduling.detection_config.frequency:
-                    detection_config_updates["frequency"] = cleaned_detection_frequency
+                _enforce_detection_frequency_floor(resulting_query_mode.type, cleaned_detection_frequency)
+                if cleaned_detection_frequency != detection_payload.get("frequency"):
+                    detection_payload["frequency"] = cleaned_detection_frequency
                     updates_applied = True
 
             if detection_window is not None:
                 if not isinstance(detection_window, int):
                     raise ToolError("detection_window must be an integer")
                 try:
-                    validation_result = validate_window_size(detection_window, "detection")
+                    detection_window_result = validate_window_size(detection_window, "detection")
                 except ValueError as exc:
                     raise ToolError(f"Invalid window size: {exc}") from exc
-                detection_config_updates["detection_window"] = detection_window
+                detection_payload["detection_window"] = detection_window
                 updates_applied = True
-                if validation_result.get("warning"):
-                    warning_text = f"⚠️  Warning: {validation_result['warning']}"
+                if detection_window_result.get("warning"):
+                    warning_text = f"⚠️  Warning: {detection_window_result['warning']}"
                     warnings.append(warning_text)
                     await reporter.warning(warning_text)
                     log_message(warning_text, "warning", "modify_kb_config", "step", request_id=request_id)
@@ -231,63 +251,12 @@ async def modify_kb_config(
             if detection_is_active is not None:
                 if not isinstance(detection_is_active, bool):
                     raise ToolError("detection_is_active must be a boolean")
-                if detection_is_active != existing_config.scheduling.detection_config.is_active:
-                    detection_config_updates["is_active"] = detection_is_active
+                if detection_is_active != detection_payload.get("is_active"):
+                    detection_payload["is_active"] = detection_is_active
                     updates_applied = True
 
-            if training_config_updates:
-                try:
-                    updated_training_payload = existing_config.scheduling.training_config.model_dump(by_alias=True)
-                    updated_training_payload.update(training_config_updates)
-                    updated_training_config = TrainingConfig.model_validate(updated_training_payload)
-                except ValidationError as exc:
-                    raise ToolError(f"Invalid training configuration: {exc}")
-            else:
-                updated_training_config = existing_config.scheduling.training_config
-
-            if detection_config_updates:
-                try:
-                    updated_detection_payload = existing_config.scheduling.detection_config.model_dump(by_alias=True)
-                    updated_detection_payload.update(detection_config_updates)
-                    updated_detection_config = DetectionConfig.model_validate(updated_detection_payload)
-                except ValidationError as exc:
-                    raise ToolError(f"Invalid detection configuration: {exc}")
-            else:
-                updated_detection_config = existing_config.scheduling.detection_config
-
-            try:
-                updated_scheduling_config = SchedulingConfig(
-                    training_config=updated_training_config,
-                    detection_config=updated_detection_config,
-                )
-            except ValidationError as exc:
-                raise ToolError(f"Invalid scheduling configuration: {exc}")
-
-            if algorithms is not None:
-                try:
-                    validated_algorithm_items = []
-                    for alg in algorithms:
-                        if isinstance(alg, AlgorithmConfigItem):
-                            validated_algorithm_items.append(AlgorithmConfigItem.model_validate(alg.model_dump()))
-                        elif isinstance(alg, dict):
-                            validated_algorithm_items.append(AlgorithmConfigItem.model_validate(alg))
-                        else:
-                            raise ToolError(
-                                f"Unsupported algorithm format: {type(alg)}. Expected AlgorithmConfigItem or dict with 'alg_name' and 'alg_parameters'."
-                            )
-                except ValidationError as exc:
-                    raise ToolError(f"Algorithm validation error: {exc}")
-
-                existing_algorithms_dump = [alg.model_dump() for alg in existing_config.algorithms]
-                new_algorithms_dump = [alg.model_dump() for alg in validated_algorithm_items]
-                if new_algorithms_dump != existing_algorithms_dump:
-                    updated_algorithms = validated_algorithm_items
-                    updates_applied = True
-                    algorithms_updated = True
-                else:
-                    updated_algorithms = existing_config.algorithms
-            else:
-                updated_algorithms = existing_config.algorithms
+            if query_mode_updated and detection_payload.get("frequency"):
+                _enforce_detection_frequency_floor(resulting_query_mode.type, detection_payload["frequency"])
 
             if not updates_applied:
                 log_message(
@@ -301,24 +270,49 @@ async def modify_kb_config(
                 raise ToolError("No valid updates provided")
 
             try:
-                new_config = KBConfig(
-                    name=updated_name,
-                    description=updated_description,
-                    change_flag=updated_change_flag,
-                    scheduling=updated_scheduling_config,
-                    algorithms=updated_algorithms,
+                updated_training_config = TrainingConfig.model_validate(training_payload)
+                updated_detection_config = DetectionConfig.model_validate(detection_payload)
+                updated_scheduling_config = SchedulingConfig(
+                    training_config=updated_training_config,
+                    detection_config=updated_detection_config,
                 )
             except ValidationError as exc:
-                raise ToolError(f"Input validation failed: {exc}")
+                raise ToolError(f"Invalid scheduling configuration: {exc}") from exc
 
-            if "from" in training_config_updates or "to" in training_config_updates:
+            new_config = KBConfig(
+                name=existing_config.name,
+                description=updated_description,
+                change_flag=existing_config.change_flag + 1,
+                elasticsearch_sql_query=updated_query,
+                query_mode=resulting_query_mode,
+                bucket_profile_id=updated_bucket_profile_id,
+                algorithm=algorithm_to_use,
+                scheduling=updated_scheduling_config,
+            )
+
+            if time_range_updated:
                 try:
-                    training_from_dt = datetime.fromisoformat(new_config.scheduling.training_config.from_.replace("Z", "+00:00"))
-                    training_to_dt = datetime.fromisoformat(new_config.scheduling.training_config.to.replace("Z", "+00:00"))
+                    training_from_dt = datetime.fromisoformat(
+                        new_config.scheduling.training_config.from_.replace("Z", "+00:00")
+                    )
+                    training_to_dt = datetime.fromisoformat(
+                        new_config.scheduling.training_config.to.replace("Z", "+00:00")
+                    )
                 except ValueError as exc:
-                    raise ToolError(f"Invalid timestamp format: {exc}")
+                    raise ToolError(f"Invalid timestamp format: {exc}") from exc
                 if training_to_dt <= training_from_dt:
                     raise ToolError("training_to must be after training_from")
+
+            if new_config.bucket_profile_id:
+                bucket_profile = await asyncio.to_thread(
+                    bucket_profiles_collection.find_one,
+                    {"_id": new_config.bucket_profile_id},
+                    {"_id": 1},
+                )
+                if bucket_profile is None:
+                    raise ToolError(
+                        f"bucket_profile_id '{new_config.bucket_profile_id}' does not exist in bucket_profiles collection"
+                    )
 
             log_message(
                 f"✓ Step 2 completed in {time.time() - step_start:.2f}s",
@@ -330,9 +324,9 @@ async def modify_kb_config(
             )
 
             step_start = time.time()
-            await reporter.step(3, "Step 3/4: Validating algorithms and SQL queries")
+            await reporter.step(3, "Step 3/4: Validating algorithms and SQL query")
             log_message(
-                "Step 3/4: Validating algorithms and SQL queries",
+                "Step 3/4: Validating algorithms and SQL query",
                 "info",
                 "modify_kb_config",
                 "step",
@@ -340,32 +334,36 @@ async def modify_kb_config(
                 extra_data={"config_id": config_id},
             )
 
-            internal_algorithms = parse_algorithms_to_internal_format(new_config.algorithms)
-            algorithm_errors = validate_algorithms(internal_algorithms)
+            algorithm_payload = new_config.algorithm.model_dump(by_alias=True)
+            algorithm_errors = validate_algorithms(algorithm_payload)
             if algorithm_errors:
                 error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
                 raise ToolError(error_msg)
 
-            validate_training_query = training_query_updated or algorithms_updated
-            validate_detection_query = detection_query_updated or algorithms_updated
+            needs_unified_validation = query_updated or algorithm_updated or time_range_updated or query_mode_updated
 
-            async def _validate_query(query: str, label: str):
+            if needs_unified_validation:
                 materialized_query = materialize_query_time_range(
-                    query,
+                    new_config.elasticsearch_sql_query,
                     new_config.scheduling.training_config.from_,
                     new_config.scheduling.training_config.to,
-                    label,
+                    "elasticsearch_sql_query",
                 )
-                await asyncio.to_thread(QueryValidator.validate, materialized_query, label)
+                await asyncio.to_thread(
+                    QueryValidator.validate,
+                    materialized_query,
+                    "unified",
+                    query_mode=new_config.query_mode.type,
+                    timestamp_field=new_config.query_mode.timestamp_field,
+                )
                 preview = await elasticsearch_sql(f"{materialized_query} LIMIT 0", ctx=ctx)
                 available_fields = [col.get("name") for col in preview.get("columns", []) if col.get("name")]
-                validate_algorithm_dimensions(new_config.algorithms, available_fields, label)
-
-            if validate_training_query:
-                await _validate_query(new_config.scheduling.training_config.training_query, "training")
-
-            if validate_detection_query:
-                await _validate_query(new_config.scheduling.detection_config.detection_query, "detection")
+                if new_config.query_mode.timestamp_field not in available_fields:
+                    raise ToolError(
+                        f"timestamp_field '{new_config.query_mode.timestamp_field}' was not returned by the query. "
+                        f"Available fields: {available_fields}"
+                    )
+                validate_algorithm_dimensions(new_config.algorithm, available_fields, "unified")
 
             log_message(
                 f"✓ Step 3 completed in {time.time() - step_start:.2f}s",
@@ -376,7 +374,7 @@ async def modify_kb_config(
                 extra_data={"config_id": config_id},
             )
 
-            payload = new_config.model_dump(by_alias=True)
+            payload = new_config.model_dump(by_alias=True, exclude_none=True)
 
             step_start = time.time()
             await reporter.step(4, "Step 4/4: Persisting configuration")
