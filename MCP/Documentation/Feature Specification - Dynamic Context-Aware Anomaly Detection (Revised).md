@@ -49,6 +49,21 @@ Users configure `query_mode` to optimize for data volume.
 *   **AGGREGATED Mode:** For > 1M rows. Query uses `GROUP BY` to return pre-aggregated metrics. High performance.
 *   **Constraint:** Both modes must return a valid ISO8601 timestamp field.
 
+### 3.3 Dimension Activation
+Each algorithm parameter can be toggled via an `is_active` flag. This allows users to pause anomaly detection for specific metrics without recreating the entire configuration. Training data for inactive dimensions is retained, but detection is skipped.
+
+### 3.4 Database Schema & Indexes
+To ensure performance and data integrity, the following indexes are required:
+
+```javascript
+// trained_models (formerly series_result)
+db.trained_models.createIndex({"kb_id": 1, "bucket_key": 1}, {unique: true});
+
+// staging_buckets (temporary ETL buffer)
+db.staging_buckets.createIndex({"job_id": 1, "bucket_key": 1});
+db.staging_buckets.createIndex({"created_at": 1}, {expireAfterSeconds: 86400}); // TTL 24h
+```
+
 ---
 
 ## 4. Data Models
@@ -58,12 +73,13 @@ Users configure `query_mode` to optimize for data volume.
 {
   "_id": "ObjectId(...)",
   "name": "API Latency Monitor",
+  "description": "Monitors API latency with business hour contexts",
   "elasticsearch_sql_query": "SELECT @timestamp, avg_latency FROM logs ...",
   "query_mode": {
     "type": "aggregated", // "raw" | "aggregated"
     "timestamp_field": "@timestamp" // Required
   },
-  "bucket_profile_id": "profile_business_hours_v1",
+  "bucket_profile_id": "business_hours_v1", // Custom String ID (Optional)
   "algorithm": { // Singular
     "name": "zscore",
     "parameters": [
@@ -77,10 +93,22 @@ Users configure `query_mode` to optimize for data volume.
 }
 ```
 
+#### 4.1.1 Field Migration Guide
+*   **`algorithms` (List) → `algorithm` (Singular):** Simplified to support one algorithm per KB.
+*   **New Fields:** `elasticsearch_sql_query`, `query_mode`, `bucket_profile_id`.
+*   **`bucket_profile_id`:** References a custom string ID in `bucket_profiles`.
+
+#### 4.1.2 Query Mode Selection Strategy
+1.  **User-specified:** User explicitly selects "raw" or "aggregated".
+2.  **Auto-detected:** KB-MCP analyzes the query:
+    *   Contains `GROUP BY` → Suggests `aggregated`.
+    *   No `GROUP BY` → Suggests `raw`.
+3.  **Validation:** Java Validator enforces consistency (AGGREGATED requires `GROUP BY`).
+
 ### 4.2 Bucket Profile (`bucket_profiles`)
 ```json
 {
-  "_id": "profile_business_hours_v1",
+  "_id": "business_hours_v1", // Custom String ID
   "timezone": "America/New_York",
   "exceptions": [
     { "bucket_base_key": "holiday_xmas", "rule": { "month": 12, "day": 25 }, "granularity": "block" }
@@ -91,6 +119,12 @@ Users configure `query_mode` to optimize for data volume.
   "fallback": { "bucket_base_key": "off_hours", "granularity": "hourly" }
 }
 ```
+
+**Referential Integrity Rules:**
+*   `bucket_profile_id` is **OPTIONAL** (null = no context bucketing).
+*   If provided, it **MUST** exist in the `bucket_profiles` collection.
+*   Validated by KB-MCP before MongoDB insert.
+*   Profiles **cannot be deleted** if referenced by active KBs.
 
 ### 4.3 Trained Model (`trained_models`)
 ```json
@@ -103,6 +137,29 @@ Users configure `query_mode` to optimize for data volume.
 }
 ```
 
+### 4.4 Configuration Validation Flow
+1.  **User invokes KB-MCP tool** `create_da_config`.
+2.  **KB-MCP performs client-side validation:**
+    *   CRON syntax (croniter).
+    *   ISO8601 timestamps.
+    *   Pydantic schema compliance.
+    *   Bucket Profile existence check.
+3.  **KB-MCP calls Java Extractor** `/api/validate/query`:
+    *   Payload: `{"query": "...", "query_mode": "aggregated", "timestamp_field": "@timestamp"}`
+4.  **Java ValidatorController checks:**
+    *   SQL syntax validity.
+    *   `timestamp_field` in SELECT clause.
+    *   `GROUP BY` present if `query_mode=aggregated`.
+    *   Test query execution returns data.
+5.  **On success:** KB-MCP saves to MongoDB.
+6.  **On failure:** Return error to Claude Desktop with specific issue.
+
+### 4.5 Bucket Profile Management
+New MCP tools are required to manage bucket profiles:
+*   `create_bucket_profile(profile_id, timezone, exceptions, schedule, fallback)`: Creates a reusable profile.
+*   `list_bucket_profiles()`: Returns all profiles with usage metadata.
+*   `delete_bucket_profile(profile_id)`: Deletes a profile if not referenced by any KB.
+
 ---
 
 ## 5. Implementation Details (Pseudocode)
@@ -111,7 +168,13 @@ Users configure `query_mode` to optimize for data volume.
 **Libraries:** `zoneinfo` (Timezones), `datetime`.
 
 ```python
+from zoneinfo import ZoneInfo
+
 class BucketResolver:
+    def __init__(self, profile):
+        self.timezone = ZoneInfo(profile.timezone)
+        # ... init rules
+
     def resolve(self, utc_timestamp):
         local_dt = utc_timestamp.astimezone(self.timezone)
         
@@ -125,7 +188,6 @@ class BucketResolver:
                 return self.format_key(rule, local_dt.hour)
 
         # 3. Check Overnight Shifts (Yesterday's shift extending to today)
-        # Fix: Use '<' for end time check to avoid overlap
         yesterday = local_dt - timedelta(days=1)
         for rule in self.schedule:
             if rule.is_overnight and self.matches_rule(yesterday, rule):
@@ -134,6 +196,18 @@ class BucketResolver:
 
         # 4. Fallback
         return self.format_key(self.fallback, local_dt.hour)
+
+    def is_within_overnight_tail(self, local_dt, rule):
+        """Check if local_dt falls within overnight shift started yesterday."""
+        if not rule.is_overnight:
+            return False
+        
+        # Convert rule times to minutes since midnight
+        shift_end_minutes = rule.end_hour * 60 + rule.end_minute
+        current_minutes = local_dt.hour * 60 + local_dt.minute
+        
+        # Exclusive end check (< not <=) to prevent overlap
+        return current_minutes < shift_end_minutes
 ```
 
 ### 5.2 ETL Pipeline: Training (Python Dispatcher)
@@ -160,11 +234,17 @@ def run_training_etl(job_id, kb_config):
             )
         )
         if len(staging_ops) >= 1000:
-            db.staging_buckets.bulk_write(staging_ops, ordered=False)
+            try:
+                db.staging_buckets.bulk_write(staging_ops, ordered=False)
+            except BulkWriteError as bwe:
+                log.error(f"Bulk write partial failure: {bwe.details}")
             staging_ops = []
     
     if staging_ops:
-        db.staging_buckets.bulk_write(staging_ops, ordered=False)
+        try:
+            db.staging_buckets.bulk_write(staging_ops, ordered=False)
+        except BulkWriteError as bwe:
+            log.error(f"Bulk write partial failure: {bwe.details}")
 
     # 3. Train Models
     model_ops = []
@@ -201,29 +281,32 @@ void scheduleDetection() {
 ```
 
 **Python Dispatcher (Worker):**
-**Libraries:** `asyncio`, `elasticsearch-async`.
+**Libraries:** `asyncio`, `elasticsearch[async]`.
 
 ```python
+from elasticsearch import AsyncElasticsearch
+
 async def detect_batch(kbs):
     # 1. Resolve Contexts
     now = datetime.now(UTC)
     contexts = {kb.id: resolver.resolve(now) for kb in kbs}
     
-    # 2. Build Multi-Search Request (_msearch)
-    msearch_body = []
+    # 2. Build Multi-Search Request (List of Dicts for ES 8.x)
+    searches = []
     for kb in kbs:
         query = build_query(kb, window=kb.detection_window)
-        msearch_body.append(query)
+        searches.append({"index": "logs"}) # Header
+        searches.append(query)             # Body
         
     # 3. Execute Async Search
-    responses = await es_client.msearch(body=msearch_body)
+    responses = await es_client.msearch(searches=searches)
     
     # 4. Detect Anomalies
-    for kb, response in zip(kbs, responses):
+    for kb, response in zip(kbs, responses['responses']):
         bucket_key = contexts[kb.id]
         baseline = get_cached_model(kb.id, bucket_key) # LRU Cache
         
-        anomalies = detect(response.hits, baseline)
+        anomalies = detect(response['hits'], baseline)
         if anomalies:
             save_anomalies(anomalies)
 ```
@@ -237,9 +320,13 @@ The feature is considered **INCOMPLETE** until the `BucketResolver` and Integrat
 
 ### 6.1 Docker-First Testing Mandate
 1.  **No Host Execution:** All tests must be executed inside the Docker containers (`kb-mcp`, `dispatcher`, `extractor`).
-2.  **Container Rebuilds:** Any change to Python modules (`kb-mcp`, `MotorDA`) or Java code (`extractor`) requires a container rebuild (`docker-compose build`) before running tests.
-3.  **Environment Variables:** Tests must respect the container's environment variables (e.g., `MONGO_URI`, `ELASTICSEARCH_URL`).
-4.  **Timezone Consistency:** Tests must explicitly set the timezone (e.g., `os.environ['TZ'] = 'America/New_York'`) or use timezone-aware objects to avoid UTC drift issues inside containers.
+2.  **Test Categories:**
+    *   **Unit Tests:** Run on host or container with mocked DBs.
+    *   **Integration Tests:** Run inside `kb-mcp` container with real MongoDB.
+    *   **End-to-End Tests:** Manual execution via Claude Desktop or automated via `docker-compose`.
+3.  **Container Rebuilds:** Any change to Python modules (`kb-mcp`, `MotorDA`) or Java code (`extractor`) requires a container rebuild (`docker-compose build`) before running tests.
+4.  **Environment Variables:** Tests must respect the container's environment variables (e.g., `MONGO_URI`, `ELASTICSEARCH_URL`).
+5.  **Timezone Consistency:** Tests must explicitly set the timezone (e.g., `os.environ['TZ'] = 'America/New_York'`) or use timezone-aware objects to avoid UTC drift issues inside containers.
 
 ### 6.2 Category A: Granularity & Segmentation Variants
 *Verifies the system can handle the different "Shapes" of buckets requested by users.*
@@ -379,8 +466,8 @@ The feature is considered **INCOMPLETE** until the `BucketResolver` and Integrat
 
 #### Test F.1: Unified Query Mode Validation
 *   **Scenario:** User configures `query_mode: "aggregated"` but forgets `GROUP BY`.
-*   **Action:** Validate KB Config.
-*   **Expected Output:** Validation Error: "Aggregated queries must include GROUP BY".
+*   **Action:** KB-MCP calls Java Validator (`/api/validate/query`).
+*   **Expected Output:** Validation Error from Java: "Query mode 'aggregated' requires GROUP BY clause".
 *   **Scenario:** User configures `query_mode` but `timestamp_field` is missing from SELECT.
 *   **Expected Output:** Validation Error: "Query must SELECT timestamp_field".
 
@@ -396,6 +483,23 @@ The feature is considered **INCOMPLETE** until the `BucketResolver` and Integrat
 *   **Expected Output:** No documents remaining for that `job_id`.
 *   **Fail Condition:** Orphaned documents left in MongoDB.
 
+### 6.8 Category G: Scalability & Performance Validation
+
+#### Test G.1: Large Dataset Training (RAW Mode Boundary)
+*   **Scenario:** Training with exactly 1,000,000 rows.
+*   **Configuration:** `query_mode: "raw"`, `time_range: 30 days`.
+*   **Expected:** Training completes within 5 minutes OR system recommends switching to AGGREGATED mode.
+*   **Metrics:** Memory usage, `staging_buckets` write throughput.
+
+#### Test G.2: Concurrent Detection Load
+*   **Scenario:** 100 KBs with `detection_frequency: "*/1 * * * *"` (every minute).
+*   **Expected:** `_msearch` batches complete < 2 seconds. LRU cache hit rate > 90% after warmup.
+
+#### Test G.3: Staging Bucket Orphan Cleanup
+*   **Scenario:** Training job crashes mid-ETL (kill Python process).
+*   **Configuration:** TTL index on `staging_buckets` with 24h expiration.
+*   **Expected:** Orphaned documents auto-deleted within 24 hours.
+
 ---
 
 ## 7. Scalability & Performance Constraints
@@ -408,7 +512,15 @@ To prevent Denial-of-Service against the Elasticsearch cluster, the system must 
 
 ### 7.2 Deterministic Offsets (Thundering Herd Mitigation)
 The Java Scheduler must not trigger all KBs simultaneously.
-*   **Logic:** Calculate a deterministic offset for each KB: `offset = hash(kb_id) % interval_seconds`.
+*   **Logic:** Calculate a deterministic offset using MD5 hash for uniform distribution.
+*   **Code:**
+    ```python
+    import hashlib
+    def calculate_offset(kb_id: str, interval_seconds: int) -> int:
+        hash_bytes = hashlib.md5(str(kb_id).encode()).digest()
+        hash_int = int.from_bytes(hash_bytes[:4], 'big')
+        return hash_int % interval_seconds
+    ```
 *   **Execution:** A KB scheduled for `*/5 * * * *` (every 300s) with `offset=12` runs at `T+12`, `T+312`, etc.
 
 ### 7.3 Efficient Batching (`_msearch`)
@@ -416,8 +528,14 @@ The Java Scheduler must not trigger all KBs simultaneously.
 *   **Prohibited:** Do NOT use `UNION ALL` or sequential HTTP requests for batch detection.
 
 ### 7.4 AsyncIO & Caching
-*   **Concurrency:** The Python Dispatcher must use `asyncio` for I/O operations. Multiprocessing is prohibited within the API context.
-*   **Model Caching:** `trained_models` must be cached in memory (LRU Cache) for 5-10 minutes to avoid MongoDB lookups on every detection tick.
+*   **Concurrency:** The Python Dispatcher must use `asyncio` for I/O operations.
+*   **Dependencies:** `elasticsearch[async]==8.15.0`, `aiohttp`.
+*   **Model Caching:** `trained_models` must be cached in memory (LRU Cache) with a size limit.
+    ```python
+    from functools import lru_cache
+    @lru_cache(maxsize=10000) # ~10MB budget
+    def get_cached_model(kb_id, bucket_key): ...
+    ```
 
 ---
 
@@ -426,5 +544,24 @@ The Java Scheduler must not trigger all KBs simultaneously.
 1.  **Phase 1: Logic Core (Python):** Implement `BucketResolver`, Pydantic Models, and Test Suite.
 2.  **Phase 2: Java/Python Bridge:** Update Java `KbMongo` entity, Extractor validation, and `series` normalization.
 3.  **Phase 3: Training ETL:** Implement `staging_buckets` and Dual-Mode Training in Python.
-4.  **Phase 4: Detection Switch:** Implement Java `DetectionSchedulerService` and Python `detect_batch` endpoint.
+4.  **Phase 4: Detection Micro-Batch Implementation:**
+    *   **Change Type:** Architectural Enhancement (not rename).
+    *   **Implementation:** Create `DetectionBatchScheduler.java` (fixed delay 1s) to poll KBs and send batches to Python. Existing `SchedulerService` remains for Training.
 5.  **Phase 5: Validation:** Run Fire Test with new architecture.
+
+---
+
+## 9. Operational Monitoring & Error Recovery
+
+### 9.1 Monitoring Metrics
+Expose the following metrics via `/metrics`:
+*   `training_jobs_active` (gauge)
+*   `detection_batch_latency_seconds` (histogram)
+*   `staging_buckets_size_mb` (gauge)
+*   `trained_models_cache_hit_rate` (gauge)
+*   `validation_failures_total` (counter by error type)
+
+### 9.2 Error Recovery Strategies
+*   **Dead Letter Queue:** Failed detection batches write to `detection_failures` collection (auto-retry 3x).
+*   **Circuit Breaker:** If 3 consecutive `_msearch` timeouts occur, pause detection for 1 minute (exponential backoff).
+*   **Orphan Cleanup:** TTL indexes ensure temporary data in `staging_buckets` is removed after 24h.
