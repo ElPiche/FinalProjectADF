@@ -55,14 +55,32 @@ public class BatchModeService {
         if(kbTrainingConfig != null && kbTrainingConfig.getIsActive()){
 
             List<String> observedValues = config.getObservedValues();
+            
+            // Get timestamp field from query_mode, default to "timestamp" for backwards compatibility
+            String timestampField = "timestamp";
+            if (config.getQueryMode() != null && config.getQueryMode().getTimestampField() != null) {
+                timestampField = config.getQueryMode().getTimestampField();
+            }
 
             var pipeline = pipelineFactory.createPipeline(new PipeMetadata(
                     config.getId(),
                     observedValues,
-                    Mode.TRAINING
+                    Mode.TRAINING,
+                    timestampField
             ));
 
-            String query = kbTrainingConfig.getQueryElastic()
+            // Use unified elasticsearch_sql_query from root level, 
+            // falling back to legacy training_query if available
+            String baseQuery = config.getElasticsearchSqlQuery();
+            if (baseQuery == null || baseQuery.isBlank()) {
+                baseQuery = kbTrainingConfig.getQueryElastic();
+            }
+            
+            if (baseQuery == null || baseQuery.isBlank()) {
+                throw new IllegalStateException("No query found in config - need elasticsearch_sql_query or training_query");
+            }
+            
+            String query = baseQuery
                     .replace("$from", kbTrainingConfig.getFrom())
                     .replace("$to", kbTrainingConfig.getTo());
 

@@ -9,16 +9,35 @@ import java.util.*;
 @Service
 public class FilterService {
 
+    /**
+     * Safely converts any Number type (Integer, Long, Float, Double) to double.
+     * Handles null values by returning 0.0.
+     */
+    private double toDouble(Object value) {
+        if (value == null) {
+            return 0.0;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).doubleValue();
+        }
+        // Fallback: try parsing as string
+        try {
+            return Double.parseDouble(value.toString());
+        } catch (NumberFormatException e) {
+            return 0.0;
+        }
+    }
 
     public List<SeriesElement> applyFilter(List<Map<String, Object>> data, PipeMetadata metadata) {
 
         List<SeriesElement> seriesElements = new ArrayList<>();
+        String timestampField = metadata.getTimestampField();
 
         for(Map<String, Object> row : data){
             for(String observedValue : metadata.getObservedValues()){
                 if(row.containsKey(observedValue)){
-                    var val = row.get(observedValue) != null ? (double) row.get(observedValue) : 0;
-                    Date ts = (Date) row.getOrDefault("es_timestamp", row.get("timestamp"));
+                    double val = toDouble(row.get(observedValue));
+                    Date ts = (Date) row.get(timestampField);
                     seriesElements.add(new SeriesElement(null,
                             val,
                             ts,

@@ -17,9 +17,17 @@ import java.util.List;
 public class AlgorithmParameter {
 
     private String dimension;
+    
+    // New unified schema adds is_active toggle for each dimension
+    @Field("is_active")
+    private boolean isActive = true;
 
-    @Field("alg_metadata")
+    // New unified schema uses "metadata" instead of "alg_metadata"
     @Nullable
-    private List<KeyValuePair> algMetadata;
+    private List<KeyValuePair> metadata;
+    
+    public boolean isActive() {
+        return isActive;
+    }
 
 }

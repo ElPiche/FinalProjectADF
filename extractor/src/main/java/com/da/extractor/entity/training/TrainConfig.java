@@ -51,20 +51,28 @@ public class TrainConfig {
         
         var trainingConfig = from.getScheduling().getTrainingConfig();
 
-        from.getAlgorithms().forEach((algorithmConfig) -> {
+        // New unified schema uses singular "algorithm" instead of "algorithms" array
+        var algorithmConfig = from.getAlgorithm();
+        if (algorithmConfig != null) {
             var algorithm = new AlgorithmConfig();
-            algorithm.setName(algorithmConfig.getAlgName());
+            algorithm.setName(algorithmConfig.getName());
+
+            // Handle null training_window (legacy field, not used in new unified schema)
+            Integer trainWindow = trainingConfig.getWindow();
+            if (trainWindow == null) {
+                trainWindow = 0;  // Default value for new schema configs
+            }
 
             var algorithmParameters = AlgorithmParameters.builder()
-                    .trainWindow(trainingConfig.getWindow())
+                    .trainWindow(trainWindow)
                     .from(Date.from(Instant.parse(trainingConfig.getFrom())))
                     .to(Date.from(Instant.parse(trainingConfig.getTo())))
                     .build();
 
-            algorithmParameters.setObservedValuesFromDimensionMetadataMaps(algorithmConfig.getAlgParameters());
+            algorithmParameters.setObservedValuesFromDimensionMetadataMaps(algorithmConfig.getParameters());
             algorithm.setParameters(algorithmParameters);
 
             this.algorithms.add(algorithm);
-        });
+        }
     }
 }

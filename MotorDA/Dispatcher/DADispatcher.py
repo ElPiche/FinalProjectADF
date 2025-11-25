@@ -2,12 +2,12 @@ import multiprocessing
 import threading
 import time
 import traceback
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 
 import requests
 from datetime import datetime, timezone
-from bson import json_util
+from bson import json_util, ObjectId
 from pymongo import MongoClient
 import pandas as pd
 from typing import Dict, Any, List, Optional
@@ -27,6 +27,9 @@ from ZScore.standalone_da_algorithm_z_score import (
     get_closest_bucket
 )
 
+# Import Training Orchestrator for bucket-aware training
+from Dispatcher.training_orchestrator import TrainingOrchestrator
+
 # Dispatcher: Tiene como objetivo recibir el documento de configuración desde MongoDB y despachar la ejecución del algoritmo correspondiente.
 # Tiene que en base al documento de configuración, identificar qué algoritmo se debe ejecutar y llamar a la función correspondiente,
 # pasándole los parámetros necesarios. Y guardar los resultados en ElasticSearch.
@@ -43,7 +46,7 @@ SERIES_RESULT_COLLECTION_NAME = "series_result"
 MONGO_TIMEOUT_MS = 2000
 
 # beaware it has a trailing slash
-ANOMALIES_INSIGHT_URL = "http://anomalies-insights:8081/api/"
+ANOMALIES_INSIGHT_URL = "http://anomalies-insights:8081/api/insights/"
 
 # conexión a elasticSearch
 ES_HOST = "http://elasticsearch-anomalies:9200"
@@ -89,24 +92,19 @@ class Algorithm:
 
             case "zscore":
 
-                print("I am executing Z Score")
-                observed_values = fetch_series_data_with_aggregation(
-                    config, self)
+                print("\033[92m[DISPATCHER] Executing Z-Score with bucket-aware training\033[0m")
+                
+                # Fetch series data from MongoDB
+                observed_values = fetch_series_data_with_aggregation(config, self)
 
-                print(observed_values)
-                results = run_zscore_batch_training(config, observed_values, self.parameters.train_window)
-                # ----------------------------ENDING OF TRAINING ZSCORE----------------------------------------------------------------------------
+                if not observed_values:
+                    print("\033[93m[DISPATCHER] No observed values to train on\033[0m")
+                    return
 
-                # --------------------------- START OF DETECTION ZSCORE----------------------------------------------------------------------------
-                # anomalies_dict: Dict[str, List] = {}
-                # for key, value in observed_values.items():
-
-                #    anomalies = detectar_anomalias_df(
-                #        value, results, self.parameters.train_window)
-                #    anomalies_dict[key] = anomalies
-
-                # --------------------------- ENDING OF DETECTION ZSCORE----------------------------------------------------------------------------
-                # send_anomalies_elastic(anomalies_dict)
+                # Run bucket-aware training using TrainingOrchestrator
+                results = run_zscore_bucketed_training(config, observed_values)
+                
+                print(f"\033[92m[DISPATCHER] Training complete for {len(results)} dimensions\033[0m")
 
             case "arma":
                 print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
@@ -126,6 +124,7 @@ class Config:
     created_at: datetime
     mode: int
     algorithms: List[Algorithm]
+    bucket_profile_id: Optional[str] = None  # Added for bucket-aware training
 
     def execute_algos(self):
 
@@ -170,13 +169,34 @@ def parse_iso(date_str: str) -> datetime:
     return dt
 
 
-def parse_config(data: dict) -> Config:
+def parse_config(data: dict, mongo_client: MongoClient = None) -> Config:
+    """Parse training_config document into Config object.
+    
+    Also fetches the KB config to get bucket_profile_id for bucket-aware training.
+    """
+    kb_id = data["kb_id"]
+    bucket_profile_id = None
+    
+    # Fetch the KB config from knowledge_base.kb_configs to get bucket_profile_id
+    if mongo_client:
+        try:
+            from bson import ObjectId
+            kb_config = mongo_client["knowledge_base"]["kb_configs"].find_one({"_id": ObjectId(kb_id)})
+            if kb_config:
+                bucket_profile_id = kb_config.get("bucket_profile_id")
+                print(f"\033[92m[DISPATCHER] KB config found, bucket_profile_id: {bucket_profile_id}\033[0m")
+            else:
+                print(f"\033[93m[DISPATCHER] KB config not found for kb_id: {kb_id}\033[0m")
+        except Exception as e:
+            print(f"\033[91m[DISPATCHER] Error fetching KB config: {e}\033[0m")
+    
     return Config(
         _id=data["_id"],
-        kb_id=data["kb_id"],
+        kb_id=kb_id,
         kb_description=data["kb_description"],
         created_at=data["created_at"],
         mode=data["mode"],
+        bucket_profile_id=bucket_profile_id,
 
         algorithms=[
             Algorithm(
@@ -303,6 +323,78 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
 
     da_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].update_one(
         query_filter, update_operation)
+
+
+def run_zscore_bucketed_training(config: Config, observed_values: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
+    """Run ZScore training with bucket-aware data grouping.
+    
+    This is the new training flow per the spec:
+    1. Create TrainingOrchestrator with bucket profile
+    2. For each dimension, group data by bucket key
+    3. Train ZScore baseline per bucket
+    4. Store results in trained_models (series_result) collection
+    
+    Args:
+        config: The Config object with kb_id, bucket_profile_id, etc.
+        observed_values: Dict mapping dimension -> DataFrame with value/timestamp columns
+    
+    Returns:
+        Dict of dimension -> training result
+    """
+    da_client: MongoClient = CreateConnectionToDA()
+    
+    print(f"\033[92m[DISPATCHER] Running bucketed training for kb_id: {config.kb_id}\033[0m")
+    print(f"\033[92m[DISPATCHER] Bucket profile: {config.bucket_profile_id}\033[0m")
+    
+    # Create TrainingOrchestrator with bucket profile
+    orchestrator = TrainingOrchestrator.create(
+        bucket_profile_id=config.bucket_profile_id,
+        mongo_client=da_client,
+        db_name=MONGO_DB_NAME
+    )
+    
+    all_results: Dict[str, Any] = {}
+    
+    for dimension, df in observed_values.items():
+        if df.empty:
+            print(f"\033[93m[DISPATCHER] Skipping empty dimension: {dimension}\033[0m")
+            continue
+        
+        print(f"\033[92m[DISPATCHER] Training dimension '{dimension}' with {len(df)} data points\033[0m")
+        
+        # Run bucket-aware training via orchestrator
+        result = orchestrator.train_dimension(
+            kb_id=config.kb_id,
+            dimension=dimension,
+            df_train=df,
+            value_col="value",
+            timestamp_col="timestamp",
+            percentile=99.5,
+            min_points=3
+        )
+        
+        all_results[dimension] = result
+        
+        # Save to MongoDB (trained_models / series_result)
+        query = {"kb_id": config.kb_id, "dimension": dimension}
+        existing = da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].find_one(query)
+        
+        if existing:
+            print(f"\033[93m[DISPATCHER] Updating existing training result for dimension: {dimension}\033[0m")
+            da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].replace_one(query, result)
+        else:
+            print(f"\033[92m[DISPATCHER] Inserting new training result for dimension: {dimension}\033[0m")
+            da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(result)
+    
+    # Mark training as complete
+    da_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].update_one(
+        {"kb_id": config.kb_id},
+        {"$set": {"is_trained": True}}
+    )
+    
+    print(f"\033[92m[DISPATCHER] Training complete for {len(all_results)} dimensions\033[0m")
+    return all_results
+
 
 def delete_series( config: Config):
 
@@ -555,23 +647,53 @@ def watch_kb_changes(kb_client):
 
     while True:
         try:
-            with kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].watch() as stream:
+            # Use fullDocument to get the inserted document directly from the change event
+            with kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].watch(
+                full_document='updateLookup'
+            ) as stream:
 
                 for change in stream:
                     print(f"something happened on: {TRAINING_COLLECTION_NAME}")
 
-                    if change.get("operationType") == "insert" or change.get("operationType") == "update":
+                    op_type = change.get("operationType")
+                    
+                    # Only process insert operations - skip updates to avoid race condition
+                    # Updates occur when we set is_trained=true after training completes
+                    if op_type == "insert":
                         print(
                             f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
 
-                        # de aquí extraemos los datos de las operativas que vayamos a llamar en formato de JSON
-                        latest_series_config = ExtractLatestConfigurationKB(kb_client)
+                        # Get the document directly from the change event instead of querying
+                        # This ensures we process the exact document that triggered the event
+                        full_doc = change.get("fullDocument")
+                        if not full_doc:
+                            print(f"\033[93m[DISPATCHER] No fullDocument in change event, falling back to query\033[0m")
+                            full_doc = ExtractLatestConfigurationKB(kb_client)
+                        
+                        # Check if already trained to avoid duplicate processing
+                        # Handle both boolean True and string "true"
+                        is_trained = full_doc.get("is_trained")
+                        print(f"\033[90m[DISPATCHER] is_trained value: {is_trained} (type: {type(is_trained).__name__})\033[0m")
+                        if is_trained in (True, "true", "True"):
+                            print(f"\033[93m[DISPATCHER] Skipping already-trained config: {full_doc.get('kb_id')}\033[0m")
+                            continue
+
+                        print(f"\033[92m[DISPATCHER] Processing training_config for kb_id: {full_doc.get('kb_id')}\033[0m")
+                        print(full_doc)
+                        
+                        # Save config to file for debugging
+                        with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
+                            f.write(json_util.dumps(full_doc, indent=2))
 
                         # we turn the JSON with the config data into a class
-                        config: Config = parse_config(latest_series_config)
+                        # Pass mongo_client so parse_config can fetch KB config for bucket_profile_id
+                        config: Config = parse_config(full_doc, kb_client)
 
                         # now we go thru each algorithm call we extracted, and try to execute training on them
                         config.execute_algos()
+                    
+                    elif op_type == "update":
+                        print(f"\033[90m[DISPATCHER] Ignoring update event (likely is_trained flag change)\033[0m")
 
         except PyMongoError as e:
             print(f"[watch_kb_changes] Mongo error: {e}, reconnecting in 5s...")
@@ -586,7 +708,7 @@ def watch_kb_changes(kb_client):
 
 # TODO: test how robust it is this with a lot of different datapoints sent at the same time
 # TODO: check how change stream works with threads
-def watch_detection_changes(kb_client, workers: ProcessPoolExecutor, data_to_detect: Queue):
+def watch_detection_changes(kb_client, workers: ThreadPoolExecutor, data_to_detect: Queue):
 
     while True:
         try:
@@ -618,86 +740,234 @@ def watch_detection_changes(kb_client, workers: ProcessPoolExecutor, data_to_det
 
 
 def detect_z_score(serie_to_detect):
+    try:
+        print(f"I am printing serie_to_detect: {serie_to_detect}", flush=True)
+        kb_client = CreateConnectionToDA()
 
-    print(f"I am printing serie_to_detect: {serie_to_detect}")
-    kb_client = CreateConnectionToDA()
+        kb_id = serie_to_detect["metadata"]["kbId"]
+        dimension = serie_to_detect["metadata"]["dim"]
+        print(f"[DETECTION] Got kb_id={kb_id}, dimension={dimension}", flush=True)
 
-    pipeline = [{'$match':
-                     {'kb_id': serie_to_detect["metadata"]["kbId"],
-                      'dimension': serie_to_detect["metadata"]["dim"]}
-                 }]
+        # Look up KB name from train_config collection
+        print(f"[DETECTION] Looking up KB config...", flush=True)
+        kb_config = kb_client[MONGO_DB_NAME]["train_config"].find_one({"_id": ObjectId(kb_id)})
+        kb_name = kb_config.get("name", "Unknown") if kb_config else "Unknown"
+        print(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}\033[0m", flush=True)
 
-    result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
-        pipeline)
+        pipeline = [{'$match':
+                         {'kb_id': kb_id,
+                          'dimension': dimension}
+                     }]
 
-    training_result = next(result, None)
-    # print(f"I am printing the result of training:  {training_result}")
+        print(f"[DETECTION] Looking up training result...", flush=True)
+        result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
+            pipeline)
 
-    # 2) flatten nested fields (metadata -> metadata.kbId etc.)
-    df = pd.json_normalize(serie_to_detect)
+        training_result = next(result, None)
+        print(f"[DETECTION] Training result: {training_result is not None}", flush=True)
+    
+        if training_result is None:
+            print(f"\033[93m[DETECTION] No training result found for kb_id={serie_to_detect['metadata']['kbId']}, dim={serie_to_detect['metadata']['dim']}\033[0m")
+            return
+    
+        # Check if this is the NEW bucket-based training result format
+        if "buckets" in training_result:
+            # NEW FORMAT: Use bucket-aware detection
+            print(f"\033[92m[DETECTION] Using bucket-aware detection for {serie_to_detect['metadata']['dim']}\033[0m")
+            
+            value = serie_to_detect.get("value", 0)
+            timestamp = serie_to_detect.get("timestamp")
+            
+            # Try to resolve the bucket key using BucketResolver
+            bucket_key = "global_default"
+            bucket_profile_id = training_result.get("bucket_profile_id")
+            
+            if bucket_profile_id and timestamp:
+                try:
+                    from Dispatcher.bucket_resolver import BucketResolver
+                    # Fetch bucket profile from MongoDB
+                    profile_doc = kb_client[MONGO_DB_NAME]["bucket_profiles"].find_one({"_id": bucket_profile_id})
+                    if profile_doc:
+                        resolver = BucketResolver.from_dict(profile_doc)
+                        # Ensure timestamp is datetime
+                        if isinstance(timestamp, datetime):
+                            bucket_key = resolver.resolve(timestamp)
+                        print(f"\033[94m[DETECTION] Resolved bucket key: {bucket_key}\033[0m")
+                except Exception as e:
+                    print(f"\033[93m[DETECTION] Could not resolve bucket, using fallback: {e}\033[0m")
+            
+            # Get the baseline for the resolved bucket, or fall back to global
+            baseline = None
+            baseline_source = "unknown"
+            
+            if bucket_key in training_result.get("buckets", {}):
+                baseline = training_result["buckets"][bucket_key]
+                baseline_source = f"bucket:{bucket_key}"
+            elif training_result.get("global_fallback"):
+                baseline = training_result["global_fallback"]
+                baseline_source = "global_fallback"
+                bucket_key = "global_fallback"
+            elif training_result.get("buckets"):
+                # Use first available bucket as last resort
+                first_key = next(iter(training_result["buckets"]))
+                baseline = training_result["buckets"][first_key]
+                baseline_source = f"first_bucket:{first_key}"
+                bucket_key = first_key
+            
+            if not baseline:
+                print(f"\033[91m[DETECTION] No baseline found in training result\033[0m")
+                return
+            
+            mean = baseline.get("mean", 0)
+            std = baseline.get("std", 1)
+            threshold = baseline.get("threshold", 3.0)
+            data_points = baseline.get("data_points", 0)
+            percentile = baseline.get("percentile", 99.5)
+            
+            # Calculate z-score
+            if std == 0:
+                z_score = 0.0
+            else:
+                z_score = abs(value - mean) / std
+            
+            is_anomaly = z_score > threshold
+            
+            print(f"\033[94m[DETECTION] bucket={bucket_key}, value={value}, mean={mean:.2f}, std={std:.2f}, z_score={z_score:.2f}, threshold={threshold:.2f}, is_anomaly={is_anomaly}\033[0m")
+            
+            if is_anomaly:
+                print("\033[31m=========================================================================================================================\033[0m")
+                print(f"\033[31m ANOMALY DETECTED: {dimension} = {value} (z-score: {z_score:.2f})\033[0m")
+                print("\033[31m=========================================================================================================================\033[0m")
+                
+                # Convert timestamp to ISO string
+                ts = timestamp
+                if isinstance(ts, datetime):
+                    ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                
+                url_post = ANOMALIES_INSIGHT_URL + "dashboard/" + kb_id + "/anomalies"
+                headers = {'Accept': 'application/json', "Content-Type": "application/json"}
+                
+                # Build context-aware anomaly description
+                context_desc = f"Anomaly in bucket '{bucket_key}'"
+                if bucket_key.startswith("workday_"):
+                    hour = bucket_key.split("_")[1]
+                    context_desc = f"Workday anomaly at hour {hour}"
+                elif bucket_key.startswith("off_hours_"):
+                    hour = bucket_key.split("_")[2] if len(bucket_key.split("_")) > 2 else "unknown"
+                    context_desc = f"Off-hours anomaly at hour {hour}"
+                elif bucket_key.startswith("weekend"):
+                    context_desc = "Weekend anomaly"
+                elif bucket_key.startswith("holiday"):
+                    context_desc = f"Holiday anomaly ({bucket_key})"
+                elif bucket_key == "global_fallback" or bucket_key == "global_default":
+                    context_desc = "Anomaly (no time-context profile)"
+                
+                processed_data = {
+                    # Core fields
+                    'algorithm': 'Z Score (Bucketed)',
+                    'metric': dimension,
+                    'text': f"{context_desc}: z-score {z_score:.2f} exceeds threshold {threshold:.2f}",
+                    'timestamp': ts,
+                    'value': value,
+                    'created_at': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    # KB identification
+                    'kb_name': kb_name,
+                    # Bucket context
+                    'bucket_key': bucket_key,
+                    'bucket_profile_id': bucket_profile_id,
+                    # Algorithm-specific details (flexible for any algorithm)
+                    'algorithm_details': {
+                        'z_score': z_score,
+                        'threshold': threshold,
+                        'mean': mean,
+                        'std': std,
+                        'baseline_data_points': data_points,
+                        'percentile': percentile,
+                        'baseline_source': baseline_source,
+                        'deviation_from_mean': value - mean,
+                    }
+                }
+                
+                try:
+                    response = requests.post(url_post, json=processed_data, headers=headers)
+                    print(f"\033[92m[DETECTION] Anomaly posted to insights API: {response.status_code}\033[0m")
+                except Exception as e:
+                    print(f"\033[91m[DETECTION] Failed to post anomaly: {e}\033[0m")
+            
+            return
+    
+        # OLD FORMAT: Legacy detection code
+        print(f"\033[93m[DETECTION] Using legacy detection format\033[0m")
 
-    # optional: rename for convenience
-    df = df.rename(columns={
-        "metadata.kbId": "kbId",
-        "metadata.dim": "dim",
-        "metadata.mode": "mode"
-    })
+        # 2) flatten nested fields (metadata -> metadata.kbId etc.)
+        df = pd.json_normalize(serie_to_detect)
 
-    # 3) make _id string (pandas doesn't like ObjectId)
-    if "_id" in df.columns:
-        df["_id"] = df["_id"].astype(str)
+        # optional: rename for convenience
+        df = df.rename(columns={
+            "metadata.kbId": "kbId",
+            "metadata.dim": "dim",
+            "metadata.mode": "mode"
+        })
 
-    # 4) ensure timestamp is datetime dtype
-    if "timestamp" in df.columns:
-        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        # 3) make _id string (pandas doesn't like ObjectId)
+        if "_id" in df.columns:
+            df["_id"] = df["_id"].astype(str)
 
-    if training_result["work_day_enabled?"]:
+        # 4) ensure timestamp is datetime dtype
+        if "timestamp" in df.columns:
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
 
-        # we add a boolean to know if it's a workday or not
-        df["is_workday"] = df["timestamp"].dt.dayofweek < 5
+        if training_result["work_day_enabled?"]:
 
-        print("I am detecting Z score with work day enabled")
-        bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+            # we add a boolean to know if it's a workday or not
+            df["is_workday"] = df["timestamp"].dt.dayofweek < 5
 
-        anomalies = anomaly_detection_workdayful(
-            df, training_result, training_result["time_window"], bucket_value)
+            print("I am detecting Z score with work day enabled")
+            bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
 
-    else:
+            anomalies = anomaly_detection_workdayful(
+                df, training_result, training_result["time_window"], bucket_value)
 
-        bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
-        print("I am detecting Z score with work day disabled")
+        else:
 
-        anomalies = anomaly_detection_workdayless(
-            df, training_result, training_result["time_window"], bucket_value)
+            bucket_value = get_closest_bucket(df, training_result, training_result["time_window"])
+            print("I am detecting Z score with work day disabled")
 
-    if anomalies[0].get("is_anomaly"):
-        print(
-            "=========================================================================================================================")
-        print(f"\033[31m anomaly detected: {anomalies} \033[0m")
-        print(
-            "=========================================================================================================================")
+            anomalies = anomaly_detection_workdayless(
+                df, training_result, training_result["time_window"], bucket_value)
 
-        url_post = ANOMALIES_INSIGHT_URL + "insights/insertDocument/" + serie_to_detect["metadata"]["kbId"]
-        headers = {'Accept': 'application/json', "Content-Type": "application/json"}
+        if anomalies[0].get("is_anomaly"):
+            print(
+                "=========================================================================================================================")
+            print(f"\033[31m anomaly detected: {anomalies} \033[0m")
+            print(
+                "=========================================================================================================================")
 
-        # convert values that might be datetimes into ISO strings
-        ts = anomalies[0].get("timestamp")
+            url_post = ANOMALIES_INSIGHT_URL + "dashboard/" + serie_to_detect["metadata"]["kbId"] + "/anomalies"
+            headers = {'Accept': 'application/json', "Content-Type": "application/json"}
 
-        if isinstance(ts, datetime):
-            # send UTC ISO 8601 string (add 'Z' or include tzinfo)
-            ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            # convert values that might be datetimes into ISO strings
+            ts = anomalies[0].get("timestamp")
 
-        processed_data = {
-            'algorithm': 'Z Score',
-            'metric': serie_to_detect["metadata"]["dim"],
-            'text': "Anomaly detected",
-            'timestamp': ts,
-            'value': anomalies[0].get("value"),
-            'created_at': datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat().replace(
-                "+00:00", "Z")
-        }
+            if isinstance(ts, datetime):
+                # send UTC ISO 8601 string (add 'Z' or include tzinfo)
+                ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
-        requests.post(url_post, json=processed_data, headers=headers)
+            processed_data = {
+                'algorithm': 'Z Score',
+                'metric': serie_to_detect["metadata"]["dim"],
+                'text': "Anomaly detected",
+                'timestamp': ts,
+                'value': anomalies[0].get("value"),
+                'created_at': datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat().replace(
+                    "+00:00", "Z")
+            }
+
+            requests.post(url_post, json=processed_data, headers=headers)
+    except Exception as e:
+        print(f"\033[91m[DETECTION] EXCEPTION in detect_z_score: {e}\033[0m", flush=True)
+        import traceback
+        traceback.print_exc()
 
 
 def restartable_thread(target, *args, delay=5):
@@ -720,8 +990,8 @@ def main():
     # we automatically use max amount of (Cores - 1) and then create workers
     num_cpu_workers = max(1, multiprocessing.cpu_count() - 1)
 
-    workers : ProcessPoolExecutor = ProcessPoolExecutor()
-    #workers : ThreadPoolExecutor = ProcessPoolExecutor(50)
+    workers : ThreadPoolExecutor = ThreadPoolExecutor()
+    #workers : ThreadPoolExecutor = ThreadPoolExecutor(50)
 
     # Start watcher in its own thread
     training_watcher = threading.Thread(

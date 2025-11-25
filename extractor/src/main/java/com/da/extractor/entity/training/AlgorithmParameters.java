@@ -30,6 +30,7 @@ public class AlgorithmParameters {
 
     void setObservedValuesFromDimensionMetadataMaps(List<AlgorithmParameter> dimensionMetadataMaps){
         this.observedValues = dimensionMetadataMaps.stream()
+                .filter(AlgorithmParameter::isActive)  // Only include active dimensions
                 .map(ObservedValue::new)
                 .toList();
     }
@@ -45,7 +46,8 @@ public class AlgorithmParameters {
 
         public ObservedValue(AlgorithmParameter from){
             this.dimension = from.getDimension();
-            this.algorithmMetadata = from.getAlgMetadata() != null ? from.getAlgMetadata() : new ArrayList<>();
+            // New unified schema uses "metadata" instead of "alg_metadata"
+            this.algorithmMetadata = from.getMetadata() != null ? from.getMetadata() : new ArrayList<>();
         }
     }
 }

@@ -29,14 +29,19 @@ public class ValidatorController {
         List<String> validationErrors = new ArrayList<>();
 
         logger.info("Iniciando validacion de query: {}", validateQueryRequestDto.getQuery());
+        
+        // Determine which timestamp field to look for
+        final String timestampField = determineTimestampField(validateQueryRequestDto);
+        logger.info("Validating timestamp field: {}", timestampField);
+        
         try{
             extractorService.extractData(validateQueryRequestDto.getQuery(), data -> {
                 if(data == null || data.isEmpty()) {
                     validationErrors.add("No data returned from the query.");
                 } else  {
-                    if(!data.stream().allMatch(row ->
-                            row.containsKey("timestamp") || row.containsKey("es_timestamp"))){
-                        validationErrors.add("Missing required timestamp field in the data.");
+                    // Check if the specified timestamp field exists in the data
+                    if(!data.stream().allMatch(row -> row.containsKey(timestampField))){
+                        validationErrors.add("Missing required timestamp field '" + timestampField + "' in the data.");
                     }
                 }
             });
@@ -58,5 +63,19 @@ public class ValidatorController {
         logger.info("Validacion de query con errores");
         logger.info("{} ❌", validateQueryRequestDto.getQuery());
         return ResponseEntity.badRequest().body(new ValidateQueryResponseDto("Query validation failed", validationErrors));
+    }
+
+    /**
+     * Determines which timestamp field to validate based on request parameters.
+     * If timestamp_field is provided, use it directly.
+     * Otherwise, fall back to legacy behavior (check for "timestamp" or "es_timestamp").
+     */
+    private String determineTimestampField(ValidateQueryRequestDto request) {
+        // If timestamp_field is explicitly provided, use it
+        if (request.getTimestamp_field() != null && !request.getTimestamp_field().isBlank()) {
+            return request.getTimestamp_field();
+        }
+        // Legacy fallback - try es_timestamp first (common convention)
+        return "es_timestamp";
     }
 }
