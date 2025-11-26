@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.Locale;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 
@@ -19,11 +20,14 @@ public class InsightsService {
 
     private final KibanaService kibanaService;
 
+    private final EmailNotificationService emailNotificationService;
+
     private final Logger logger = LoggerFactory.getLogger(InsightsService.class);
 
-    public InsightsService(ElasticsearchService elasticsearchService, KibanaService kibanaService) {
+    public InsightsService(ElasticsearchService elasticsearchService, KibanaService kibanaService, EmailNotificationService emailNotificationService) {
         this.elasticsearchService = elasticsearchService;
         this.kibanaService = kibanaService;
+        this.emailNotificationService = emailNotificationService;
     }
 
     public void createKbMapping(IndexKbIdMapping kbIdMapping) throws Exception {
@@ -91,6 +95,35 @@ public class InsightsService {
         }
 
         return response;
+    }
+
+    public void sendMail(String to) throws Exception {
+
+        var kbName = "test";
+
+        var anomalyMetric = "httpcodes";
+
+        var anomalyValue = "muchos values";
+
+        var timestamp = Instant.now();
+
+        var indexName = "nombre facha";
+
+        var kibanaId = "70a44f12-a013-47ba-96ee-e046aa8b00c9";
+
+        emailNotificationService.sendHtmlEmailFromTemplate(
+                to,   // o recorrer lista
+                "Anomalía detectada en KB: test"  ,//kb.getName(),
+                "templates/anomaly-email.html",
+                Map.of(
+                        "kbName", kbName,
+                        "anomalyMetric", anomalyMetric,
+                        "anomalyValue", anomalyValue.toString(),
+                        "anomalyTimestamp", timestamp.toString(),
+                        "resultsIndexName", indexName,
+                        "kibanaUrl", "http://localhost:5602/app/dashboards#/view/" + kibanaId
+                )
+        );
     }
 
     private String normalizeIndexName(String rawName) {
