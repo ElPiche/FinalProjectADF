@@ -94,10 +94,37 @@ public class InsightsService {
 
         }
 
+        if(doc.getEmail() != null) {
+            sendAnomalyEmail(doc, mapping);
+        }
+
         return response;
     }
 
-    public void sendMail(String to) throws Exception {
+    public void sendAnomalyEmail(DocumentDto doc, IndexKbIdMapping mapping) throws Exception {
+
+        try{
+
+            emailNotificationService.sendHtmlEmailFromTemplate(
+                    doc.getEmail(),   // o recorrer lista
+                    "Anomalía detectada en configuración:" + doc.getKbName(),
+                    "templates/anomaly-email.html",
+                    Map.of(
+                            "kbName", doc.getKbName(),
+                            "anomalyMetric", doc.getMetric(),
+                            "anomalyValue", doc.getValue().toString(),
+                            "anomalyTimestamp", doc.getTimestamp(),
+                            "resultsIndexName", mapping.getIndexName(),
+                            "kibanaUrl", "http://localhost:5602/app/dashboards#/view/" + mapping.getDashboardId()
+                    )
+            );
+
+        }catch(Exception e){
+            logger.error("Error while sending anomaly email:" + e.getMessage());
+            //throw e;
+        }
+    }
+    public void sendMailTest(String to) throws Exception {
 
         var kbName = "test";
 

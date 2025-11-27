@@ -32,7 +32,7 @@ public class InsightsController {
     @PostMapping("/mailTest")
     public ResponseEntity<String> mailTest(@RequestBody String to) throws Exception {
 
-        insightsService.sendMail(to);
+        insightsService.sendMailTest(to);
         return ResponseEntity.ok("correo enviado");
     }
 
