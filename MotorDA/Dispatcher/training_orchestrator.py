@@ -1,13 +1,13 @@
-"""Training Orchestrator - Integrates BucketResolver with Pure ZScore Algorithm.
+"""Training Orchestrator - Integrates BucketResolver with Algorithm Registry.
 
 This module is the Dispatcher's responsibility for:
 1. Fetching bucket profile from MongoDB
 2. Resolving timestamps to bucket keys using BucketResolver
 3. Grouping training data by bucket key
-4. Training ZScore baselines per bucket
+4. Training algorithm baselines per bucket via the registry
 5. Storing results in the new schema format
 
-The ZScore algorithm is PURE statistics - no bucket awareness.
+The algorithms are PURE statistics - no bucket awareness.
 Bucketing is handled ENTIRELY here.
 """
 
@@ -19,11 +19,15 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from pymongo import MongoClient
 
-# Import pure ZScore algorithm - NO bucket logic
-from MotorDA.ZScore import zscore_algorithm as zscore
+# Import algorithm registry - central place for all algorithms
+from MotorDA.algorithm_registry import get_algorithm, is_algorithm_supported
+from MotorDA.base_algorithm import DetectionMode, BucketMode
 
 # Import BucketResolver - handles ALL bucketing
 from MotorDA.Dispatcher.bucket_resolver import BucketResolver, BucketProfile
+
+# Legacy import for backward compatibility (will be removed in future)
+from MotorDA.ZScore import zscore_algorithm as zscore
 
 
 @dataclass
@@ -150,53 +154,122 @@ class TrainingOrchestrator:
                 "global_fallback": {"mean": ..., "std": ..., ...}
             }
         """
+        # Default to zscore for backward compatibility
+        return self.train_dimension_with_algorithm(
+            kb_id=kb_id,
+            dimension=dimension,
+            algorithm_name="zscore",
+            df_train=df_train,
+            value_col=value_col,
+            timestamp_col=timestamp_col,
+            metadata={"percentile": percentile, "min_points": min_points},
+        )
+    
+    def train_dimension_with_algorithm(
+        self,
+        kb_id: str,
+        dimension: str,
+        algorithm_name: str,
+        df_train: pd.DataFrame,
+        value_col: str = "value",
+        timestamp_col: str = "timestamp",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Train any POINT algorithm for a dimension, grouped by bucket.
+        
+        This is the NEW main training method using the algorithm registry.
+        It supports any POINT algorithm with SEGMENT bucket mode.
+        
+        Args:
+            kb_id: Knowledge Base configuration ID
+            dimension: The metric dimension being trained
+            algorithm_name: Name of algorithm in registry (e.g., "zscore", "iqr")
+            df_train: Training DataFrame
+            value_col: Column containing metric values
+            timestamp_col: Column containing timestamps
+            metadata: Algorithm-specific parameters (e.g., {"percentile": 99.5})
+        
+        Returns:
+            Training result dict in new schema format
+        """
+        metadata = metadata or {}
+        min_points = int(metadata.get("min_points", 3))
+        
+        # Get algorithm from registry
+        algorithm = get_algorithm(algorithm_name)
+        if algorithm is None:
+            raise ValueError(f"Unknown algorithm: '{algorithm_name}'. Use is_algorithm_supported() to check.")
+        
+        # Validate algorithm is POINT mode
+        if algorithm.detection_mode != DetectionMode.POINT:
+            raise ValueError(
+                f"Algorithm '{algorithm_name}' is {algorithm.detection_mode.value} mode, "
+                f"but only POINT mode algorithms are currently supported."
+            )
+        
         if df_train.empty:
             return {
                 "kb_id": kb_id,
                 "dimension": dimension,
+                "algorithm": algorithm_name,
                 "bucket_profile_id": self.bucket_profile_id,
                 "buckets": {},
                 "global_fallback": None,
             }
         
-        # Create global fallback from ALL training data
-        all_values = df_train[value_col].astype(float).tolist()
-        global_fallback = zscore.create_global_fallback(all_values, percentile)
+        # Create global fallback from ALL training data (algorithm-aware)
+        all_data = [
+            {"value": v, "timestamp": t}
+            for v, t in zip(
+                df_train[value_col].astype(float).tolist(),
+                df_train[timestamp_col].tolist()
+            )
+        ]
+        global_result = algorithm.train(all_data, bucket_key="global_fallback", metadata=metadata)
+        global_fallback = global_result.to_dict()
         
         # Group training data by bucket key
         grouped = self.group_by_bucket(df_train, timestamp_col)
         
-        print(f"\033[92m[ORCHESTRATOR] Training dimension '{dimension}' with {len(grouped)} buckets\033[0m")
+        print(f"\033[92m[ORCHESTRATOR] Training dimension '{dimension}' with algorithm '{algorithm_name}' and {len(grouped)} buckets\033[0m")
         
-        # Train ZScore baseline for each bucket
+        # Train algorithm baseline for each bucket
         buckets: Dict[str, Dict[str, Any]] = {}
         
         for bucket_key, bucket_df in grouped.items():
-            values = bucket_df[value_col].astype(float).tolist()
-            n_points = len(values)
+            # Convert DataFrame to list of dicts for algorithm interface
+            bucket_data = [
+                {"value": v, "timestamp": t}
+                for v, t in zip(
+                    bucket_df[value_col].astype(float).tolist(),
+                    bucket_df[timestamp_col].tolist()
+                )
+            ]
+            n_points = len(bucket_data)
             
             if n_points < min_points:
                 # Use global fallback for insufficient data
                 print(f"\033[93m[ORCHESTRATOR] Bucket '{bucket_key}' has {n_points} points < {min_points}, using global fallback\033[0m")
-                baseline = global_fallback
-                sufficient_data = False
+                buckets[bucket_key] = {
+                    **global_fallback,
+                    "sufficient_data": False,
+                }
             else:
                 # Train bucket-specific baseline
                 print(f"\033[92m[ORCHESTRATOR] Bucket '{bucket_key}' training with {n_points} data points\033[0m")
-                baseline = zscore.train(values, percentile, min_points)
-                sufficient_data = True
-            
-            buckets[bucket_key] = {
-                **baseline.to_dict(),
-                "sufficient_data": sufficient_data,
-            }
+                result = algorithm.train(bucket_data, bucket_key=bucket_key, metadata=metadata)
+                buckets[bucket_key] = {
+                    **result.to_dict(),
+                    "sufficient_data": result.sufficient_data,
+                }
         
         return {
             "kb_id": kb_id,
             "dimension": dimension,
+            "algorithm": algorithm_name,
             "bucket_profile_id": self.bucket_profile_id,
             "buckets": buckets,
-            "global_fallback": global_fallback.to_dict() if global_fallback else None,
+            "global_fallback": global_fallback,
         }
 
 
@@ -302,15 +375,31 @@ class DetectionOrchestrator:
                 "is_anomaly": False,
             }
         
-        # Use pure ZScore algorithm for detection
-        baseline = zscore.ZScoreBaseline.from_dict(bucket_stats)
-        result = zscore.detect(value, baseline)
+        # Get algorithm name from training result, default to zscore
+        algorithm_name = baseline_result.get("algorithm", "zscore")
+        algorithm = get_algorithm(algorithm_name)
+        
+        if algorithm is None:
+            # Fall back to legacy zscore detection
+            print(f"\033[93m[DETECTION] Algorithm '{algorithm_name}' not in registry, using legacy zscore\033[0m")
+            baseline = zscore.ZScoreBaseline.from_dict(bucket_stats)
+            result = zscore.detect(value, baseline)
+            return {
+                "timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
+                "dimension": dimension,
+                "bucket_key": bucket_key,
+                **result.to_dict(),
+            }
+        
+        # Use algorithm from registry
+        detection_result = algorithm.detect(value, bucket_stats)
         
         return {
             "timestamp": timestamp.isoformat() if hasattr(timestamp, 'isoformat') else str(timestamp),
             "dimension": dimension,
+            "algorithm": algorithm_name,
             "bucket_key": bucket_key,
-            **result.to_dict(),
+            **detection_result.to_dict(),
         }
     
     def detect_batch(

@@ -30,6 +30,16 @@ from ZScore.standalone_da_algorithm_z_score import (
 # Import Training Orchestrator for bucket-aware training
 from Dispatcher.training_orchestrator import TrainingOrchestrator
 
+# Import Series Orchestrator for SERIES algorithms (Phase 2)
+from Dispatcher.series_orchestrator import SeriesTrainingOrchestrator, SeriesDetectionOrchestrator
+
+# Import History Provider for SERIES algorithm detection (Phase 2)
+from Dispatcher.history_provider import HistoryProvider, get_history_provider
+
+# Import algorithm registry for dynamic algorithm lookup
+from MotorDA.algorithm_registry import get_algorithm, is_algorithm_supported, list_algorithm_names
+from MotorDA.base_algorithm import DetectionMode, BucketMode
+
 # Dispatcher: Tiene como objetivo recibir el documento de configuración desde MongoDB y despachar la ejecución del algoritmo correspondiente.
 # Tiene que en base al documento de configuración, identificar qué algoritmo se debe ejecutar y llamar a la función correspondiente,
 # pasándole los parámetros necesarios. Y guardar los resultados en ElasticSearch.
@@ -87,12 +97,42 @@ class Algorithm:
     parameters: Parameters
 
     def execute(self, config):
+        """Execute training for this algorithm.
+        
+        Uses the algorithm registry for both POINT and SERIES algorithms.
+        - POINT algorithms: Use TrainingOrchestrator (bucket splitting)
+        - SERIES algorithms: Use SeriesTrainingOrchestrator (continuous data)
+        """
+        algorithm_name = self.name.lower()
+        
+        # Check if algorithm is in the registry
+        if is_algorithm_supported(algorithm_name):
+            algorithm = get_algorithm(algorithm_name)
+            
+            # Fetch series data from MongoDB
+            observed_values = fetch_series_data_with_aggregation(config, self)
 
-        match self.name:
+            if not observed_values:
+                print("\033[93m[DISPATCHER] No observed values to train on\033[0m")
+                return
 
+            # Route based on detection mode
+            if algorithm.detection_mode == DetectionMode.SERIES:
+                print(f"\033[92m[DISPATCHER] Executing SERIES algorithm '{algorithm_name}' via SeriesOrchestrator\033[0m")
+                results = run_series_algorithm_training(config, algorithm_name, observed_values)
+            else:
+                print(f"\033[92m[DISPATCHER] Executing POINT algorithm '{algorithm_name}' via TrainingOrchestrator\033[0m")
+                results = run_algorithm_bucketed_training(config, algorithm_name, observed_values)
+            
+            print(f"\033[92m[DISPATCHER] Training complete for {len(results)} dimensions\033[0m")
+            delete_series(config)
+            return
+        
+        # Legacy fallback for algorithms not yet in registry
+        match algorithm_name:
             case "zscore":
-
-                print("\033[92m[DISPATCHER] Executing Z-Score with bucket-aware training\033[0m")
+                # This branch is now handled above, but kept for safety
+                print("\033[92m[DISPATCHER] Executing Z-Score with bucket-aware training (legacy path)\033[0m")
                 
                 # Fetch series data from MongoDB
                 observed_values = fetch_series_data_with_aggregation(config, self)
@@ -107,10 +147,11 @@ class Algorithm:
                 print(f"\033[92m[DISPATCHER] Training complete for {len(results)} dimensions\033[0m")
 
             case "arma":
-                print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
+                print(f"\033[93m[DISPATCHER] TRAINING {self.name} - Register as SERIES algorithm in registry\033[0m")
 
             case _:
-                print(f"TRAINING {self.name} NOT IMPLEMENTED YET.")
+                supported = list_algorithm_names()
+                print(f"\033[91m[DISPATCHER] Unknown algorithm: '{self.name}'. Supported: {supported}\033[0m")
 
         delete_series(config)
 
@@ -204,8 +245,8 @@ def parse_config(data: dict, mongo_client: MongoClient = None) -> Config:
                 parameters=Parameters(
                     train_window=a["parameters"]["train_window"],
                     observed_values={
-                        ov["dimension"]: {am["key"]: am["value"]
-                                          for am in ov["algorithm_metadata"]}
+                        ov["dimension"]: {am["key"]: am.get("value", am.get("values", ""))
+                                          for am in ov.get("algorithm_metadata", [])}
                         for ov in a["parameters"]["observed_values"]
                     },
                     from_=a["parameters"]["from"],
@@ -393,6 +434,166 @@ def run_zscore_bucketed_training(config: Config, observed_values: Dict[str, pd.D
     )
     
     print(f"\033[92m[DISPATCHER] Training complete for {len(all_results)} dimensions\033[0m")
+    return all_results
+
+
+def run_algorithm_bucketed_training(
+    config: Config, 
+    algorithm_name: str, 
+    observed_values: Dict[str, pd.DataFrame]
+) -> Dict[str, Any]:
+    """Run any registered algorithm with bucket-aware data grouping.
+    
+    This is the NEW unified training flow using the algorithm registry:
+    1. Create TrainingOrchestrator with bucket profile
+    2. For each dimension, train using the specified algorithm
+    3. Store results in trained_models (series_result) collection
+    
+    Args:
+        config: The Config object with kb_id, bucket_profile_id, etc.
+        algorithm_name: Name of algorithm in registry (e.g., "zscore", "iqr")
+        observed_values: Dict mapping dimension -> DataFrame with value/timestamp columns
+    
+    Returns:
+        Dict of dimension -> training result
+    """
+    da_client: MongoClient = CreateConnectionToDA()
+    
+    print(f"\033[92m[DISPATCHER] Running '{algorithm_name}' bucketed training for kb_id: {config.kb_id}\033[0m")
+    print(f"\033[92m[DISPATCHER] Bucket profile: {config.bucket_profile_id}\033[0m")
+    
+    # Create TrainingOrchestrator with bucket profile
+    orchestrator = TrainingOrchestrator.create(
+        bucket_profile_id=config.bucket_profile_id,
+        mongo_client=da_client,
+        db_name=MONGO_DB_NAME
+    )
+    
+    all_results: Dict[str, Any] = {}
+    
+    for dimension, df in observed_values.items():
+        if df.empty:
+            print(f"\033[93m[DISPATCHER] Skipping empty dimension: {dimension}\033[0m")
+            continue
+        
+        print(f"\033[92m[DISPATCHER] Training dimension '{dimension}' with algorithm '{algorithm_name}' and {len(df)} data points\033[0m")
+        
+        # Run bucket-aware training via orchestrator with specified algorithm
+        result = orchestrator.train_dimension_with_algorithm(
+            kb_id=config.kb_id,
+            dimension=dimension,
+            algorithm_name=algorithm_name,
+            df_train=df,
+            value_col="value",
+            timestamp_col="timestamp",
+            metadata={"percentile": 99.5, "min_points": 3}  # Default params, could come from config
+        )
+        
+        all_results[dimension] = result
+        
+        # Save to MongoDB (trained_models / series_result)
+        query = {"kb_id": config.kb_id, "dimension": dimension}
+        existing = da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].find_one(query)
+        
+        if existing:
+            print(f"\033[93m[DISPATCHER] Updating existing training result for dimension: {dimension}\033[0m")
+            da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].replace_one(query, result)
+        else:
+            print(f"\033[92m[DISPATCHER] Inserting new training result for dimension: {dimension}\033[0m")
+            da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(result)
+    
+    # Mark training as complete
+    da_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].update_one(
+        {"kb_id": config.kb_id},
+        {"$set": {"is_trained": True, "algorithm": algorithm_name}}
+    )
+    
+    print(f"\033[92m[DISPATCHER] Training complete for {len(all_results)} dimensions using '{algorithm_name}'\033[0m")
+    return all_results
+
+
+def run_series_algorithm_training(
+    config: Config,
+    algorithm_name: str,
+    observed_values: Dict[str, List[float]],
+    bucket_profile: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """
+    Train SERIES algorithms (like ARMA/LSTM) that operate on continuous time series.
+    
+    Unlike POINT algorithms, SERIES algorithms:
+    - Train on the full time series without bucket segmentation
+    - Learn temporal patterns and dependencies
+    - Use bucket info as a FEATURE (input to model) rather than data splitter
+    
+    Args:
+        config: Training configuration with kb_id and parameters
+        algorithm_name: Name of the algorithm (e.g., "arma", "lstm")
+        observed_values: Dictionary mapping dimension names to their time series values
+        bucket_profile: Optional bucket profile for adding bucket features
+        
+    Returns:
+        Dictionary with training results per dimension
+    """
+    print(f"\033[96m[DISPATCHER] Running SERIES training with algorithm: {algorithm_name}\033[0m")
+    
+    da_client: MongoClient = CreateConnectionToDA()
+    
+    # Get algorithm from registry
+    algorithm_instance = get_algorithm(algorithm_name)
+    if algorithm_instance is None:
+        raise ValueError(f"Unknown algorithm: {algorithm_name}")
+    
+    # Check it's actually a SERIES algorithm
+    if algorithm_instance.detection_mode != DetectionMode.SERIES:
+        raise ValueError(f"Algorithm '{algorithm_name}' is not a SERIES algorithm (mode: {algorithm_instance.detection_mode})")
+    
+    # Create the series training orchestrator using factory method
+    orchestrator = SeriesTrainingOrchestrator.create(
+        bucket_profile_id=bucket_profile,
+        mongo_client=da_client,
+        db_name=MONGO_DB_NAME
+    )
+    
+    all_results = {}
+    
+    for dimension, df in observed_values.items():
+        print(f"\033[94m[DISPATCHER] Training dimension '{dimension}' with {len(df)} values\033[0m")
+        
+        # The observed_values already contains DataFrames with 'timestamp' and 'value' columns
+        # from fetch_series_data_with_aggregation, so we use them directly
+        
+        # Run training via series orchestrator
+        result = orchestrator.train_dimension(
+            kb_id=config.kb_id,
+            dimension=dimension,
+            algorithm_name=algorithm_name,
+            df_train=df,
+            value_col="value",
+            timestamp_col="timestamp",
+            metadata={"percentile": 99.5}  # Default params
+        )
+        
+        all_results[dimension] = result
+        
+        # Save to MongoDB
+        query = {"kb_id": config.kb_id, "dimension": dimension}
+        existing = da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].find_one(query)
+        
+        if existing:
+            print(f"\033[93m[DISPATCHER] Updating SERIES training result for: {dimension}\033[0m")
+            da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].replace_one(query, result)
+        else:
+            print(f"\033[92m[DISPATCHER] Inserting SERIES training result for: {dimension}\033[0m")
+            da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(result)
+    
+    # Mark training as complete
+    da_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].update_one(
+        {"kb_id": config.kb_id},
+        {"$set": {"is_trained": True, "algorithm": algorithm_name, "algorithm_type": "SERIES"}}
+    )
+    
+    print(f"\033[92m[DISPATCHER] SERIES training complete for {len(all_results)} dimensions\033[0m")
     return all_results
 
 
@@ -725,8 +926,33 @@ def watch_detection_changes(kb_client, workers: ThreadPoolExecutor, data_to_dete
                             f"\033[31m Someone inserted data into: {SERIES_COLLECTION_NAME} \033[0m")
 
                         serie_to_detect = change.get("fullDocument")
-
-                        workers.submit(detect_z_score, (serie_to_detect))
+                        
+                        # Route to appropriate detection function based on algorithm type
+                        kb_id = serie_to_detect.get("metadata", {}).get("kbId")
+                        if kb_id:
+                            # Look up the algorithm type from training config
+                            try:
+                                training_config = kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].find_one({"kb_id": kb_id})
+                                if training_config:
+                                    # Get algorithm name from algorithms array
+                                    algorithms = training_config.get("algorithms", [])
+                                    algorithm_name = algorithms[0].get("name", "zscore") if algorithms else "zscore"
+                                    algorithm_class = get_algorithm(algorithm_name)
+                                    
+                                    if algorithm_class and algorithm_class.detection_mode == DetectionMode.SERIES:
+                                        print(f"\033[96m[DETECTION] Routing to SERIES detection for {algorithm_name}\033[0m")
+                                        workers.submit(detect_series_algorithm, serie_to_detect)
+                                    else:
+                                        # Default to Z-score (POINT) detection
+                                        workers.submit(detect_z_score, (serie_to_detect))
+                                else:
+                                    # No config found, use default
+                                    workers.submit(detect_z_score, (serie_to_detect))
+                            except Exception as e:
+                                print(f"\033[93m[DETECTION] Error determining algorithm type: {e}, using default\033[0m")
+                                workers.submit(detect_z_score, (serie_to_detect))
+                        else:
+                            workers.submit(detect_z_score, (serie_to_detect))
 
         except PyMongoError as e:
             print(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
@@ -737,6 +963,168 @@ def watch_detection_changes(kb_client, workers: ThreadPoolExecutor, data_to_dete
             print(f"[watch_detection_changes] Unexpected error: {e}")
             traceback.print_exc()
             time.sleep(5)
+
+
+def detect_series_algorithm(serie_to_detect: Dict[str, Any]) -> None:
+    """
+    Detection function for SERIES algorithms (ARMA, LSTM, etc.).
+    
+    Unlike POINT detection, SERIES detection:
+    - Fetches historical values via HistoryProvider
+    - Passes the full window (history + current) to the algorithm
+    - Algorithm predicts next value and compares to actual
+    
+    Args:
+        serie_to_detect: Detection data from MongoDB change stream
+    """
+    try:
+        print(f"\033[96m[SERIES DETECTION] Processing: {serie_to_detect}\033[0m", flush=True)
+        
+        kb_client = CreateConnectionToDA()
+        
+        kb_id = serie_to_detect["metadata"]["kbId"]
+        dimension = serie_to_detect["metadata"]["dim"]
+        value = serie_to_detect.get("value", 0)
+        timestamp = serie_to_detect.get("timestamp")
+        
+        # Ensure timestamp is datetime
+        if isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        
+        print(f"\033[94m[SERIES DETECTION] kb_id={kb_id}, dimension={dimension}\033[0m", flush=True)
+        
+        # Lookup training config (using kb_id as string, not ObjectId)
+        training_config = kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].find_one({"kb_id": kb_id})
+        if not training_config:
+            print(f"\033[91m[SERIES DETECTION] Training config not found for {kb_id}\033[0m")
+            return
+            
+        kb_name = training_config.get("kb_description", "Unknown")
+        algorithms = training_config.get("algorithms", [])
+        algorithm_name = algorithms[0].get("name", "unknown") if algorithms else "unknown"
+        
+        # Get the training result to find model parameters
+        pipeline = [{'$match': {'kb_id': kb_id, 'dimension': dimension}}]
+        result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(pipeline)
+        training_result = next(result, None)
+        
+        if training_result is None:
+            print(f"\033[93m[SERIES DETECTION] No training result for kb_id={kb_id}, dim={dimension}\033[0m")
+            return
+        
+        # Get algorithm from registry
+        algorithm_class = get_algorithm(algorithm_name)
+        if algorithm_class is None:
+            print(f"\033[91m[SERIES DETECTION] Unknown algorithm: {algorithm_name}\033[0m")
+            return
+        
+        # Get required history length from algorithm
+        history_length = getattr(algorithm_class, 'required_history_length', 10)  # Default 10 if not specified
+        
+        # Initialize history provider and cache
+        history_provider = get_history_provider(kb_client, MONGO_DB_NAME)
+        
+        # Fetch historical values
+        print(f"\033[94m[SERIES DETECTION] Fetching {history_length} historical values\033[0m")
+        history_window = history_provider.get_history(
+            kb_id=kb_id,
+            dimension=dimension,
+            before_timestamp=timestamp,
+            window_size=history_length
+        )
+        
+        if len(history_window.values) < history_length:
+            print(f"\033[93m[SERIES DETECTION] Insufficient history: {len(history_window.values)}/{history_length}\033[0m")
+            return
+        
+        # Algorithm from registry is already an instance
+        algorithm_instance = algorithm_class
+        
+        # Check for bucket profile (used as FEATURE)
+        bucket_profile_id = training_result.get("bucket_profile_id")
+        bucket_features = None
+        
+        if bucket_profile_id and timestamp:
+            try:
+                from Dispatcher.bucket_resolver import BucketResolver
+                profile_doc = kb_client[MONGO_DB_NAME]["bucket_profiles"].find_one({"_id": bucket_profile_id})
+                if profile_doc:
+                    resolver = BucketResolver.from_dict(profile_doc)
+                    bucket_key = resolver.resolve(timestamp)
+                    # Convert bucket key to features (e.g., one-hot encoding)
+                    bucket_features = {"bucket_key": bucket_key}
+            except Exception as e:
+                print(f"\033[93m[SERIES DETECTION] Could not resolve bucket: {e}\033[0m")
+        
+        # Create SeriesDetectionOrchestrator via factory method
+        orchestrator = SeriesDetectionOrchestrator.create(
+            bucket_profile_id=bucket_profile_id,
+            baseline=training_result,  # Pass the whole training result as baseline
+            mongo_client=kb_client,
+            db_name=MONGO_DB_NAME
+        )
+        
+        # Convert history to list format expected by algorithm
+        history_list = history_window.to_list()
+        
+        # Run detection using the orchestrator's detect method
+        detection_result = orchestrator.detect(
+            value=value,
+            timestamp=timestamp,
+            history=history_list,
+            algorithm_name=algorithm_name,
+            metadata={}
+        )
+        
+        is_anomaly = detection_result.get("is_anomaly", False)
+        predicted_value = detection_result.get("predicted_value", value)
+        error = detection_result.get("prediction_error", 0)  # Fixed: was "error", should be "prediction_error"
+        threshold = detection_result.get("threshold", 0)
+        
+        print(f"\033[94m[SERIES DETECTION] value={value}, predicted={predicted_value:.2f}, error={error:.2f}, is_anomaly={is_anomaly}\033[0m")
+        
+        if is_anomaly:
+            print("\033[31m=========================================================================================================================\033[0m")
+            print(f"\033[31m SERIES ANOMALY DETECTED: {dimension} = {value} (predicted: {predicted_value:.2f})\033[0m")
+            print("\033[31m=========================================================================================================================\033[0m")
+            
+            # Convert timestamp to ISO string
+            ts = timestamp
+            if isinstance(ts, datetime):
+                ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            
+            url_post = ANOMALIES_INSIGHT_URL + "dashboard/" + kb_id + "/anomalies"
+            headers = {'Accept': 'application/json', "Content-Type": "application/json"}
+            
+            processed_data = {
+                'algorithm': f'{algorithm_name.upper()} (Series)',
+                'metric': dimension,
+                'text': f"Series anomaly: actual {value:.2f} vs predicted {predicted_value:.2f} (error: {error:.2f})",
+                'timestamp': ts,
+                'value': value,
+                'created_at': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                'kb_name': kb_name,
+                'bucket_key': bucket_features.get("bucket_key") if bucket_features else None,
+                'bucket_profile_id': bucket_profile_id,
+                'algorithm_details': {
+                    'predicted_value': predicted_value,
+                    'prediction_error': error,
+                    'threshold': threshold,
+                    'history_length': history_length,
+                    'algorithm_type': 'SERIES',
+                }
+            }
+            
+            try:
+                response = requests.post(url_post, json=processed_data, headers=headers)
+                print(f"\033[92m[SERIES DETECTION] Anomaly posted: {response.status_code}\033[0m")
+            except Exception as e:
+                print(f"\033[91m[SERIES DETECTION] Failed to post anomaly: {e}\033[0m")
+                
+    except Exception as e:
+        print(f"\033[91m[SERIES DETECTION] EXCEPTION: {e}\033[0m", flush=True)
+        import traceback
+        traceback.print_exc()
 
 
 def detect_z_score(serie_to_detect):
