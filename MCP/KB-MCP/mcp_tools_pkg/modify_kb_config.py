@@ -47,6 +47,7 @@ async def modify_kb_config(
     detection_start: Optional[str] = None,
     algorithm: Optional[AlgorithmConfig] = None,
     bucket_profile_id: Optional[str] = None,
+    source_index: Optional[str] = None,
     ctx: Context | None = None,
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
@@ -185,6 +186,17 @@ async def modify_kb_config(
                     updated_bucket_profile_id = cleaned_bucket_profile_id
                     updates_applied = True
 
+            updated_source_index = existing_config.source_index
+            if source_index is not None:
+                if not isinstance(source_index, str):
+                    raise ToolError("source_index must be a string")
+                cleaned_source_index = source_index.strip()
+                if cleaned_source_index == "":
+                    cleaned_source_index = None
+                if cleaned_source_index != existing_config.source_index:
+                    updated_source_index = cleaned_source_index
+                    updates_applied = True
+
             training_payload = existing_config.scheduling.training_config.model_dump(by_alias=True)
             if training_from is not None:
                 if not isinstance(training_from, str) or not training_from.strip():
@@ -228,7 +240,7 @@ async def modify_kb_config(
                     validate_cron_expression(cleaned_detection_frequency)
                 except ValueError as exc:
                     raise ToolError(str(exc)) from exc
-                _enforce_detection_frequency_floor(resulting_query_mode.type, cleaned_detection_frequency)
+                await _enforce_detection_frequency_floor(resulting_query_mode.type, cleaned_detection_frequency)
                 if cleaned_detection_frequency != detection_payload.get("frequency"):
                     detection_payload["frequency"] = cleaned_detection_frequency
                     updates_applied = True
@@ -256,7 +268,7 @@ async def modify_kb_config(
                     updates_applied = True
 
             if query_mode_updated and detection_payload.get("frequency"):
-                _enforce_detection_frequency_floor(resulting_query_mode.type, detection_payload["frequency"])
+                await _enforce_detection_frequency_floor(resulting_query_mode.type, detection_payload["frequency"])
 
             if not updates_applied:
                 log_message(
@@ -286,6 +298,7 @@ async def modify_kb_config(
                 elasticsearch_sql_query=updated_query,
                 query_mode=resulting_query_mode,
                 bucket_profile_id=updated_bucket_profile_id,
+                source_index=updated_source_index,
                 algorithm=algorithm_to_use,
                 scheduling=updated_scheduling_config,
             )

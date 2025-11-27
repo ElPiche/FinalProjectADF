@@ -424,6 +424,7 @@ async def create_da_config(
     detection_start: str,
     algorithm: AlgorithmConfig = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
     bucket_profile_id: str | None = None,
+    source_index: str | None = None,
     ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
@@ -442,6 +443,7 @@ async def create_da_config(
             detection_start,
             algorithm,
             bucket_profile_id,
+            source_index,
             ctx,
         )
     raise ToolError("create_da_config is not implemented in the migration package yet")
@@ -461,6 +463,7 @@ async def modify_kb_config(
     detection_start: Optional[str] = None,
     algorithm: Optional[AlgorithmConfig] = Field(default=None, description=ALGORITHM_CONFIG_DESCRIPTION),
     bucket_profile_id: Optional[str] = None,
+    source_index: Optional[str] = None,
     ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
@@ -479,6 +482,7 @@ async def modify_kb_config(
             detection_start,
             algorithm,
             bucket_profile_id,
+            source_index,
             ctx,
         )
     raise ToolError("modify_kb_config is not implemented in the migration package yet")

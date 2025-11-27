@@ -998,8 +998,12 @@ def detect_series_algorithm(serie_to_detect: Dict[str, Any]) -> None:
         if not training_config:
             print(f"\033[91m[SERIES DETECTION] Training config not found for {kb_id}\033[0m")
             return
-            
-        kb_name = training_config.get("kb_description", "Unknown")
+        
+        # Also lookup KB config for kb_name and source_index from knowledge_base.kb_configs
+        kb_config = kb_client["knowledge_base"]["kb_configs"].find_one({"_id": ObjectId(kb_id)})
+        kb_name = kb_config.get("name", "Unknown") if kb_config else training_config.get("kb_description", "Unknown")
+        source_index = kb_config.get("source_index", None) if kb_config else None
+        
         algorithms = training_config.get("algorithms", [])
         algorithm_name = algorithms[0].get("name", "unknown") if algorithms else "unknown"
         
@@ -1025,13 +1029,15 @@ def detect_series_algorithm(serie_to_detect: Dict[str, Any]) -> None:
         history_provider = get_history_provider(kb_client, MONGO_DB_NAME)
         
         # Fetch historical values
-        print(f"\033[94m[SERIES DETECTION] Fetching {history_length} historical values\033[0m")
+        print(f"\033[94m[SERIES DETECTION] Fetching {history_length} historical values before timestamp={timestamp}\033[0m")
         history_window = history_provider.get_history(
             kb_id=kb_id,
             dimension=dimension,
             before_timestamp=timestamp,
             window_size=history_length
         )
+        
+        print(f"\033[94m[SERIES DETECTION] Got {len(history_window.values)} values from history provider\033[0m")
         
         if len(history_window.values) < history_length:
             print(f"\033[93m[SERIES DETECTION] Insufficient history: {len(history_window.values)}/{history_length}\033[0m")
@@ -1104,6 +1110,7 @@ def detect_series_algorithm(serie_to_detect: Dict[str, Any]) -> None:
                 'value': value,
                 'created_at': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 'kb_name': kb_name,
+                'source_index': source_index,
                 'bucket_key': bucket_features.get("bucket_key") if bucket_features else None,
                 'bucket_profile_id': bucket_profile_id,
                 'algorithm_details': {
@@ -1136,11 +1143,12 @@ def detect_z_score(serie_to_detect):
         dimension = serie_to_detect["metadata"]["dim"]
         print(f"[DETECTION] Got kb_id={kb_id}, dimension={dimension}", flush=True)
 
-        # Look up KB name from train_config collection
+        # Look up KB config from knowledge_base.kb_configs for name and source_index
         print(f"[DETECTION] Looking up KB config...", flush=True)
-        kb_config = kb_client[MONGO_DB_NAME]["train_config"].find_one({"_id": ObjectId(kb_id)})
+        kb_config = kb_client["knowledge_base"]["kb_configs"].find_one({"_id": ObjectId(kb_id)})
         kb_name = kb_config.get("name", "Unknown") if kb_config else "Unknown"
-        print(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}\033[0m", flush=True)
+        source_index = kb_config.get("source_index", None) if kb_config else None
+        print(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}, Source Index: {source_index}\033[0m", flush=True)
 
         pipeline = [{'$match':
                          {'kb_id': kb_id,
@@ -1260,6 +1268,7 @@ def detect_z_score(serie_to_detect):
                     'created_at': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                     # KB identification
                     'kb_name': kb_name,
+                    'source_index': source_index,
                     # Bucket context
                     'bucket_key': bucket_key,
                     'bucket_profile_id': bucket_profile_id,

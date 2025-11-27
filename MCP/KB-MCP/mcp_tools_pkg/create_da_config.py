@@ -31,17 +31,70 @@ MIN_DETECTION_FREQUENCY_SECONDS = {
     "aggregated": 10,
 }
 
+# Extractor URL for CRON validation (uses Java Spring's CronExpression)
+EXTRACTOR_CRON_VALIDATE_URL = os.environ.get("EXTRACTOR_CRON_VALIDATE_URL", "http://extractor:8086/api/validate/cron")
+CRON_VALIDATION_TIMEOUT = int(os.environ.get("CRON_VALIDATION_TIMEOUT_SECONDS", "5"))
 
-def _enforce_detection_frequency_floor(query_mode_type: str, cron_expression: str) -> None:
-    """Ensure CRON schedules obey minimum per-mode frequencies."""
 
+async def _enforce_detection_frequency_floor(query_mode_type: str, cron_expression: str) -> None:
+    """Ensure CRON schedules obey minimum per-mode frequencies.
+    
+    Calls the Extractor's Java Spring-based CRON validator to ensure accurate
+    parsing of 6-field CRON expressions with second resolution.
+    """
+    import aiohttp
+
+    payload = {
+        "cronExpression": cron_expression,
+        "queryModeType": query_mode_type or "raw"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                EXTRACTOR_CRON_VALIDATE_URL,
+                json=payload,
+                timeout=aiohttp.ClientTimeout(total=CRON_VALIDATION_TIMEOUT)
+            ) as response:
+                result = await response.json()
+                
+                if response.status != 200:
+                    # Extractor returned validation error
+                    error_message = result.get("message", "CRON validation failed")
+                    raise ToolError(error_message)
+                
+                # Log successful validation
+                interval = result.get("intervalSeconds", "?")
+                normalized = result.get("normalizedCron", cron_expression)
+                log_message(
+                    f"CRON validation passed: '{cron_expression}' -> '{normalized}' (interval: {interval}s)",
+                    "info", "create_da_config", "cron_validation"
+                )
+                
+    except aiohttp.ClientError as e:
+        # Fall back to local validation if Extractor is unreachable
+        log_message(
+            f"Extractor CRON validation unavailable, using local fallback: {e}",
+            "warning", "create_da_config", "cron_validation"
+        )
+        _local_cron_validation_fallback(query_mode_type, cron_expression)
+    except asyncio.TimeoutError:
+        log_message(
+            "Extractor CRON validation timed out, using local fallback",
+            "warning", "create_da_config", "cron_validation"
+        )
+        _local_cron_validation_fallback(query_mode_type, cron_expression)
+
+
+def _local_cron_validation_fallback(query_mode_type: str, cron_expression: str) -> None:
+    """Fallback validation using Python croniter (doesn't support 6-field CRON well)."""
     from croniter import croniter
 
     reference = datetime.now(timezone.utc)
     try:
         iterator = croniter(cron_expression, reference)
         next_fire = iterator.get_next(datetime)
-    except Exception as exc:  # pragma: no cover - croniter raises descriptive errors
+    except Exception as exc:
         raise ToolError(f"Unable to evaluate detection_frequency '{cron_expression}': {exc}") from exc
 
     interval_seconds = (next_fire - reference).total_seconds()
@@ -68,6 +121,7 @@ async def create_da_config(
     detection_start: str,
     algorithm: AlgorithmConfig,
     bucket_profile_id: Optional[str] = None,
+    source_index: Optional[str] = None,
     ctx: Context | None = None,
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
@@ -146,7 +200,7 @@ async def create_da_config(
             except ValidationError as exc:
                 raise ToolError(f"Algorithm validation error: {exc}") from exc
 
-            _enforce_detection_frequency_floor(validated_query_mode.type, detection_frequency)
+            await _enforce_detection_frequency_floor(validated_query_mode.type, detection_frequency)
 
             training_kwargs = {"from": training_from}
             detection_kwargs = {"from": detection_start} if detection_start else {}
@@ -158,6 +212,7 @@ async def create_da_config(
                 elasticsearch_sql_query=cleaned_query,
                 query_mode=validated_query_mode,
                 bucket_profile_id=normalized_bucket_profile_id,
+                source_index=source_index.strip() if source_index else None,
                 algorithm=validated_algorithm,
                 scheduling=SchedulingConfig(
                     training_config=TrainingConfig(

@@ -240,12 +240,14 @@ class HistoryProvider:
         """Fetch historical entries from MongoDB."""
         collection = self.mongo_client[self.db_name][self.series_collection_name]
         
-        # Query for detection mode (mode=1) data
+        # Query for historical data (no mode filter - uses all available data)
         query = {
             "metadata.kbId": kb_id,
             "metadata.dim": dimension,
             "timestamp": {"$lt": before_timestamp},
         }
+        
+        print(f"\033[94m[HISTORY] Query: {query}, limit={limit}\033[0m")
         
         cursor = collection.find(query).sort("timestamp", DESCENDING).limit(limit)
         

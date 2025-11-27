@@ -14,7 +14,7 @@ from pydantic import (
 )
 
 
-SUPPORTED_ALGORITHMS = {"zscore"}
+SUPPORTED_ALGORITHMS = {"zscore", "armax"}
 
 
 class QueryMode(BaseModel):
@@ -181,6 +181,10 @@ class KBConfig(BaseModel):
     change_flag: int = Field(default=0, description="Change flag for triggering change streams")
     elasticsearch_sql_query: str = Field(description="Unified Elasticsearch SQL query for training and detection")
     query_mode: QueryMode = Field(description="Query mode metadata")
+    source_index: Optional[str] = Field(
+        default=None,
+        description="Source Elasticsearch index name for dashboard identification.",
+    )
     bucket_profile_id: Optional[str] = Field(
         default=None,
         description="Optional reference to a bucket_profiles document (time-context definition).",
