@@ -20,14 +20,18 @@ public class DocumentDto {
     public String timestamp;
     public Double value;
     public String created_at;
-    
+    public String email;
+    public Double zScore;
+    public Double std;
+    public String kbName;
+
     // KB identification
     public String kb_name;
-    
+
     // Bucket context fields (common to all bucket-aware algorithms)
     public String bucket_key;
     public String bucket_profile_id;
-    
+
     // Algorithm-specific data (flexible - each algorithm can put whatever it needs here)
     // Examples: z_score, threshold, mean, std, cluster_id, distance, etc.
     public Map<String, Object> algorithm_details;

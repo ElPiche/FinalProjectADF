@@ -84,12 +84,17 @@ public class ElasticsearchService {
 
     private Map<String, Object> toDocumentMap(DocumentDto dto) {
         Map<String, Object> m = new HashMap<>();
-        
+
         // Core fields
         if (dto.algorithm != null) m.put("algorithm", dto.algorithm);
         if (dto.metric != null)    m.put("metric", dto.metric);
         if (dto.text != null)      m.put("text", dto.text);
         if (dto.value != null)     m.put("value", dto.value);
+
+        if (dto.email != null)     m.put("email", dto.email);
+        if (dto.zScore != null)     m.put("zScore", dto.zScore);
+        if (dto.std != null)     m.put("std", dto.std);
+        if (dto.kbName != null)     m.put("kbName", dto.kbName);
 
         // KB identification
         if (dto.kb_name != null)   m.put("kb_name", dto.kb_name);
@@ -97,7 +102,7 @@ public class ElasticsearchService {
         // Bucket context fields
         if (dto.bucket_key != null)        m.put("bucket_key", dto.bucket_key);
         if (dto.bucket_profile_id != null) m.put("bucket_profile_id", dto.bucket_profile_id);
-        
+
         // Algorithm-specific details (flexible map - supports any algorithm)
         if (dto.algorithm_details != null) {
             m.put("algorithm_details", dto.algorithm_details);

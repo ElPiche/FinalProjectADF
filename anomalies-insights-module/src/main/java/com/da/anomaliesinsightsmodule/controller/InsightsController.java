@@ -29,6 +29,13 @@ public class InsightsController {
         return ResponseEntity.ok("hello world");
     }
 
+    @PostMapping("/mailTest")
+    public ResponseEntity<String> mailTest(@RequestBody String to) throws Exception {
+
+        insightsService.sendMailTest(to);
+        return ResponseEntity.ok("correo enviado");
+    }
+
     @PutMapping("/dashboards")
     public ResponseEntity createMapping(@RequestBody CreateMappingRequestDto kbIdMapping){
 

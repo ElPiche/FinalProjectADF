@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8"/>
+    <title>Alerta de Anomalía</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f5f6fa; padding: 20px;">
+
+<table width="100%" cellpadding="0" cellspacing="0"
+       style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 20px;">
+
+    <tr>
+        <td style="text-align: center; padding-bottom: 20px;">
+            <h2 style="color: #d63031; margin: 0;">🔔 Alerta de Anomalía Detectada</h2>
+            <p style="color: #636e72; margin: 5px 0 0 0;">Se ha detectado una anomalía en el sistema.</p>
+        </td>
+    </tr>
+
+    <tr>
+        <td>
+            <h3 style="color: #2d3436; border-bottom: 1px solid #dfe6e9; padding-bottom: 5px;">
+                Información General
+            </h3>
+
+            <p><strong>Índice:</strong> {{kbName}}</p>
+            <p><strong>Métrica:</strong> {{anomalyMetric}}</p>
+            <p><strong>Valor detectado:</strong> {{anomalyValue}}</p>
+            <p><strong>Fecha:</strong> {{anomalyTimestamp}}</p>
+            <p><strong>Índice de resultados:</strong> {{resultsIndexName}}</p>
+        </td>
+    </tr>
+
+    <tr>
+        <td style="padding-top: 20px;">
+            <h3 style="color: #2d3436; border-bottom: 1px solid #dfe6e9; padding-bottom: 5px;">
+                Visualización en Kibana
+            </h3>
+
+            <p>
+                Puedes ver esta anomalía en el dashboard correspondiente en Kibana:
+            </p>
+
+            <p style="text-align: center; margin-top: 25px;">
+                <a href="{{kibanaUrl}}"
+                   style="background-color: #0984e3; color: #ffffff; text-decoration: none;
+                              padding: 12px 20px; border-radius: 6px; font-weight: bold;"
+                   target="_blank">
+                    🔍 Abrir Dashboard en Kibana
+                </a>
+            </p>
+        </td>
+    </tr>
+
+    <tr>
+        <td style="text-align: center; padding-top: 30px; color: #b2bec3; font-size: 12px;">
+            Este correo fue generado automáticamente por el sistema de detección de anomalías.
+        </td>
+    </tr>
+
+</table>
+</body>
+</html>
