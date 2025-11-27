@@ -75,7 +75,6 @@ class ZScore:
 @dataclass
 class Parameters:
     train_window: int
-    # dimension → { key → value } key value being for algorithm metadata, might be empty
     observed_values: Dict[str, Dict[str, int]]
     from_: datetime
     to: datetime
@@ -987,11 +986,7 @@ def main():
 
     data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
 
-    # we automatically use max amount of (Cores - 1) and then create workers
-    num_cpu_workers = max(1, multiprocessing.cpu_count() - 1)
-
     workers : ThreadPoolExecutor = ThreadPoolExecutor()
-    #workers : ThreadPoolExecutor = ThreadPoolExecutor(50)
 
     # Start watcher in its own thread
     training_watcher = threading.Thread(
