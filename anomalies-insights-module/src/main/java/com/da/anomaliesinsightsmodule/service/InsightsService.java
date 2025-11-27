@@ -119,6 +119,8 @@ public class InsightsService {
                     )
             );
 
+            logger.info("Sending anomaly email to: " + doc.getEmail());
+
         }catch(Exception e){
             logger.error("Error while sending anomaly email:" + e.getMessage());
             //throw e;

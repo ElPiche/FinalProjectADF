@@ -21,12 +21,9 @@ public class DocumentDto {
     public Double value;
     public String created_at;
     public String email;
-    public Double zScore;
-    public Double std;
-    public String kbName;
 
     // KB identification
-    public String kb_name;
+    public String kbName;
 
     // Bucket context fields (common to all bucket-aware algorithms)
     public String bucket_key;
