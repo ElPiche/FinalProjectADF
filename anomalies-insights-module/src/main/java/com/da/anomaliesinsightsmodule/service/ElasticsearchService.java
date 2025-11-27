@@ -74,6 +74,18 @@ public class ElasticsearchService {
         return indexKbIdMappingRepo.findByKbId(kbId);
     }
 
+    public Optional<IndexKbIdMapping> getKbIdMappingByIndex(String indexName) throws Exception {
+        return indexKbIdMappingRepo.findByIndexName(indexName);
+    }
+
+    public IndexResponse updateKbMapping(IndexKbIdMapping kbIdMapping) throws Exception {
+        return client.index(i -> i
+                .index("index_kb_id_mappings")
+                .id(kbIdMapping.getKbId())
+                .document(kbIdMapping)
+        );
+    }
+
     public void createIndex(String indexName) throws Exception {
         client.indices().create(c -> c.index(indexName));
     }
@@ -93,6 +105,7 @@ public class ElasticsearchService {
 
         // KB identification
         if (dto.kb_name != null)   m.put("kb_name", dto.kb_name);
+        if (dto.source_index != null) m.put("source_index", dto.source_index);
 
         // Bucket context fields
         if (dto.bucket_key != null)        m.put("bucket_key", dto.bucket_key);

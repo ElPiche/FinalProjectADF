@@ -93,6 +93,38 @@ public class InsightsService {
         return response;
     }
 
+    public void recreateDashboard(String indexName) throws Exception {
+        String normalizedIndexName = normalizeIndexName(indexName);
+        
+        // Check if index exists
+        if (!elasticsearchService.indexExists(normalizedIndexName)) {
+            throw new NoSuchElementException("Index does not exist: " + normalizedIndexName);
+        }
+        
+        // Get or create data view
+        String dataViewId = kibanaService.createDataView(normalizedIndexName);
+        logger.info("DataView for index: {} id: {}", normalizedIndexName, dataViewId);
+        
+        // Create new saved search
+        String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + normalizedIndexName);
+        logger.info("Created saved search: {} for dataView: {}", ssId, dataViewId);
+        
+        // Create new dashboard with improved panels
+        String dashId = kibanaService.createDashboardWithEmbeddedLens("Dashboard - " + normalizedIndexName, dataViewId, ssId);
+        logger.info("Created new dashboard: {} with saved search: {}", dashId, ssId);
+        
+        // Try to update the mapping if it exists
+        Optional<IndexKbIdMapping> mappingOpt = elasticsearchService.getKbIdMappingByIndex(normalizedIndexName);
+        if (mappingOpt.isPresent()) {
+            IndexKbIdMapping mapping = mappingOpt.get();
+            mapping.setDataViewId(dataViewId);
+            mapping.setSavedSearchId(ssId);
+            mapping.setDashboardId(dashId);
+            elasticsearchService.updateKbMapping(mapping);
+            logger.info("Updated mapping for index: {}", normalizedIndexName);
+        }
+    }
+
     private String normalizeIndexName(String rawName) {
         if (rawName == null || rawName.isBlank()) {
             throw new IllegalArgumentException("Index name cannot be null or empty");

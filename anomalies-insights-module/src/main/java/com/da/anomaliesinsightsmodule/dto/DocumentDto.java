@@ -23,6 +23,7 @@ public class DocumentDto {
     
     // KB identification
     public String kb_name;
+    public String source_index;
     
     // Bucket context fields (common to all bucket-aware algorithms)
     public String bucket_key;

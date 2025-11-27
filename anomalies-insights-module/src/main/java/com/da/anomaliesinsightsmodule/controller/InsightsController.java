@@ -89,4 +89,28 @@ public class InsightsController {
 
     }
 
+    @PostMapping("/dashboard/{indexName}/recreate")
+    public ResponseEntity recreateDashboard(@PathVariable String indexName){
+
+        try{
+
+            insightsService.recreateDashboard(indexName);
+            return ResponseEntity.ok("Dashboard recreated for: " + indexName);
+
+        }
+        catch (NoSuchElementException e){
+
+            logger.error("Index or data view not found: {}", indexName, e);
+            return ResponseEntity.status(404).body(e.getMessage());
+
+        }
+        catch (Exception e){
+
+            logger.error("Error recreating dashboard for index: {}", indexName, e);
+            return ResponseEntity.status(500).body("Internal Server Error recreating dashboard");
+
+        }
+
+    }
+
 }
