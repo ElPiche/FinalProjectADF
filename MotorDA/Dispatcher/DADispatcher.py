@@ -92,7 +92,7 @@ class Algorithm:
             case "zscore":
 
                 print("\033[92m[DISPATCHER] Executing Z-Score with bucket-aware training\033[0m")
-                
+
                 # Fetch series data from MongoDB
                 observed_values = fetch_series_data_with_aggregation(config, self)
 
@@ -102,7 +102,7 @@ class Algorithm:
 
                 # Run bucket-aware training using TrainingOrchestrator
                 results = run_zscore_bucketed_training(config, observed_values)
-                
+
                 print(f"\033[92m[DISPATCHER] Training complete for {len(results)} dimensions\033[0m")
 
             case "arma":
@@ -135,47 +135,14 @@ class Config:
             algo.execute(self)
 
 
-def parse_iso(date_str: str) -> datetime:
-    """
-    Parses ISO 8601 timestamps that may include:
-      - a 'Z' suffix (UTC)
-      - a timezone offset like '+00:00'
-      - no timezone info (assumed UTC)
-      - missing milliseconds
-    """
-    if not date_str:
-        raise ValueError("Empty or None date string provided")
-
-    date_str = date_str.strip()
-
-    # Normalize 'Z' to '+00:00' for fromisoformat
-    if date_str.endswith("Z"):
-        date_str = date_str[:-1] + "+00:00"
-
-    try:
-        dt = datetime.fromisoformat(date_str)
-    except ValueError:
-        # Fallback for cases missing milliseconds
-        try:
-            dt = datetime.fromisoformat(date_str.split(".")[0] + "+00:00")
-        except Exception as e:
-            raise ValueError(f"Unrecognized date format: {date_str}") from e
-
-    # If no timezone info, assume UTC
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-
-    return dt
-
-
 def parse_config(data: dict, mongo_client: MongoClient = None) -> Config:
     """Parse training_config document into Config object.
-    
+
     Also fetches the KB config to get bucket_profile_id for bucket-aware training.
     """
     kb_id = data["kb_id"]
     bucket_profile_id = None
-    
+
     # Fetch the KB config from knowledge_base.kb_configs to get bucket_profile_id
     if mongo_client:
         try:
@@ -188,7 +155,7 @@ def parse_config(data: dict, mongo_client: MongoClient = None) -> Config:
                 print(f"\033[93m[DISPATCHER] KB config not found for kb_id: {kb_id}\033[0m")
         except Exception as e:
             print(f"\033[91m[DISPATCHER] Error fetching KB config: {e}\033[0m")
-    
+
     return Config(
         _id=data["_id"],
         kb_id=kb_id,
@@ -218,7 +185,7 @@ def parse_config(data: dict, mongo_client: MongoClient = None) -> Config:
 
 def CreateConnectionToKB() -> MongoClient:
     # we establish the connection to the kb mongo db
-    mongo_kb_client = client = MongoClient(
+    mongo_kb_client = MongoClient(
         MONGO_KB_URL,
         serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
         connectTimeoutMS=MONGO_TIMEOUT_MS,
@@ -229,8 +196,6 @@ def CreateConnectionToKB() -> MongoClient:
         readPreference='primaryPreferred'
     )
 
-    kb_database = mongo_kb_client[MONGO_DB_NAME]
-    kb_collection = kb_database[TRAINING_COLLECTION_NAME]
     mongo_kb_client.admin.command("ping")
     print("Nos conectamos al Mongo de entrenamiento")
     return mongo_kb_client
@@ -238,7 +203,7 @@ def CreateConnectionToKB() -> MongoClient:
 
 def CreateConnectionToDA() -> MongoClient:
     # we establish the connection to the da mongo db
-    mongo_da_client = client = MongoClient(
+    mongo_da_client = MongoClient(
         MONGO_KB_URL,
         serverSelectionTimeoutMS=MONGO_TIMEOUT_MS,
         connectTimeoutMS=MONGO_TIMEOUT_MS,
@@ -248,8 +213,7 @@ def CreateConnectionToDA() -> MongoClient:
         # Allow reads from secondary if primary unavailable
         readPreference='primaryPreferred'
     )
-    da_database = mongo_da_client[MONGO_DB_NAME]
-    da_collection = da_database[SERIES_COLLECTION_NAME]
+
     mongo_da_client.admin.command("ping")
     print("Nos conectamos a la DA")
     return mongo_da_client
@@ -263,7 +227,7 @@ def ExtractLatestConfigurationKB(client: MongoClient):
     result = client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].find().sort(
         '_id', -1).limit(1).next()
 
-    print(result)
+    #print(result)
 
     # we parse with BSON cuz mongo brings some binary data inside, and we want to serialize it into JSON
     with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
@@ -272,17 +236,6 @@ def ExtractLatestConfigurationKB(client: MongoClient):
         latest_document = collection.find().sort('created_at', -1).limit(1).next()print(latest_document)
         """
     return result
-
-
-def get_kb_block(doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Devuelve siempre el bloque kbConfig sin importar si viene en camelCase o PascalCase."""
-    return doc.get("kbConfig") or doc.get("KB_Config") or {}
-
-
-def get_kb_id(doc: Dict[str, Any]) -> Optional[str]:
-    kb = get_kb_block(doc)
-    return kb.get("id") or kb.get("Id")
-
 
 def run_zscore_batch_training(config: Config, observed_values, time_window: int = 60):
 
@@ -326,41 +279,41 @@ def run_zscore_batch_training(config: Config, observed_values, time_window: int 
 
 def run_zscore_bucketed_training(config: Config, observed_values: Dict[str, pd.DataFrame]) -> Dict[str, Any]:
     """Run ZScore training with bucket-aware data grouping.
-    
+
     This is the new training flow per the spec:
     1. Create TrainingOrchestrator with bucket profile
     2. For each dimension, group data by bucket key
     3. Train ZScore baseline per bucket
     4. Store results in trained_models (series_result) collection
-    
+
     Args:
         config: The Config object with kb_id, bucket_profile_id, etc.
         observed_values: Dict mapping dimension -> DataFrame with value/timestamp columns
-    
+
     Returns:
         Dict of dimension -> training result
     """
     da_client: MongoClient = CreateConnectionToDA()
-    
+
     print(f"\033[92m[DISPATCHER] Running bucketed training for kb_id: {config.kb_id}\033[0m")
     print(f"\033[92m[DISPATCHER] Bucket profile: {config.bucket_profile_id}\033[0m")
-    
+
     # Create TrainingOrchestrator with bucket profile
     orchestrator = TrainingOrchestrator.create(
         bucket_profile_id=config.bucket_profile_id,
         mongo_client=da_client,
         db_name=MONGO_DB_NAME
     )
-    
+
     all_results: Dict[str, Any] = {}
-    
+
     for dimension, df in observed_values.items():
         if df.empty:
             print(f"\033[93m[DISPATCHER] Skipping empty dimension: {dimension}\033[0m")
             continue
-        
+
         print(f"\033[92m[DISPATCHER] Training dimension '{dimension}' with {len(df)} data points\033[0m")
-        
+
         # Run bucket-aware training via orchestrator
         result = orchestrator.train_dimension(
             kb_id=config.kb_id,
@@ -371,26 +324,26 @@ def run_zscore_bucketed_training(config: Config, observed_values: Dict[str, pd.D
             percentile=99.5,
             min_points=3
         )
-        
+
         all_results[dimension] = result
-        
+
         # Save to MongoDB (trained_models / series_result)
         query = {"kb_id": config.kb_id, "dimension": dimension}
         existing = da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].find_one(query)
-        
+
         if existing:
             print(f"\033[93m[DISPATCHER] Updating existing training result for dimension: {dimension}\033[0m")
             da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].replace_one(query, result)
         else:
             print(f"\033[92m[DISPATCHER] Inserting new training result for dimension: {dimension}\033[0m")
             da_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].insert_one(result)
-    
+
     # Mark training as complete
     da_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].update_one(
         {"kb_id": config.kb_id},
         {"$set": {"is_trained": True}}
     )
-    
+
     print(f"\033[92m[DISPATCHER] Training complete for {len(all_results)} dimensions\033[0m")
     return all_results
 
@@ -408,7 +361,8 @@ def delete_series( config: Config):
     print(result)
 
 def fetch_series_data_with_aggregation(
-    config: Config, algorithm_to_execute: Algorithm
+    config: Config,
+    algorithm_to_execute: Algorithm
 ) -> Dict[str, pd.DataFrame]:
     """
     Fetch series data for all dimensions using MongoDB aggregation pipeline.
@@ -568,80 +522,6 @@ def fetch_series_data_with_aggregation(
 
     return observed_values
 
-
-def fetch_series_data_batch(
-    dimensions: List[str],
-    kb_id: str,
-    mode: str,
-    date_from: str,
-    date_to: str,
-    da_client: MongoClient,
-    db_name: str = "logsdb",
-    series_collection_name: str = "series"
-) -> Dict[str, pd.DataFrame]:
-    """
-    Alternative function to fetch series data when you have individual parameters
-    instead of a config document.
-    """
-
-    series_collection = da_client[db_name][series_collection_name]
-
-    print(f"\nFetching batch data for {len(dimensions)} dimensions...")
-
-    observed_values = {}
-
-    for dimension in dimensions:
-        pipeline = [
-            {
-                '$match': {
-                    'metadata.kbId': kb_id,
-                    'metadata.dim': dimension,
-                    'metadata.mode': mode.upper(),
-                    'timestamp': {
-                        '$gte': {'$date': date_from},
-                        '$lte': {'$date': date_to}
-                    }
-                }
-            },
-            {
-                '$project': {
-                    '_id': 0,
-                    'timestamp': 1,
-                    'value': 1
-                }
-            },
-            {
-                '$sort': {'timestamp': 1}
-            }
-        ]
-
-        try:
-            cursor = series_collection.aggregate(pipeline)
-            results = list(cursor)
-
-            if results:
-                df = pd.DataFrame(results)
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-                df['value'] = df['value'].apply(
-                    lambda x: float(x) if isinstance(x, (int, float))
-                    else float(x.get('$numberLong', 0)) if isinstance(x, dict)
-                    else 0
-                )
-                observed_values[dimension] = df
-                print(f"  ✓ {dimension}: {len(df)} records")
-            else:
-                observed_values[dimension] = pd.DataFrame(
-                    columns=['timestamp', 'value'])
-                print(f"  ✗ {dimension}: No data")
-
-        except Exception as e:
-            print(f"  ✗ {dimension}: Error - {str(e)}")
-            observed_values[dimension] = pd.DataFrame(
-                columns=['timestamp', 'value'])
-
-    return observed_values
-
-
 def watch_kb_changes(kb_client):
 
     while True:
@@ -655,7 +535,7 @@ def watch_kb_changes(kb_client):
                     print(f"something happened on: {TRAINING_COLLECTION_NAME}")
 
                     op_type = change.get("operationType")
-                    
+
                     # Only process insert operations - skip updates to avoid race condition
                     # Updates occur when we set is_trained=true after training completes
                     if op_type == "insert":
@@ -668,7 +548,7 @@ def watch_kb_changes(kb_client):
                         if not full_doc:
                             print(f"\033[93m[DISPATCHER] No fullDocument in change event, falling back to query\033[0m")
                             full_doc = ExtractLatestConfigurationKB(kb_client)
-                        
+
                         # Check if already trained to avoid duplicate processing
                         # Handle both boolean True and string "true"
                         is_trained = full_doc.get("is_trained")
@@ -679,7 +559,7 @@ def watch_kb_changes(kb_client):
 
                         print(f"\033[92m[DISPATCHER] Processing training_config for kb_id: {full_doc.get('kb_id')}\033[0m")
                         print(full_doc)
-                        
+
                         # Save config to file for debugging
                         with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
                             f.write(json_util.dumps(full_doc, indent=2))
@@ -690,7 +570,7 @@ def watch_kb_changes(kb_client):
 
                         # now we go thru each algorithm call we extracted, and try to execute training on them
                         config.execute_algos()
-                    
+
                     elif op_type == "update":
                         print(f"\033[90m[DISPATCHER] Ignoring update event (likely is_trained flag change)\033[0m")
 
@@ -705,8 +585,8 @@ def watch_kb_changes(kb_client):
 
 
 
-# TODO: test how robust it is this with a lot of different datapoints sent at the same time
-# TODO: check how change stream works with threads
+# TODO: test how robust it is this with a lot of different datapoints sent at the same time -> pretty robust, we tried it with 10400 entries
+# TODO: check how change stream works with threads -> works synchronously, fetches one at a time
 def watch_detection_changes(kb_client, workers: ThreadPoolExecutor, data_to_detect: Queue):
 
     while True:
@@ -764,23 +644,23 @@ def detect_z_score(serie_to_detect):
 
         training_result = next(result, None)
         print(f"[DETECTION] Training result: {training_result is not None}", flush=True)
-    
+
         if training_result is None:
             print(f"\033[93m[DETECTION] No training result found for kb_id={serie_to_detect['metadata']['kbId']}, dim={serie_to_detect['metadata']['dim']}\033[0m")
             return
-    
+
         # Check if this is the NEW bucket-based training result format
         if "buckets" in training_result:
             # NEW FORMAT: Use bucket-aware detection
             print(f"\033[92m[DETECTION] Using bucket-aware detection for {serie_to_detect['metadata']['dim']}\033[0m")
-            
+
             value = serie_to_detect.get("value", 0)
             timestamp = serie_to_detect.get("timestamp")
-            
+
             # Try to resolve the bucket key using BucketResolver
             bucket_key = "global_default"
             bucket_profile_id = training_result.get("bucket_profile_id")
-            
+
             if bucket_profile_id and timestamp:
                 try:
                     from Dispatcher.bucket_resolver import BucketResolver
@@ -794,11 +674,11 @@ def detect_z_score(serie_to_detect):
                         print(f"\033[94m[DETECTION] Resolved bucket key: {bucket_key}\033[0m")
                 except Exception as e:
                     print(f"\033[93m[DETECTION] Could not resolve bucket, using fallback: {e}\033[0m")
-            
+
             # Get the baseline for the resolved bucket, or fall back to global
             baseline = None
             baseline_source = "unknown"
-            
+
             if bucket_key in training_result.get("buckets", {}):
                 baseline = training_result["buckets"][bucket_key]
                 baseline_source = f"bucket:{bucket_key}"
@@ -812,40 +692,40 @@ def detect_z_score(serie_to_detect):
                 baseline = training_result["buckets"][first_key]
                 baseline_source = f"first_bucket:{first_key}"
                 bucket_key = first_key
-            
+
             if not baseline:
                 print(f"\033[91m[DETECTION] No baseline found in training result\033[0m")
                 return
-            
+
             mean = baseline.get("mean", 0)
             std = baseline.get("std", 1)
             threshold = baseline.get("threshold", 3.0)
             data_points = baseline.get("data_points", 0)
             percentile = baseline.get("percentile", 99.5)
-            
+
             # Calculate z-score
             if std == 0:
                 z_score = 0.0
             else:
                 z_score = abs(value - mean) / std
-            
+
             is_anomaly = z_score > threshold
-            
+
             print(f"\033[94m[DETECTION] bucket={bucket_key}, value={value}, mean={mean:.2f}, std={std:.2f}, z_score={z_score:.2f}, threshold={threshold:.2f}, is_anomaly={is_anomaly}\033[0m")
-            
+
             if is_anomaly:
                 print("\033[31m=========================================================================================================================\033[0m")
                 print(f"\033[31m ANOMALY DETECTED: {dimension} = {value} (z-score: {z_score:.2f})\033[0m")
                 print("\033[31m=========================================================================================================================\033[0m")
-                
+
                 # Convert timestamp to ISO string
                 ts = timestamp
                 if isinstance(ts, datetime):
                     ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-                
+
                 url_post = ANOMALIES_INSIGHT_URL + "dashboard/" + kb_id + "/anomalies"
                 headers = {'Accept': 'application/json', "Content-Type": "application/json"}
-                
+
                 # Build context-aware anomaly description
                 context_desc = f"Anomaly in bucket '{bucket_key}'"
                 if bucket_key.startswith("workday_"):
@@ -860,7 +740,7 @@ def detect_z_score(serie_to_detect):
                     context_desc = f"Holiday anomaly ({bucket_key})"
                 elif bucket_key == "global_fallback" or bucket_key == "global_default":
                     context_desc = "Anomaly (no time-context profile)"
-                
+
                 processed_data = {
                     # Core fields
                     'algorithm': 'Z Score (Bucketed)',
@@ -886,15 +766,15 @@ def detect_z_score(serie_to_detect):
                         'deviation_from_mean': value - mean,
                     }
                 }
-                
+
                 try:
                     response = requests.post(url_post, json=processed_data, headers=headers)
                     print(f"\033[92m[DETECTION] Anomaly posted to insights API: {response.status_code}\033[0m")
                 except Exception as e:
                     print(f"\033[91m[DETECTION] Failed to post anomaly: {e}\033[0m")
-            
+
             return
-    
+
         # OLD FORMAT: Legacy detection code
         print(f"\033[93m[DETECTION] Using legacy detection format\033[0m")
 
@@ -996,7 +876,7 @@ def main():
 
     detection_watcher = threading.Thread(
         target=restartable_thread,
-        args=(watch_detection_changes,kb_client, workers, data_to_detect),
+        args=(watch_detection_changes,kb_client, workers),
         daemon=True
     )
 
