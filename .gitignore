@@ -218,3 +218,10 @@ MCP/KB-MCP/logs/log.txt
 MCP/KB-MCP/logs/structured_logs.jsonl
 logs/*
 logstash/data/*
+
+# Secrets and sensitive configuration files
+**/application-secrets.properties
+**/secrets.properties
+*.secrets
+.env.local
+.env.*.local

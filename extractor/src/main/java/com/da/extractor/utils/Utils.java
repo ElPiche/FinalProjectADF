@@ -26,7 +26,7 @@ public class Utils {
     /// Extrae el nombre del índice de una consulta Elasticsearch SQL
     public static String extractIndexName(String query) {
         Pattern pattern = Pattern.compile(
-                "FROM\\s+\"?([a-zA-Z0-9_.]+)\"?",
+                "FROM\\s+\"?([a-zA-Z0-9_.\\-*]+)\"?",
                 Pattern.CASE_INSENSITIVE
         );
         Matcher matcher = pattern.matcher(query);

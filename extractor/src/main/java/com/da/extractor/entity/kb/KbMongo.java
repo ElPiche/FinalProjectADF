@@ -39,6 +39,14 @@ public class KbMongo{
     // Unified SQL query for both training and detection
     @Field("elasticsearch_sql_query")
     private String elasticsearchSqlQuery;
+    
+    // Source Elasticsearch index being monitored - used for dashboard naming and anomaly output
+    @Field("source_index")
+    private String sourceIndex;
+    
+    // Anomaly notification configuration
+    @Field("anomaly_config")
+    private AnomalyConfig anomalyConfig;
 
     public List<String> getObservedValues(){
         if (algorithm == null || algorithm.getParameters() == null) {

@@ -11,7 +11,7 @@ from mcp.server.fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import ValidationError
 
-from models import AlgorithmConfig, DetectionConfig, KBConfig, QueryMode, SchedulingConfig, TrainingConfig
+from models import AlgorithmConfig, AnomalyConfig, DetectionConfig, KBConfig, QueryMode, SchedulingConfig, TrainingConfig
 from db import connect_mongodb
 from validation import validate_algorithms, validate_cron_expression, validate_window_size
 from utils import log_message as _utils_log_message
@@ -68,6 +68,8 @@ async def create_da_config(
     detection_start: str,
     algorithm: AlgorithmConfig,
     bucket_profile_id: Optional[str] = None,
+    source_index: str = "",
+    anomaly_config: Optional[AnomalyConfig] = None,
     ctx: Context | None = None,
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
@@ -127,6 +129,22 @@ async def create_da_config(
                 raise ToolError(str(exc)) from exc
 
             normalized_bucket_profile_id = bucket_profile_id.strip() if bucket_profile_id else None
+            normalized_source_index = source_index.strip() if source_index else None
+            
+            if not normalized_source_index:
+                raise ToolError("source_index is required - specify the Elasticsearch index being monitored (e.g., 'app-logs')")
+
+            # Validate and normalize anomaly_config if provided
+            validated_anomaly_config = None
+            if anomaly_config is not None:
+                try:
+                    validated_anomaly_config = (
+                        anomaly_config
+                        if isinstance(anomaly_config, AnomalyConfig)
+                        else AnomalyConfig.model_validate(anomaly_config)
+                    )
+                except ValidationError as exc:
+                    raise ToolError(f"Invalid anomaly_config payload: {exc}") from exc
 
             try:
                 validated_query_mode = (
@@ -156,8 +174,10 @@ async def create_da_config(
                 description=description,
                 change_flag=0,
                 elasticsearch_sql_query=cleaned_query,
+                source_index=normalized_source_index,
                 query_mode=validated_query_mode,
                 bucket_profile_id=normalized_bucket_profile_id,
+                anomaly_config=validated_anomaly_config,
                 algorithm=validated_algorithm,
                 scheduling=SchedulingConfig(
                     training_config=TrainingConfig(

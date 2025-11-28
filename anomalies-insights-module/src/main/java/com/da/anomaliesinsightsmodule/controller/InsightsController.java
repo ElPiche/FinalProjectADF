@@ -43,7 +43,8 @@ public class InsightsController {
 
             insightsService.createKbMapping(new IndexKbIdMapping(
                     kbIdMapping.getKbId(),
-                    kbIdMapping.getIndexName(),
+                    kbIdMapping.getSourceIndex(),
+                    null,  // anomalyIndex will be derived
                     null,
                     null,
                     null

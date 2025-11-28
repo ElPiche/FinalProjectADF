@@ -13,6 +13,7 @@ import db
 from db import connect_mongodb
 from models import (
     AlgorithmConfig,
+    AnomalyConfig,
     DetectionConfig,
     KBConfig,
     QueryMode,
@@ -47,6 +48,8 @@ async def modify_kb_config(
     detection_start: Optional[str] = None,
     algorithm: Optional[AlgorithmConfig] = None,
     bucket_profile_id: Optional[str] = None,
+    source_index: Optional[str] = None,
+    anomaly_config: Optional[AnomalyConfig] = None,
     ctx: Context | None = None,
 ) -> str:
     request_id = str(uuid.uuid4())[:8]
@@ -185,6 +188,32 @@ async def modify_kb_config(
                     updated_bucket_profile_id = cleaned_bucket_profile_id
                     updates_applied = True
 
+            updated_source_index = existing_config.source_index
+            if source_index is not None:
+                if not isinstance(source_index, str):
+                    raise ToolError("source_index must be a string")
+                cleaned_source_index = source_index.strip()
+                if cleaned_source_index == "":
+                    raise ToolError("source_index cannot be empty")
+                if cleaned_source_index != existing_config.source_index:
+                    updated_source_index = cleaned_source_index
+                    updates_applied = True
+
+            updated_anomaly_config = existing_config.anomaly_config
+            if anomaly_config is not None:
+                try:
+                    validated_anomaly_config = (
+                        anomaly_config
+                        if isinstance(anomaly_config, AnomalyConfig)
+                        else AnomalyConfig.model_validate(anomaly_config)
+                    )
+                except ValidationError as exc:
+                    raise ToolError(f"Invalid anomaly_config payload: {exc}") from exc
+                existing_dump = existing_config.anomaly_config.model_dump() if existing_config.anomaly_config else None
+                if validated_anomaly_config.model_dump() != existing_dump:
+                    updated_anomaly_config = validated_anomaly_config
+                    updates_applied = True
+
             training_payload = existing_config.scheduling.training_config.model_dump(by_alias=True)
             if training_from is not None:
                 if not isinstance(training_from, str) or not training_from.strip():
@@ -284,8 +313,10 @@ async def modify_kb_config(
                 description=updated_description,
                 change_flag=existing_config.change_flag + 1,
                 elasticsearch_sql_query=updated_query,
+                source_index=updated_source_index,
                 query_mode=resulting_query_mode,
                 bucket_profile_id=updated_bucket_profile_id,
+                anomaly_config=updated_anomaly_config,
                 algorithm=algorithm_to_use,
                 scheduling=updated_scheduling_config,
             )

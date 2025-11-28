@@ -11,5 +11,5 @@ import lombok.Setter;
 @AllArgsConstructor
 public class KeyValuePair{
     String key;
-    Object value;
+    Object values;
 }

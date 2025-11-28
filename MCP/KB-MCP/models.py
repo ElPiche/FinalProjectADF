@@ -122,6 +122,37 @@ class SchedulingConfig(BaseModel):
     detection_config: DetectionConfig = Field(description="Detection configuration")
 
 
+class AnomalyConfig(BaseModel):
+    """Generic holder for per-KB anomaly notification and future tweakable configs."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_emails: Optional[List[str]] = Field(
+        default=None,
+        validation_alias=AliasChoices("user_emails", "UserEmails"),
+        serialization_alias="user_emails",
+        description="Optional list of email addresses to notify when anomalies are detected.",
+    )
+
+    @field_validator("user_emails")
+    @classmethod
+    def validate_user_emails(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            raise ValueError("user_emails must be a list of email addresses")
+        validated_emails = []
+        email_pattern = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+        for email in value:
+            if not isinstance(email, str) or not email.strip():
+                raise ValueError("Each email must be a non-empty string")
+            email_clean = email.strip()
+            if not email_pattern.match(email_clean):
+                raise ValueError(f"Invalid email format: {email_clean}")
+            validated_emails.append(email_clean)
+        return validated_emails if validated_emails else None
+
+
 class AlgorithmParameter(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -180,10 +211,19 @@ class KBConfig(BaseModel):
     description: str = Field(description="Human-readable description")
     change_flag: int = Field(default=0, description="Change flag for triggering change streams")
     elasticsearch_sql_query: str = Field(description="Unified Elasticsearch SQL query for training and detection")
+    source_index: str = Field(
+        description="Source Elasticsearch index being monitored (e.g., 'app-logs'). Used for dashboard naming and anomaly output index.",
+    )
     query_mode: QueryMode = Field(description="Query mode metadata")
     bucket_profile_id: Optional[str] = Field(
         default=None,
         description="Optional reference to a bucket_profiles document (time-context definition).",
+    )
+    anomaly_config: Optional[AnomalyConfig] = Field(
+        default=None,
+        validation_alias=AliasChoices("anomaly_config", "AnomalyConfig"),
+        serialization_alias="anomaly_config",
+        description="Optional anomaly notification and configuration settings.",
     )
     algorithm: AlgorithmConfig = Field(description="Algorithm configuration")
     scheduling: SchedulingConfig = Field(description="Scheduling configuration")

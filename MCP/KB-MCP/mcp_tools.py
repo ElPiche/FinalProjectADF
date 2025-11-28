@@ -14,7 +14,7 @@ import uuid
 import time
 import json
 
-from models import AlgorithmConfig, QueryMode
+from models import AlgorithmConfig, QueryMode, AnomalyConfig
 from utils import log_message as _utils_log_message, stderr_print
 from instrumentation import timed
 from description_utils import ALGORITHM_CONFIG_DESCRIPTION, AVAILABLE_ALGORITHMS_DESCRIPTION, SUPPORTED_ALGORITHMS, SUPPORTED_ALGORITHMS_INLINE, SUPPORTED_ALGORITHMS_QUOTED, generate_tool_list_for_describe_mcp, get_tool_count, generate_kb_config_template_description, generate_kb_config_fields_description, generate_kb_config_description, generate_kb_config_example, generate_kb_config_description, generate_kb_config_example, generate_algorithm_config_example
@@ -424,6 +424,8 @@ async def create_da_config(
     detection_start: str,
     algorithm: AlgorithmConfig = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
     bucket_profile_id: str | None = None,
+    source_index: str = Field(description="Source Elasticsearch index being monitored (e.g., 'app-logs'). Required."),
+    anomaly_config: AnomalyConfig | None = None,
     ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
@@ -442,6 +444,8 @@ async def create_da_config(
             detection_start,
             algorithm,
             bucket_profile_id,
+            source_index,
+            anomaly_config,
             ctx,
         )
     raise ToolError("create_da_config is not implemented in the migration package yet")
@@ -461,6 +465,8 @@ async def modify_kb_config(
     detection_start: Optional[str] = None,
     algorithm: Optional[AlgorithmConfig] = Field(default=None, description=ALGORITHM_CONFIG_DESCRIPTION),
     bucket_profile_id: Optional[str] = None,
+    source_index: Optional[str] = None,
+    anomaly_config: Optional[AnomalyConfig] = None,
     ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
@@ -479,6 +485,8 @@ async def modify_kb_config(
             detection_start,
             algorithm,
             bucket_profile_id,
+            source_index,
+            anomaly_config,
             ctx,
         )
     raise ToolError("modify_kb_config is not implemented in the migration package yet")
