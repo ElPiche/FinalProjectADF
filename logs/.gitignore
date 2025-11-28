@@ -1,0 +1,4 @@
+# Ignorar todo lo que se genere acá
+*
+
+!.gitignore
