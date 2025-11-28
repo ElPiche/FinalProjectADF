@@ -526,6 +526,7 @@ def watch_kb_changes(kb_client):
 
     while True:
         try:
+
             # Use fullDocument to get the inserted document directly from the change event
             with kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].watch(
                 full_document='updateLookup'
@@ -539,12 +540,13 @@ def watch_kb_changes(kb_client):
                     # Only process insert operations - skip updates to avoid race condition
                     # Updates occur when we set is_trained=true after training completes
                     if op_type == "insert":
-                        print(
-                            f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
+
+                        print(f"\033[31m Someone inserted data into: {TRAINING_COLLECTION_NAME} \033[0m")
 
                         # Get the document directly from the change event instead of querying
                         # This ensures we process the exact document that triggered the event
                         full_doc = change.get("fullDocument")
+
                         if not full_doc:
                             print(f"\033[93m[DISPATCHER] No fullDocument in change event, falling back to query\033[0m")
                             full_doc = ExtractLatestConfigurationKB(kb_client)
@@ -552,8 +554,10 @@ def watch_kb_changes(kb_client):
                         # Check if already trained to avoid duplicate processing
                         # Handle both boolean True and string "true"
                         is_trained = full_doc.get("is_trained")
+
                         print(f"\033[90m[DISPATCHER] is_trained value: {is_trained} (type: {type(is_trained).__name__})\033[0m")
-                        if is_trained in (True, "true", "True"):
+
+                        if is_trained in (True, "true", "True"): #??????????? why? this should re train, besides if you insert the same document, mongo should explode
                             print(f"\033[93m[DISPATCHER] Skipping already-trained config: {full_doc.get('kb_id')}\033[0m")
                             continue
 
@@ -571,7 +575,9 @@ def watch_kb_changes(kb_client):
                         # now we go thru each algorithm call we extracted, and try to execute training on them
                         config.execute_algos()
 
-                    elif op_type == "update":
+                    elif op_type == "update": # TODO: add support for is_trained = true cuz when it's an is_trained
+                                              # TODO: it always brings data, so it won't explode
+
                         print(f"\033[90m[DISPATCHER] Ignoring update event (likely is_trained flag change)\033[0m")
 
         except PyMongoError as e:
@@ -587,7 +593,7 @@ def watch_kb_changes(kb_client):
 
 # TODO: test how robust it is this with a lot of different datapoints sent at the same time -> pretty robust, we tried it with 10400 entries
 # TODO: check how change stream works with threads -> works synchronously, fetches one at a time
-def watch_detection_changes(kb_client, workers: ThreadPoolExecutor, data_to_detect: Queue):
+def watch_detection_changes(kb_client, workers: ThreadPoolExecutor):
 
     while True:
         try:
@@ -605,7 +611,7 @@ def watch_detection_changes(kb_client, workers: ThreadPoolExecutor, data_to_dete
 
                         serie_to_detect = change.get("fullDocument")
 
-                        workers.submit(detect_z_score, (serie_to_detect))
+                        workers.submit(detect_z_score, serie_to_detect)
 
         except PyMongoError as e:
             print(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
@@ -620,7 +626,7 @@ def watch_detection_changes(kb_client, workers: ThreadPoolExecutor, data_to_dete
 
 def detect_z_score(serie_to_detect):
     try:
-        print(f"I am printing serie_to_detect: {serie_to_detect}", flush=True)
+        #print(f"I am printing serie_to_detect: {serie_to_detect}", flush=True)
         kb_client = CreateConnectionToDA()
 
         kb_id = serie_to_detect["metadata"]["kbId"]
@@ -629,13 +635,16 @@ def detect_z_score(serie_to_detect):
 
         # Look up KB name from train_config collection
         print(f"[DETECTION] Looking up KB config...", flush=True)
+
         kb_config = kb_client[MONGO_DB_NAME]["train_config"].find_one({"_id": ObjectId(kb_id)})
         kb_name = kb_config.get("name", "Unknown") if kb_config else "Unknown"
+
         print(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}\033[0m", flush=True)
 
         pipeline = [{'$match':
                          {'kb_id': kb_id,
-                          'dimension': dimension}
+                          'dimension': dimension
+                          }
                      }]
 
         print(f"[DETECTION] Looking up training result...", flush=True)
@@ -651,6 +660,7 @@ def detect_z_score(serie_to_detect):
 
         # Check if this is the NEW bucket-based training result format
         if "buckets" in training_result:
+
             # NEW FORMAT: Use bucket-aware detection
             print(f"\033[92m[DETECTION] Using bucket-aware detection for {serie_to_detect['metadata']['dim']}\033[0m")
 
@@ -666,12 +676,15 @@ def detect_z_score(serie_to_detect):
                     from Dispatcher.bucket_resolver import BucketResolver
                     # Fetch bucket profile from MongoDB
                     profile_doc = kb_client[MONGO_DB_NAME]["bucket_profiles"].find_one({"_id": bucket_profile_id})
+
                     if profile_doc:
                         resolver = BucketResolver.from_dict(profile_doc)
+
                         # Ensure timestamp is datetime
                         if isinstance(timestamp, datetime):
                             bucket_key = resolver.resolve(timestamp)
                         print(f"\033[94m[DETECTION] Resolved bucket key: {bucket_key}\033[0m")
+
                 except Exception as e:
                     print(f"\033[93m[DETECTION] Could not resolve bucket, using fallback: {e}\033[0m")
 
@@ -682,10 +695,12 @@ def detect_z_score(serie_to_detect):
             if bucket_key in training_result.get("buckets", {}):
                 baseline = training_result["buckets"][bucket_key]
                 baseline_source = f"bucket:{bucket_key}"
+
             elif training_result.get("global_fallback"):
                 baseline = training_result["global_fallback"]
                 baseline_source = "global_fallback"
                 bucket_key = "global_fallback"
+
             elif training_result.get("buckets"):
                 # Use first available bucket as last resort
                 first_key = next(iter(training_result["buckets"]))
@@ -765,6 +780,7 @@ def detect_z_score(serie_to_detect):
                         'baseline_source': baseline_source,
                         'deviation_from_mean': value - mean,
                     }
+                    #TODO: add support for the email in anomaly insight
                 }
 
                 try:
@@ -863,8 +879,6 @@ def main():
     """Main function. It creates 2 watchers, one for training (listens to Mongo's anomaly_detection -> training_config) and one for detection (listens to Mongo's anomaly_detection -> series)."""
     # Esto arma la conexión a MongoDB
     kb_client = CreateConnectionToKB()
-
-    data_to_detect: Queue = Queue(maxsize=QUEUE_MAX_SIZE)
 
     workers : ThreadPoolExecutor = ThreadPoolExecutor()
 
