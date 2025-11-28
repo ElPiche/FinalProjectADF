@@ -78,7 +78,7 @@ public class KibanaService {
     public String getDataViewIdByTitle(String title) {
         try {
             HttpRequest req = HttpRequest.newBuilder()
-                    .uri(URI.create(baseUrl + "/api/data_views/data_view/list"))
+                    .uri(URI.create(baseUrl + "/api/data_views"))
                     .header("kbn-xsrf", "true")
                     .GET().build();
 
