@@ -10,8 +10,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.List;
-import java.util.stream.Collectors;
 
 /**
  * Rate limiter for email notifications to prevent spam.
@@ -51,18 +49,12 @@ public class EmailRateLimiterService {
                 normalizedEmail, k -> new CopyOnWriteArrayList<>()
         );
 
-        // Clean up old entries (older than 1 hour)
-        List<Instant> recentSends = history.stream()
-                .filter(timestamp -> timestamp.isAfter(oneHourAgo))
-                .collect(Collectors.toList());
-
-        // Update history with cleaned list
-        history.clear();
-        history.addAll(recentSends);
+        // Clean up old entries atomically (older than 1 hour)
+        history.removeIf(timestamp -> !timestamp.isAfter(oneHourAgo));
 
         // Check cooldown (minimum time between emails to same recipient)
-        if (!recentSends.isEmpty()) {
-            Instant lastSend = recentSends.get(recentSends.size() - 1);
+        if (!history.isEmpty()) {
+            Instant lastSend = history.get(history.size() - 1);
             if (lastSend.isAfter(cooldownThreshold)) {
                 logger.info("Rate limit: Email to {} blocked by cooldown. Last sent: {}", 
                         normalizedEmail, lastSend);
@@ -71,9 +63,9 @@ public class EmailRateLimiterService {
         }
 
         // Check hourly limit
-        if (recentSends.size() >= maxEmailsPerHour) {
+        if (history.size() >= maxEmailsPerHour) {
             logger.info("Rate limit: Email to {} blocked. {} emails sent in last hour (max: {})", 
-                    normalizedEmail, recentSends.size(), maxEmailsPerHour);
+                    normalizedEmail, history.size(), maxEmailsPerHour);
             return false;
         }
 
