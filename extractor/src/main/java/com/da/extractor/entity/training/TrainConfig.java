@@ -1,5 +1,6 @@
 package com.da.extractor.entity.training;
 
+import com.da.extractor.entity.kb.AnomalyConfig;
 import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.entity.serie.Mode;
 import lombok.*;
@@ -40,6 +41,9 @@ public class TrainConfig {
     private short mode;
 
     private List<AlgorithmConfig> algorithms;
+    
+    @Field("anomaly_config")
+    private AnomalyConfig anomalyConfig;
 
     public TrainConfig(KbMongo from){
         this.kbId = from.getId();
@@ -48,6 +52,7 @@ public class TrainConfig {
         this.isTrained = false;
         this.mode = (short) Mode.TRAINING.ordinal();
         this.algorithms = new ArrayList<>();
+        this.anomalyConfig = from.getAnomalyConfig(); // Copy anomaly notification config
         
         var trainingConfig = from.getScheduling().getTrainingConfig();
 

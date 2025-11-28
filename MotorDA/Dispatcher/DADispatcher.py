@@ -633,13 +633,18 @@ def detect_z_score(serie_to_detect):
         dimension = serie_to_detect["metadata"]["dim"]
         print(f"[DETECTION] Got kb_id={kb_id}, dimension={dimension}", flush=True)
 
-        # Look up KB name from train_config collection
+        # Look up KB name and user emails from training_config collection (indexed by kb_id, not _id)
         print(f"[DETECTION] Looking up KB config...", flush=True)
+        kb_config = kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].find_one({"kb_id": kb_id})
+        kb_name = kb_config.get("kb_description", "Unknown") if kb_config else "Unknown"
 
-        kb_config = kb_client[MONGO_DB_NAME]["train_config"].find_one({"_id": ObjectId(kb_id)})
-        kb_name = kb_config.get("name", "Unknown") if kb_config else "Unknown"
-
-        print(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}\033[0m", flush=True)
+        # Extract user emails for notifications from anomaly_config
+        user_emails = []
+        if kb_config:
+            anomaly_config = kb_config.get("anomaly_config", {})
+            if anomaly_config:
+                user_emails = anomaly_config.get("user_emails", [])
+        print(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}, Notification emails: {user_emails}\033[0m", flush=True)
 
         pipeline = [{'$match':
                          {'kb_id': kb_id,
@@ -756,6 +761,9 @@ def detect_z_score(serie_to_detect):
                 elif bucket_key == "global_fallback" or bucket_key == "global_default":
                     context_desc = "Anomaly (no time-context profile)"
 
+                # Get first email for notification (or None if no emails configured)
+                notification_email = user_emails[0] if user_emails else None
+
                 processed_data = {
                     # Core fields
                     'algorithm': 'Z Score (Bucketed)',
@@ -764,8 +772,9 @@ def detect_z_score(serie_to_detect):
                     'timestamp': ts,
                     'value': value,
                     'created_at': datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    'email': notification_email,
                     # KB identification
-                    'kb_name': kb_name,
+                    'kbName': kb_name,
                     # Bucket context
                     'bucket_key': bucket_key,
                     'bucket_profile_id': bucket_profile_id,
@@ -848,6 +857,9 @@ def detect_z_score(serie_to_detect):
                 # send UTC ISO 8601 string (add 'Z' or include tzinfo)
                 ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
+            # Get first email for notification (or None if no emails configured)
+            notification_email = user_emails[0] if user_emails else None
+
             processed_data = {
                 'algorithm': 'Z Score',
                 'metric': serie_to_detect["metadata"]["dim"],
@@ -855,7 +867,9 @@ def detect_z_score(serie_to_detect):
                 'timestamp': ts,
                 'value': anomalies[0].get("value"),
                 'created_at': datetime.now(timezone.utc).replace(tzinfo=timezone.utc).isoformat().replace(
-                    "+00:00", "Z")
+                    "+00:00", "Z"),
+                'email': notification_email,
+                'kbName': kb_name
             }
 
             requests.post(url_post, json=processed_data, headers=headers)
@@ -890,7 +904,7 @@ def main():
 
     detection_watcher = threading.Thread(
         target=restartable_thread,
-        args=(watch_detection_changes,kb_client, workers),
+        args=(watch_detection_changes, kb_client, workers, data_to_detect),
         daemon=True
     )
 

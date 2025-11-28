@@ -40,8 +40,8 @@ def list_available_algorithms() -> str:
             "example_config": {
                 "alg_name": "kmeans",
                 "alg_parameters": [
-                    {"dimension": "status_code_5xx_counter", "alg_metadata": [{"key": "clusters", "values": "3"}]},
-                    {"dimension": "status_code_5xx_counter", "alg_metadata": [{"key": "clusters", "values": "5"}]}
+                    {"dimension": "status_code_5xx_counter", "alg_metadata": [{"key": "clusters", "value": "3"}]},
+                    {"dimension": "status_code_5xx_counter", "alg_metadata": [{"key": "clusters", "value": "5"}]}
                 ]
             },
             "parameters": [

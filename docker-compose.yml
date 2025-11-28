@@ -321,6 +321,35 @@ services:
     #   - ./MotorDA:/app/MotorDA
 
 
+  log-generator:
+    build:
+      context: ./log-generator
+      dockerfile: Dockerfile
+    container_name: log-generator
+    restart: unless-stopped
+    depends_on:
+      elasticsearch-dataset:
+        condition: service_healthy
+    environment:
+      - ES_HOST=http://elasticsearch-dataset:9200
+      - INDEX_NAME=app-logs
+      - HISTORICAL_DAYS=365
+      - HISTORICAL_BATCH_SIZE=5000
+      - HISTORICAL_ANOMALY_RATE=0.02
+      - CONTINUOUS_INTERVAL=1.0
+      - LOGS_PER_INTERVAL_MIN=15
+      - LOGS_PER_INTERVAL_MAX=30
+      - CONTINUOUS_ANOMALY_RATE=0.02
+      - BURST_PROBABILITY=0.05
+    networks:
+      - adf-network
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "unified_log_generator.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
   logstash:
     image: docker.elastic.co/logstash/logstash:8.15.0
     container_name: logstash

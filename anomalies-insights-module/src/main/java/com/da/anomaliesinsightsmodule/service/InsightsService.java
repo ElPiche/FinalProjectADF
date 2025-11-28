@@ -22,39 +22,46 @@ public class InsightsService {
 
     private final EmailNotificationService emailNotificationService;
 
+    private final EmailRateLimiterService emailRateLimiterService;
+
     private final Logger logger = LoggerFactory.getLogger(InsightsService.class);
 
-    public InsightsService(ElasticsearchService elasticsearchService, KibanaService kibanaService, EmailNotificationService emailNotificationService) {
+    public InsightsService(ElasticsearchService elasticsearchService, KibanaService kibanaService, 
+                           EmailNotificationService emailNotificationService,
+                           EmailRateLimiterService emailRateLimiterService) {
         this.elasticsearchService = elasticsearchService;
         this.kibanaService = kibanaService;
         this.emailNotificationService = emailNotificationService;
+        this.emailRateLimiterService = emailRateLimiterService;
     }
 
     public void createKbMapping(IndexKbIdMapping kbIdMapping) throws Exception {
 
-        //Normalizar nombre.
-        String normalizedIndexName = normalizeIndexName(kbIdMapping.getIndexName());
+        // Source index (e.g., "app-logs") - used for dashboard naming
+        String sourceIndex = kbIdMapping.getSourceIndex();
+        
+        // Derive anomaly output index from source (e.g., "app-logs" -> "app-logs_anomalies")
+        String anomalyIndex = sanitizeIndexName(sourceIndex) + "_anomalies";
+        kbIdMapping.setAnomalyIndex(anomalyIndex);
 
-        kbIdMapping.setIndexName(normalizedIndexName);
+        if(!elasticsearchService.indexExists(anomalyIndex)){
 
-        if(!elasticsearchService.indexExists(normalizedIndexName)){
-
-            //Crear indice
-            elasticsearchService.createIndex(normalizedIndexName);
-            logger.info("Creating anomalies index in elasticsearch: " + normalizedIndexName);
+            //Crear indice for anomalies
+            elasticsearchService.createIndex(anomalyIndex);
+            logger.info("Creating anomalies index in elasticsearch: " + anomalyIndex);
 
             //Crear dataview
-            String dataViewId = kibanaService.createDataView(normalizedIndexName);
+            String dataViewId = kibanaService.createDataView(anomalyIndex);
 
-            logger.info("Creating dataView for index:  " + normalizedIndexName + " data view id: " + dataViewId);
+            logger.info("Creating dataView for index:  " + anomalyIndex + " data view id: " + dataViewId);
 
-            //Crear saved search + lens para dashboard
-            String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + normalizedIndexName);
+            //Crear saved search + lens para dashboard - use SOURCE index for title
+            String ssId = kibanaService.createSavedSearch(dataViewId, "SavedSearch - " + sourceIndex);
 
             logger.info("Creating saved search:  " + ssId + " data view id: " + dataViewId);
 
-            //Crear dashboard
-            String dashId = kibanaService.createDashboardWithEmbeddedLens("Dashboard - " + normalizedIndexName, dataViewId, ssId);
+            //Crear dashboard - use SOURCE index for title (what we're monitoring)
+            String dashId = kibanaService.createDashboardWithEmbeddedLens("Dashboard - " + sourceIndex, dataViewId, ssId);
 
             logger.info("Creating dashboard:  " + dashId + " saved search id: " + ssId);
 
@@ -68,7 +75,7 @@ public class InsightsService {
         //Crear mapeo
         elasticsearchService.createKbMapping(kbIdMapping);
 
-        logger.info("Creating mapping:  kbid: " + kbIdMapping.getKbId() + " Index name: " + normalizedIndexName);
+        logger.info("Creating mapping:  kbid: " + kbIdMapping.getKbId() + " Source index: " + sourceIndex + " Anomaly index: " + anomalyIndex);
 
     }
 
@@ -82,9 +89,9 @@ public class InsightsService {
 
         IndexResponse response;
 
-        //Subir documento.
-        response = elasticsearchService.indexAnomalyDocument(mapping.getIndexName(), doc);
-        logger.info("Inserting document in index:  " + mapping.getIndexName());
+        //Subir documento to anomaly index
+        response = elasticsearchService.indexAnomalyDocument(mapping.getAnomalyIndex(), doc);
+        logger.info("Inserting document in index:  " + mapping.getAnomalyIndex());
 
         //Refrescar dataView
         if (mapping.getDataViewId() != null) {
@@ -104,6 +111,13 @@ public class InsightsService {
     public void sendAnomalyEmail(DocumentDto doc, IndexKbIdMapping mapping) throws Exception {
 
         try{
+            // Check rate limit before sending
+            if (!emailRateLimiterService.canSendEmail(doc.getEmail())) {
+                logger.info("Email to {} rate limited. Status: {}", 
+                        doc.getEmail(), 
+                        emailRateLimiterService.getRateLimitStatus(doc.getEmail()));
+                return;
+            }
 
             emailNotificationService.sendHtmlEmailFromTemplate(
                     doc.getEmail(),   // o recorrer lista
@@ -114,10 +128,15 @@ public class InsightsService {
                             "anomalyMetric", doc.getMetric(),
                             "anomalyValue", doc.getValue().toString(),
                             "anomalyTimestamp", doc.getTimestamp(),
-                            "resultsIndexName", mapping.getIndexName(),
+                            "sourceIndex", mapping.getSourceIndex(),
                             "kibanaUrl", "http://localhost:5602/app/dashboards#/view/" + mapping.getDashboardId()
                     )
             );
+
+            // Record successful send for rate limiting
+            emailRateLimiterService.recordEmailSent(doc.getEmail());
+
+            logger.info("Sending anomaly email to: " + doc.getEmail());
 
         }catch(Exception e){
             logger.error("Error while sending anomaly email:" + e.getMessage());
@@ -153,7 +172,11 @@ public class InsightsService {
         );
     }
 
-    private String normalizeIndexName(String rawName) {
+    /**
+     * Sanitize an index name for Elasticsearch without adding any suffix.
+     * Used for preparing source index names before appending _anomalies.
+     */
+    private String sanitizeIndexName(String rawName) {
         if (rawName == null || rawName.isBlank()) {
             throw new IllegalArgumentException("Index name cannot be null or empty");
         }
@@ -177,14 +200,9 @@ public class InsightsService {
             normalized = "idx-" + normalized;
         }
 
-        // f) agregar sufijo _anomalies_result si no lo tiene
-        if (!normalized.endsWith("_anomalies_result")) {
-            normalized = normalized + "_anomalies_result";
-        }
-
-        // g) limitar longitud
-        if (normalized.length() > 255) {
-            normalized = normalized.substring(0, 255);
+        // f) limitar longitud (leave room for _anomalies suffix)
+        if (normalized.length() > 245) {
+            normalized = normalized.substring(0, 245);
         }
 
         return normalized;

@@ -241,7 +241,7 @@ def generate_kb_config_template_description() -> str:
                         if 'alg_metadata' in param:
                             metadata = param['alg_metadata']
                             for meta in metadata:
-                                description_parts.append(f"        - {meta.get('key', 'N/A')}: {meta.get('values', 'N/A')}")
+                                description_parts.append(f"        - {meta.get('key', 'N/A')}: {meta.get('value', 'N/A')}")
 
         return "\n".join(description_parts)
 
@@ -392,7 +392,7 @@ def generate_kb_config_example() -> str:
                     AlgorithmParameter(
                         dimension="es_event_count",
                         is_active=False,
-                        metadata=[{"key": "threshold", "values": "99.5"}],
+                        metadata=[{"key": "threshold", "value": "99.5"}],
                     ),
                 ],
             ),
@@ -450,7 +450,7 @@ def generate_algorithm_config_example() -> str:
                 AlgorithmParameter(
                     dimension="status_code_5xx_counter",
                     is_active=True,
-                    metadata=[{"key": "percentile", "values": "99.5"}],
+                    metadata=[{"key": "percentile", "value": "99.5"}],
                 ),
             ]
         )

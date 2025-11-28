@@ -88,12 +88,16 @@ public class BatchModeService {
             pipeline.process(query);
             var trainConfig = new TrainConfig(config);
 
-            String indexName = Utils.extractIndexName(query);
+            // Source index from KB config - used for both dashboard naming and anomaly output
+            String sourceIndex = config.getSourceIndex();
+            if (sourceIndex == null || sourceIndex.isBlank()) {
+                throw new IllegalArgumentException("source_index is required in KB config");
+            }
 
-            // Enviar POST al módulo de anomalías
+            // Enviar POST al módulo de anomalías - source index is used for everything
             CreateMappingRequestDto mappingRequest = new CreateMappingRequestDto(
                     config.getId(),
-                    indexName
+                    sourceIndex
             );
             String requestBody = new ObjectMapper().writeValueAsString(mappingRequest);
 
@@ -114,7 +118,7 @@ public class BatchModeService {
 
                 response.thenAccept(res -> {
                     if(res.statusCode() == 200){
-                        logger.info("Se ha creado el mapping para kbId \"{}\" e indice \"{}\"", config.getId(), indexName);
+                        logger.info("Se ha creado el mapping para kbId \"{}\" source index \"{}\"", config.getId(), sourceIndex);
 
                     }else if(res.statusCode() == 500){
                         logger.error("Error interno del módulo de anomalías al crear el mapping para kbId \"{}\"\n: {}",

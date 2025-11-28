@@ -6,9 +6,10 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StreamUtils;
 
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 
@@ -41,9 +42,12 @@ public class EmailNotificationService {
             Map<String, String> variables
     ) throws Exception {
 
-        // 1. Carga el template desde resources
+        // 1. Carga el template desde resources (works with JAR files)
         ClassPathResource resource = new ClassPathResource(templatePath);
-        String html = Files.readString(resource.getFile().toPath(), StandardCharsets.UTF_8);
+        String html;
+        try (InputStream inputStream = resource.getInputStream()) {
+            html = StreamUtils.copyToString(inputStream, StandardCharsets.UTF_8);
+        }
 
         // 2. Reemplaza variables {{var}}
         for (Map.Entry<String, String> entry : variables.entrySet()) {
