@@ -904,7 +904,7 @@ def main():
 
     detection_watcher = threading.Thread(
         target=restartable_thread,
-        args=(watch_detection_changes, kb_client, workers, data_to_detect),
+        args=(watch_detection_changes, kb_client, workers),
         daemon=True
     )
 
