@@ -294,7 +294,7 @@ if __name__ == "__main__":
                         "alg_name": "kmeans",
                         "alg_parameters": [{
                             "dimension": args.alg_kmeans_dimension,
-                            "alg_metadata": [{"key": "clusters", "values": str(args.alg_kmeans_clusters)}]
+                            "alg_metadata": [{"key": "clusters", "value": str(args.alg_kmeans_clusters)}]
                         }]
                     })
 

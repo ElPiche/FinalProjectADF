@@ -170,7 +170,7 @@ def parse_config(data: dict, mongo_client: MongoClient = None) -> Config:
                 parameters=Parameters(
                     train_window=a["parameters"]["train_window"],
                     observed_values={
-                        ov["dimension"]: {am["key"]: am.get("values", am.get("value"))
+                        ov["dimension"]: {am["key"]: am["value"]
                                           for am in ov["algorithm_metadata"]}
                         for ov in a["parameters"]["observed_values"]
                     },

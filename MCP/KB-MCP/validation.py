@@ -425,7 +425,7 @@ def validate_algorithms(algorithms: list[dict] | dict | None) -> list[str]:
                     continue
                 if "key" not in meta:
                     errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing key")
-                if "values" not in meta:
+                if "value" not in meta:
                     errors.append(f"algorithm {i}, parameter {j}, metadata {k}: missing values")
 
     return errors
