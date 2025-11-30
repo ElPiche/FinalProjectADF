@@ -413,6 +413,36 @@ services:
       retries: 3
       start_period: 30s
 
+  # KB Stress Generator - Stress test the stack by periodically creating configs
+  kb-stress-generator:
+    build:
+      context: ./kb-stress-generator
+      dockerfile: Dockerfile
+    container_name: kb-stress-generator
+    restart: unless-stopped
+    profiles:
+      - stress  # Only starts with: docker-compose --profile stress up
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      elasticsearch-dataset:
+        condition: service_healthy
+    environment:
+      - MONGODB_URI=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
+      - MONGODB_DB=knowledge_base
+      - MONGODB_COLLECTION=kb_configs
+      - BUCKET_COLLECTION=bucket_profiles
+      - ES_URL=http://elasticsearch-dataset:9200
+      - MODE=continuous
+      - MIN_INTERVAL=1
+      - MAX_INTERVAL=10
+      - BURST_PROBABILITY=0.1
+      - BURST_SIZE_MIN=3
+      - BURST_SIZE_MAX=10
+      - BUCKET_PROBABILITY=0.3
+    networks:
+      - adf-network
+
 
 volumes:
   mongo_data: null
