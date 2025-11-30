@@ -45,12 +45,18 @@ public class SchedulerService {
 
     public void createStreamingTask(SchedulerConfig config, PipeMetadata pipeMetadata) {
 
-        String springCron = normalizeCron(config.getFrequency());
+        String springCron = normalizeCron(config.getFrequency(), config.getKbId());
 
         CronTrigger cronTrigger = new CronTrigger(springCron);
         Runnable task = () -> {
             try {
-                TrainConfig trainConfig = trainingConfigRepository.findByKbId(config.getKbId()).orElseThrow();
+                // Gracefully handle missing TrainConfig instead of crashing
+                var trainConfigOpt = trainingConfigRepository.findByKbId(config.getKbId());
+                if (trainConfigOpt.isEmpty()) {
+                    log.warn("TrainConfig not found for KB ID: {}. Skipping detection cycle.", config.getKbId());
+                    return;
+                }
+                TrainConfig trainConfig = trainConfigOpt.get();
 
                 if(trainConfig.isTrained()){
                     Instant to  = Instant.now();
@@ -95,9 +101,25 @@ public class SchedulerService {
     }
 
 
-    private String normalizeCron(String cron){
+    /**
+     * Normalizes a CRON expression to 6-field Spring format.
+     * For 5-field crons, uses a hash-based second offset derived from the KB ID
+     * to prevent thundering herd (all tasks firing at second=0).
+     * 
+     * @param cron The cron expression (5 or 6 fields)
+     * @param kbId The KB configuration ID used to compute the offset
+     * @return A 6-field Spring cron expression with distributed seconds
+     */
+    private String normalizeCron(String cron, String kbId) {
         String[] parts = cron.trim().split("\\s+");
-        return (parts.length == 5) ? "0 " + cron : cron;
+        if (parts.length == 5) {
+            // Use hash of kbId to distribute executions across 0-59 seconds
+            int secondOffset = Math.abs(kbId.hashCode()) % 60;
+            log.debug("Normalized 5-field cron for KB {}: second offset = {}", kbId, secondOffset);
+            return secondOffset + " " + cron;
+        }
+        // Already 6-field, return as-is
+        return cron;
     }
 
     public void cancelTask(String id) {

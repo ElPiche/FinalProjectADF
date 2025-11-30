@@ -31,11 +31,11 @@ public class ValidatorController {
     /**
      * Minimum detection frequency in seconds by query mode.
      * - raw: 60 seconds (1 minute) - raw queries are heavier
-     * - aggregated: 10 seconds - aggregated queries can run more frequently
+     * - aggregated: 1 second - aggregated queries can run at sub-second granularity
      */
     private static final Map<String, Long> MIN_DETECTION_FREQUENCY_SECONDS = Map.of(
             "raw", 60L,
-            "aggregated", 10L
+            "aggregated", 1L
     );
     
     /**

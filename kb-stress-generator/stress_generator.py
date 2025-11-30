@@ -265,22 +265,30 @@ class KBConfigGenerator:
             },
         ]
         
-        # Detection frequencies (CRON expressions)
+        # Detection frequencies (CRON expressions) - 6-field format for Spring
+        # Format: second minute hour day month weekday
         self.detection_frequencies = [
-            "*/1 * * * *",   # Every minute
-            "*/2 * * * *",   # Every 2 minutes
-            "*/5 * * * *",   # Every 5 minutes
-            "*/10 * * * *",  # Every 10 minutes
-            "*/15 * * * *",  # Every 15 minutes
+            # Sub-minute frequencies (1-30 second intervals)
+            "*/1 * * * * *",    # Every 1 second
+            "*/2 * * * * *",    # Every 2 seconds
+            "*/5 * * * * *",    # Every 5 seconds
+            "*/10 * * * * *",   # Every 10 seconds
+            "*/15 * * * * *",   # Every 15 seconds
+            "*/30 * * * * *",   # Every 30 seconds
+            # Minute-based frequencies
+            "0 */1 * * * *",    # Every minute
+            "0 */2 * * * *",    # Every 2 minutes
+            "0 */5 * * * *",    # Every 5 minutes
         ]
         
-        # Detection windows in seconds
+        # Detection windows in seconds (matches frequency options)
         self.detection_windows = [
+            5,     # 5 seconds (for 1-5s frequencies)
+            10,    # 10 seconds
+            30,    # 30 seconds
+            60,    # 1 minute
             300,   # 5 minutes
             600,   # 10 minutes
-            900,   # 15 minutes
-            1800,  # 30 minutes
-            3600,  # 1 hour
         ]
         
         # Config name templates

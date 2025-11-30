@@ -327,6 +327,8 @@ services:
       dockerfile: Dockerfile
     container_name: log-generator
     restart: unless-stopped
+    profiles:
+      - stress  # Only starts with: docker-compose --profile stress up
     depends_on:
       elasticsearch-dataset:
         condition: service_healthy
