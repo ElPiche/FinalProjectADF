@@ -287,6 +287,8 @@ def generate_kb_config_fields_description() -> str:
 - scheduling.detection_config.from (ISO 8601 string): Optional detection start timestamp.
 - bucket_profile_id (string): References a document in `bucket_profiles` to enable time-context bucketing. Null disables the resolver.
 - algorithm.parameters[].metadata (list): Algorithm-specific key/value metadata pairs.
+- anomaly_config (object): Optional notification settings. Structure:
+  - user_emails (list of strings): Email addresses to notify when anomalies are detected. Example: `{"user_emails": ["user@example.com"]}`
 
 **Derived Fields**:
 - scheduling.training_config and scheduling.detection_config are constructed automatically from the individual inputs above.

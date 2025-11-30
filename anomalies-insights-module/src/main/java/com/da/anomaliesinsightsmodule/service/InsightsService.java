@@ -101,26 +101,57 @@ public class InsightsService {
 
         }
 
-        if(doc.getEmail() != null) {
-            sendAnomalyEmail(doc, mapping);
+        // Email notification logging
+        logger.info("================== EMAIL NOTIFICATION CHECK ==================");
+        logger.info("Document received - kbId: {}, metric: {}, email field: '{}'", 
+                kbId, doc.getMetric(), doc.getEmail());
+        
+        if(doc.getEmail() != null && !doc.getEmail().isBlank()) {
+            // Support multiple emails separated by commas
+            String[] emails = doc.getEmail().split(",");
+            logger.info("Email field is present, {} recipient(s) found: {}", emails.length, doc.getEmail());
+            for (String email : emails) {
+                String trimmedEmail = email.trim();
+                if (!trimmedEmail.isBlank()) {
+                    logger.info("Sending email to: {}", trimmedEmail);
+                    sendAnomalyEmailToRecipient(doc, mapping, trimmedEmail);
+                }
+            }
+        } else {
+            logger.warn("No email configured in document - email field is null or empty. Skipping email notification.");
         }
+        logger.info("==============================================================");
 
         return response;
     }
 
     public void sendAnomalyEmail(DocumentDto doc, IndexKbIdMapping mapping) throws Exception {
+        // Legacy method - sends to the email in the document
+        if (doc.getEmail() != null && !doc.getEmail().isBlank()) {
+            sendAnomalyEmailToRecipient(doc, mapping, doc.getEmail());
+        }
+    }
 
+    public void sendAnomalyEmailToRecipient(DocumentDto doc, IndexKbIdMapping mapping, String recipientEmail) throws Exception {
+
+        logger.info(">>> sendAnomalyEmailToRecipient called for email: {}", recipientEmail);
+        
         try{
             // Check rate limit before sending
-            if (!emailRateLimiterService.canSendEmail(doc.getEmail())) {
+            logger.info("Checking rate limit for email: {}", recipientEmail);
+            if (!emailRateLimiterService.canSendEmail(recipientEmail)) {
                 logger.info("Email to {} rate limited. Status: {}", 
-                        doc.getEmail(), 
-                        emailRateLimiterService.getRateLimitStatus(doc.getEmail()));
+                        recipientEmail, 
+                        emailRateLimiterService.getRateLimitStatus(recipientEmail));
                 return;
             }
 
+            logger.info("Rate limit check passed. Preparing email template...");
+            logger.info("Template variables - kbName: {}, metric: {}, value: {}, timestamp: {}, sourceIndex: {}", 
+                    doc.getKbName(), doc.getMetric(), doc.getValue(), doc.getTimestamp(), mapping.getSourceIndex());
+
             emailNotificationService.sendHtmlEmailFromTemplate(
-                    doc.getEmail(),   // o recorrer lista
+                    recipientEmail,
                     "Anomalía detectada en configuración:" + doc.getKbName(),
                     "templates/anomaly-email.html",
                     Map.of(
@@ -134,12 +165,13 @@ public class InsightsService {
             );
 
             // Record successful send for rate limiting
-            emailRateLimiterService.recordEmailSent(doc.getEmail());
+            emailRateLimiterService.recordEmailSent(recipientEmail);
 
-            logger.info("Sending anomaly email to: " + doc.getEmail());
+            logger.info("SUCCESS: Anomaly email sent to: {}", recipientEmail);
 
         }catch(Exception e){
-            logger.error("Error while sending anomaly email:" + e.getMessage());
+            logger.error("FAILED: Error while sending anomaly email to {}: {}", recipientEmail, e.getMessage());
+            logger.error("Full stack trace:", e);
             //throw e;
         }
     }

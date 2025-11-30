@@ -45,6 +45,10 @@ SERIES_COLLECTION_NAME = "series"
 SERIES_RESULT_COLLECTION_NAME = "series_result"
 MONGO_TIMEOUT_MS = 2000
 
+# KB configs are stored in a separate database by KB-MCP
+KB_CONFIGS_DB_NAME = "knowledge_base"
+KB_CONFIGS_COLLECTION_NAME = "kb_configs"
+
 # beaware it has a trailing slash
 ANOMALIES_INSIGHT_URL = "http://anomalies-insights:8081/api/insights/"
 
@@ -138,28 +142,31 @@ class Config:
 def parse_config(data: dict, mongo_client: MongoClient = None) -> Config:
     """Parse training_config document into Config object.
 
-    Also fetches the KB config to get bucket_profile_id for bucket-aware training.
+    Fetches KB metadata (name, description, bucket_profile_id) from kb_configs.
+    training_config only provides training-specific data (algorithms, time ranges).
     """
     kb_id = data["kb_id"]
     bucket_profile_id = None
+    kb_description = "Unknown"  # Default, will be overwritten from kb_configs
 
-    # Fetch the KB config from knowledge_base.kb_configs to get bucket_profile_id
+    # Fetch the KB config from knowledge_base.kb_configs to get ALL metadata
     if mongo_client:
         try:
             from bson import ObjectId
-            kb_config = mongo_client["knowledge_base"]["kb_configs"].find_one({"_id": ObjectId(kb_id)})
+            kb_config = mongo_client[KB_CONFIGS_DB_NAME][KB_CONFIGS_COLLECTION_NAME].find_one({"_id": ObjectId(kb_id)})
             if kb_config:
                 bucket_profile_id = kb_config.get("bucket_profile_id")
-                print(f"\033[92m[DISPATCHER] KB config found, bucket_profile_id: {bucket_profile_id}\033[0m")
+                kb_description = kb_config.get("name", kb_config.get("description", "Unknown"))
+                print(f"\033[92m[DISPATCHER] KB config found: name={kb_description}, bucket_profile_id={bucket_profile_id}\033[0m")
             else:
-                print(f"\033[93m[DISPATCHER] KB config not found for kb_id: {kb_id}\033[0m")
+                print(f"\033[93m[DISPATCHER] KB config not found in {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME} for kb_id: {kb_id}\033[0m")
         except Exception as e:
             print(f"\033[91m[DISPATCHER] Error fetching KB config: {e}\033[0m")
 
     return Config(
         _id=data["_id"],
         kb_id=kb_id,
-        kb_description=data["kb_description"],
+        kb_description=kb_description,
         created_at=data["created_at"],
         mode=data["mode"],
         bucket_profile_id=bucket_profile_id,
@@ -633,17 +640,25 @@ def detect_z_score(serie_to_detect):
         dimension = serie_to_detect["metadata"]["dim"]
         print(f"[DETECTION] Got kb_id={kb_id}, dimension={dimension}", flush=True)
 
-        # Look up KB name and user emails from training_config collection (indexed by kb_id, not _id)
-        print(f"[DETECTION] Looking up KB config...", flush=True)
-        kb_config = kb_client[MONGO_DB_NAME][TRAINING_COLLECTION_NAME].find_one({"kb_id": kb_id})
-        kb_name = kb_config.get("kb_description", "Unknown") if kb_config else "Unknown"
-
-        # Extract user emails for notifications from anomaly_config
+        # Get ALL KB metadata from kb_configs collection (the source of truth for KB metadata)
+        kb_name = "Unknown"
         user_emails = []
-        if kb_config:
-            anomaly_config = kb_config.get("anomaly_config", {})
-            if anomaly_config:
-                user_emails = anomaly_config.get("user_emails", [])
+        print(f"[DETECTION] Looking up KB config from {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME}...", flush=True)
+        try:
+            kb_config_doc = kb_client[KB_CONFIGS_DB_NAME][KB_CONFIGS_COLLECTION_NAME].find_one({"_id": ObjectId(kb_id)})
+            if kb_config_doc:
+                # Get name/description from kb_configs
+                kb_name = kb_config_doc.get("name", kb_config_doc.get("description", "Unknown"))
+                # Get notification emails from anomaly_config
+                anomaly_config = kb_config_doc.get("anomaly_config", {})
+                if anomaly_config:
+                    user_emails = anomaly_config.get("user_emails", [])
+                print(f"\033[92m[DETECTION] Found KB config: name={kb_name}, anomaly_config={anomaly_config}\033[0m", flush=True)
+            else:
+                print(f"\033[93m[DETECTION] KB config not found in {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME} for id={kb_id}\033[0m", flush=True)
+        except Exception as e:
+            print(f"\033[91m[DETECTION] Error reading KB config: {e}\033[0m", flush=True)
+            
         print(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}, Notification emails: {user_emails}\033[0m", flush=True)
 
         pipeline = [{'$match':
@@ -761,8 +776,8 @@ def detect_z_score(serie_to_detect):
                 elif bucket_key == "global_fallback" or bucket_key == "global_default":
                     context_desc = "Anomaly (no time-context profile)"
 
-                # Get first email for notification (or None if no emails configured)
-                notification_email = user_emails[0] if user_emails else None
+                # Join all emails as comma-separated string (insights module handles splitting)
+                notification_email = ",".join(user_emails) if user_emails else None
 
                 processed_data = {
                     # Core fields
@@ -857,8 +872,8 @@ def detect_z_score(serie_to_detect):
                 # send UTC ISO 8601 string (add 'Z' or include tzinfo)
                 ts = ts.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
-            # Get first email for notification (or None if no emails configured)
-            notification_email = user_emails[0] if user_emails else None
+            # Join all emails as comma-separated string (insights module handles splitting)
+            notification_email = ",".join(user_emails) if user_emails else None
 
             processed_data = {
                 'algorithm': 'Z Score',

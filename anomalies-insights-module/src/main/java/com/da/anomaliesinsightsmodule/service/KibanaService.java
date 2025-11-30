@@ -378,7 +378,7 @@ public class KibanaService {
                                                                                             "label", "KB Name",
                                                                                             "dataType", "string",
                                                                                             "operationType", "terms",
-                                                                                            "sourceField", "kb_name.keyword",
+                                                                                            "sourceField", "kbName.keyword",
                                                                                             "isBucketed", true,
                                                                                             "params", Map.of("size", 10, "orderBy", Map.of("type", "column", "columnId", "cnt"), "orderDirection", "desc")
                                                                                     ),
@@ -520,7 +520,7 @@ public class KibanaService {
                                                                                             "label", "KB",
                                                                                             "dataType", "string",
                                                                                             "operationType", "terms",
-                                                                                            "sourceField", "kb_name.keyword",
+                                                                                            "sourceField", "kbName.keyword",
                                                                                             "isBucketed", true,
                                                                                             "params", Map.of("size", 5, "orderBy", Map.of("type", "column", "columnId", "count"), "orderDirection", "desc")
                                                                                     ),

@@ -70,6 +70,12 @@ public class InsightsController {
     @PostMapping("/dashboard/{kbId}/anomalies")
     public ResponseEntity insertDocument(@PathVariable String kbId, @RequestBody DocumentDto doc){
 
+        logger.info("================== ANOMALY DOCUMENT RECEIVED ==================");
+        logger.info("kbId: {}", kbId);
+        logger.info("Document: algorithm={}, metric={}, value={}, email={}, kbName={}", 
+                doc.getAlgorithm(), doc.getMetric(), doc.getValue(), doc.getEmail(), doc.getKbName());
+        logger.info("==============================================================");
+
         try{
 
             insightsService.uploadDocument(kbId, doc);

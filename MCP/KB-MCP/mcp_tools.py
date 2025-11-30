@@ -425,7 +425,7 @@ async def create_da_config(
     algorithm: AlgorithmConfig = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
     bucket_profile_id: str | None = None,
     source_index: str = Field(description="Source Elasticsearch index being monitored (e.g., 'app-logs'). Required."),
-    anomaly_config: AnomalyConfig | None = None,
+    anomaly_config: AnomalyConfig | None = Field(default=None, description="Optional notification settings. Structure: {\"user_emails\": [\"email@example.com\"]}. Emails receive anomaly alerts."),
     ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
@@ -466,7 +466,7 @@ async def modify_kb_config(
     algorithm: Optional[AlgorithmConfig] = Field(default=None, description=ALGORITHM_CONFIG_DESCRIPTION),
     bucket_profile_id: Optional[str] = None,
     source_index: Optional[str] = None,
-    anomaly_config: Optional[AnomalyConfig] = None,
+    anomaly_config: Optional[AnomalyConfig] = Field(default=None, description="Optional notification settings. Structure: {\"user_emails\": [\"email@example.com\"]}. Emails receive anomaly alerts."),
     ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
