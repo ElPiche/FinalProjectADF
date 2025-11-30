@@ -13,14 +13,16 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from mcp_tools_pkg.create_da_config import create_da_config
-from models import ZScoreConfig
+from models import AlgorithmConfig
 
-# Create a proper ZScoreConfig object
-zscore_config = ZScoreConfig(alg_name='zscore', alg_parameters=[{'dimension': 'bytes'}])
+# Create a proper AlgorithmConfig object
+zscore_config = AlgorithmConfig(name='zscore', parameters=[{'dimension': 'bytes'}])
 
-# Define queries
-training_q = 'SELECT timestamp, bytes FROM ".ds-kibana_sample_data_logs-2025.11.02-000001" WHERE timestamp >= "2025-10-01" AND timestamp < "2025-11-01"'
-detection_q = 'SELECT timestamp, bytes FROM ".ds-kibana_sample_data_logs-2025.11.02-000001" WHERE timestamp >= NOW() - INTERVAL 1 HOUR'
+# Define query
+unified_query = (
+    "SELECT @timestamp, bytes FROM \".ds-kibana_sample_data_logs-2025.11.02-000001\" "
+    "WHERE @timestamp >= '$from' AND @timestamp < '$to'"
+)
 
 def main():
     # Call the function directly
@@ -28,13 +30,16 @@ def main():
         create_da_config(
             name='test-kb-manual-check-direct',
             description='Test KB configuration created directly in Python',
-            training_query=training_q,
-            detection_query=detection_q,
+            elasticsearch_sql_query=unified_query,
+            query_mode={'type': 'raw', 'timestamp_field': '@timestamp'},
             training_from='2025-10-01T00:00:00Z',
             training_to='2025-10-31T23:59:59Z',
+            training_is_active=True,
+            detection_is_active=True,
             detection_frequency='0 */5 * * * *',
             detection_start='2025-11-02T20:00:00Z',
-            algorithms=[zscore_config]
+            detection_window=3600,
+            algorithm=zscore_config
         )
     )
 

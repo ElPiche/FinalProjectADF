@@ -9,12 +9,12 @@ bodies so importing this shim is fast and side-effect free.
 from mcp.server.fastmcp import FastMCP, Context
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
-from typing import List
+from typing import Optional
 import uuid
 import time
 import json
 
-from models import AlgorithmConfig
+from models import AlgorithmConfig, QueryMode, AnomalyConfig
 from utils import log_message as _utils_log_message, stderr_print
 from instrumentation import timed
 from description_utils import ALGORITHM_CONFIG_DESCRIPTION, AVAILABLE_ALGORITHMS_DESCRIPTION, SUPPORTED_ALGORITHMS, SUPPORTED_ALGORITHMS_INLINE, SUPPORTED_ALGORITHMS_QUOTED, generate_tool_list_for_describe_mcp, get_tool_count, generate_kb_config_template_description, generate_kb_config_fields_description, generate_kb_config_description, generate_kb_config_example, generate_kb_config_description, generate_kb_config_example, generate_algorithm_config_example
@@ -109,7 +109,7 @@ def _create_da_config_docstring():
     return f"""
     Create a new anomaly-detection configuration for monitoring data streams.
 
-    This tool creates and stores a complete anomaly detection configuration in MongoDB, including training and detection queries, scheduling parameters, and algorithm specifications. The configuration will be used by the anomaly detection engine to train models and detect anomalies in real-time.
+        This tool stores a complete anomaly detection configuration in MongoDB, including a unified `elasticsearch_sql_query`, query mode metadata, scheduling parameters, optional bucket profile linkage, and algorithm specifications. Dispatcher and extractor services will use the saved configuration to train models and perform detections in real time.
 
     {etl_docstring()}
 
@@ -117,10 +117,10 @@ def _create_da_config_docstring():
     {template_description}
 
     BEFORE USING THIS TOOL:
-    **It is Required to first validate your training_query and detection_query using the `elasticsearch_sql` tool. This ensures that your queries are syntactically correct and return the expected columns, which is crucial for the algorithms to function properly.**
-    **also ensure the indices referenced in your queries exist and are accessible in the elasticsearch cluster.**
-    **and lastly ensure that the algorithms you plan to use are compatible with the output columns of your queries by using the `list_available_algorithms` tool**
-    **and ensure that the dimension names specified in the algorithm configurations exactly match the column names returned by your queries.**
+        **Validate your unified elasticsearch_sql_query with the `elasticsearch_sql` tool before calling this function. Ensure the query returns the timestamp field declared in `query_mode.timestamp_field`.**
+        **Ensure the indices referenced in your query exist and are accessible in the Elasticsearch cluster.**
+        **Confirm the algorithm dimensions map to actual column names returned by the unified query. Use `list_available_algorithms` plus `elasticsearch_sql` previews for verification.**
+        **If you plan to link a bucket profile, create it first so you can reference the correct `bucket_profile_id`.**
     For more info, use the `describe_mcp_server` tool.
 
     {fields_description}
@@ -128,39 +128,12 @@ def _create_da_config_docstring():
     **Algorithm Configuration Structure**:
     {ALGORITHM_CONFIG_DESCRIPTION}
 
-    **Example AlgorithmConfig Structure** (dynamically generated from actual class):
-    ```json
-    {{
-      "alg_name": "zscore",
-      "alg_parameters": [
-        {{
-          "dimension": "response_time"
-        }},
-        {{
-          "dimension": "error_count"
-        }}
-      ]
-    }}
-    ```
+        **Example AlgorithmConfig Structure** (dynamically generated from actual class):
+        ```json
+        {generate_algorithm_config_example()}
+        ```
 
-    **Complete algorithms Array Example**:
-    ```json
-    [
-      {{
-        "alg_name": "zscore",
-        "alg_parameters": [
-          {{
-            "dimension": "response_time"
-          }},
-          {{
-            "dimension": "error_count"
-          }}
-        ]
-      }}
-    ]
-    ```
-
-    The algorithms parameter accepts a list of algorithm configuration objects in the exact format that will be stored in the database, following the KBConfigTemplate.json specification. No complex parsing or legacy format conversion is performed.
+        Pass the algorithm object exactly as it should be stored (single algorithm entry with metadata and optional `is_active` flags). No legacy arrays are required—KBConfig stores a single `algorithm` object.
 
     Returns:
     - Success: "SUCCESS: Configuration saved to MongoDB! Document ID: <id> Configuration saved successfully."
@@ -193,7 +166,7 @@ def _modify_kb_config_docstring():
     return f"""
     Update an existing anomaly-detection configuration.
 
-    This tool allows you to modify any aspect of an existing configuration by providing its config_id and the fields you want to update. Only the specified fields will be changed; others remain unchanged.
+    Provide the `config_id` plus whichever fields you want to update. KB-MCP persists the changes atomically, leaving unspecified fields untouched. The tool now works with the unified query schema (single `elasticsearch_sql_query`, `query_mode`, singular `algorithm`, optional `bucket_profile_id`).
 
     {etl_docstring()}
     
@@ -201,7 +174,14 @@ def _modify_kb_config_docstring():
     {template_description}
 
     Required Input:
-    - config_id (string): The unique identifier of the configuration to update (e.g., "507f1f77bcf86cd799439011")
+    - config_id (string): MongoDB ID of the configuration to update (e.g., "507f1f77bcf86cd799439011").
+
+    Optional Inputs (all map directly to KBConfig fields):
+    - description, elasticsearch_sql_query, query_mode
+    - training_from, training_to, training_is_active
+    - detection_start, detection_frequency, detection_window, detection_is_active
+    - algorithm (singular AlgorithmConfig)
+    - bucket_profile_id
 
     {fields_description}
 
@@ -209,8 +189,8 @@ def _modify_kb_config_docstring():
     {ALGORITHM_CONFIG_DESCRIPTION}
 
     Returns:
-    - Success: Confirmation message indicating what was updated
-    - Error: Validation error message if the update failed
+    - Success: Confirmation message indicating the update succeeded.
+    - Error: Validation message describing what failed (missing config, invalid CRON, SQL validation failure, etc.).
 
     Common Validation Errors:
     - config_id not found in database
@@ -219,33 +199,25 @@ def _modify_kb_config_docstring():
     - Dimension names not matching query output if algorithms are updated
 
     Example Usage:
-    To update just the description and detection frequency:
+    Update description and detection frequency:
     {{
       "config_id": "507f1f77bcf86cd799439011",
       "description": "Updated monitoring for web traffic anomalies",
       "detection_frequency": "*/30 * * * *"
     }}
 
-        To change the algorithms:
-        {{
-            "config_id": "507f1f77bcf86cd799439011",
-            "algorithms": [
-                {{
-                    "alg_name": "zscore",
-                    "alg_parameters": [
-                        {{
-                            "dimension": "new_metric_column"
-                        }}
-                    ]
-                }}
-            ]
-        }}
+    Update algorithm dimensions and query metadata:
+    {{
+      "config_id": "507f1f77bcf86cd799439011",
+      "algorithm": {generate_algorithm_config_example()},
+      "query_mode": {{"type": "aggregated", "timestamp_field": "event_time"}}
+    }}
 
     Tips:
-    - Use list_kb_configurations first to see current configuration details
-    - Only include fields you want to change
-    - Changes take effect immediately for future detection runs
-    - The configuration structure automatically reflects any changes made to KBConfigTemplate.json
+    - Use list_kb_configurations first to inspect the current state.
+    - Only specify fields you intend to change.
+    - Changing `query_mode` re-validates the stored CRON for compliance with per-mode minimums.
+    - Ensure any referenced bucket_profile_id exists before updating.
     """
 
 
@@ -441,70 +413,82 @@ for more info, use the `describe_mcp_server` tool.
 async def create_da_config(
     name: str,
     description: str,
-    training_query: str,
-    detection_query: str,
+    elasticsearch_sql_query: str,
+    query_mode: QueryMode,
     training_from: str,
     training_to: str,
     training_is_active: bool,
     detection_is_active: bool,
-    training_window: int,
-    detection_window: int,
     detection_frequency: str,
+    detection_window: int,
     detection_start: str,
-    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
-    ctx: Context | None = None
+    algorithm: AlgorithmConfig = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
+    bucket_profile_id: str | None = None,
+    source_index: str = Field(description="Source Elasticsearch index being monitored (e.g., 'app-logs'). Required."),
+    anomaly_config: AnomalyConfig | None = Field(default=None, description="Optional notification settings. Structure: {\"user_emails\": [\"email@example.com\"]}. Emails receive anomaly alerts."),
+    ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "create_da_config"):
-        return await pkg.create_da_config(name, 
-                                          description, 
-                                          training_query, 
-                                          detection_query,
-                                          training_from, 
-                                          training_to, 
-                                          training_is_active, 
-                                          detection_is_active,
-                                          training_window, 
-                                          detection_window, 
-                                          detection_frequency,
-                                          detection_start, 
-                                          algorithms,
-                                          ctx)
+        return await pkg.create_da_config(
+            name,
+            description,
+            elasticsearch_sql_query,
+            query_mode,
+            training_from,
+            training_to,
+            training_is_active,
+            detection_is_active,
+            detection_frequency,
+            detection_window,
+            detection_start,
+            algorithm,
+            bucket_profile_id,
+            source_index,
+            anomaly_config,
+            ctx,
+        )
     raise ToolError("create_da_config is not implemented in the migration package yet")
 
 
 async def modify_kb_config(
     config_id: str,
-    description: str,
-    training_query: str,
-    detection_query: str,
-    training_from: str,
-    training_to: str,
-    training_is_active: bool,
-    detection_is_active: bool,
-    training_window: int,
-    detection_window: int,
-    detection_frequency: str,
-    detection_start: str,
-    algorithms: List[AlgorithmConfig] = Field(description=ALGORITHM_CONFIG_DESCRIPTION),
-    ctx: Context | None = None
+    description: Optional[str] = None,
+    elasticsearch_sql_query: Optional[str] = None,
+    query_mode: Optional[QueryMode] = None,
+    training_from: Optional[str] = None,
+    training_to: Optional[str] = None,
+    training_is_active: Optional[bool] = None,
+    detection_is_active: Optional[bool] = None,
+    detection_frequency: Optional[str] = None,
+    detection_window: Optional[int] = None,
+    detection_start: Optional[str] = None,
+    algorithm: Optional[AlgorithmConfig] = Field(default=None, description=ALGORITHM_CONFIG_DESCRIPTION),
+    bucket_profile_id: Optional[str] = None,
+    source_index: Optional[str] = None,
+    anomaly_config: Optional[AnomalyConfig] = Field(default=None, description="Optional notification settings. Structure: {\"user_emails\": [\"email@example.com\"]}. Emails receive anomaly alerts."),
+    ctx: Context | None = None,
 ) -> str:
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "modify_kb_config"):
-        return await pkg.modify_kb_config(config_id, 
-                                          description, 
-                                          training_query, 
-                                          detection_query,
-                                          training_from, 
-                                          training_to, 
-                                          training_is_active,
-                                          detection_is_active, 
-                                          training_window, 
-                                          detection_window,
-                                          detection_frequency, 
-                                          detection_start, 
-                                          algorithms,
-                                          ctx)
+        return await pkg.modify_kb_config(
+            config_id,
+            description,
+            elasticsearch_sql_query,
+            query_mode,
+            training_from,
+            training_to,
+            training_is_active,
+            detection_is_active,
+            detection_frequency,
+            detection_window,
+            detection_start,
+            algorithm,
+            bucket_profile_id,
+            source_index,
+            anomaly_config,
+            ctx,
+        )
     raise ToolError("modify_kb_config is not implemented in the migration package yet")
 
 
@@ -610,4 +594,151 @@ mcp.add_tool(
 mcp.add_tool(
     elasticsearch_sql,
     description=_elasticsearch_sql_docstring()
+)
+
+
+# ============== Bucket Profile Tools ==============
+
+def _create_bucket_profile_docstring():
+    return """
+    Create a reusable bucket profile for time-context definitions.
+
+    Bucket profiles define how timestamps are mapped to semantic bucket keys for
+    context-aware anomaly detection. This enables different baselines for different
+    time periods (e.g., business hours vs. weekends, holidays vs. normal days).
+
+    Required Inputs:
+    - profile_id (string): Unique identifier (e.g., "business_hours_v1")
+    - timezone (string): IANA timezone (e.g., "America/New_York")
+
+    Optional Inputs:
+    - exceptions: List of exception rules for specific dates (holidays)
+    - schedule: List of schedule rules for recurring patterns
+    - fallback: Configuration for when no rule matches
+
+    Exception Rule Structure:
+    {
+        "bucket_base_key": "holiday_xmas",
+        "rule": {"month": 12, "day": 25, "year": null},
+        "granularity": "block"  // "block" or "hourly"
+    }
+
+    Schedule Rule Structure:
+    {
+        "bucket_base_key": "workday",
+        "days": [1,2,3,4,5],  // 1=Monday, 7=Sunday
+        "time_range": {"start": "09:00", "end": "17:00"},
+        "granularity": "hourly",
+        "months": null  // optional: [1,2,12] for winter
+    }
+
+    Fallback Structure:
+    {"bucket_base_key": "off_hours", "granularity": "hourly"}
+
+    Priority Order:
+    1. Exceptions (holidays) - checked first
+    2. Schedule rules - in list order, first match wins
+    3. Fallback - always matches
+
+    Example:
+    {
+        "profile_id": "business_hours_v1",
+        "timezone": "America/New_York",
+        "exceptions": [
+            {"bucket_base_key": "holiday_xmas", "rule": {"month": 12, "day": 25}, "granularity": "block"}
+        ],
+        "schedule": [
+            {"bucket_base_key": "workday", "days": [1,2,3,4,5], "time_range": {"start": "09:00", "end": "17:00"}, "granularity": "hourly"}
+        ],
+        "fallback": {"bucket_base_key": "off_hours", "granularity": "hourly"}
+    }
+
+    Returns:
+    Success message with profile ID.
+
+    Common Errors:
+    - Profile ID already exists
+    - Invalid timezone
+    - Invalid time format (must be HH:MM)
+    - Invalid day values (must be 1-7)
+    """
+
+
+def _list_bucket_profiles_docstring():
+    return """
+    List all bucket profiles with usage metadata.
+
+    Returns a formatted list of all saved bucket profiles, including:
+    - Profile ID and timezone
+    - Number of exception and schedule rules
+    - Fallback configuration
+    - Number of KB configurations using this profile
+
+    Inputs: None
+
+    Example Output:
+    Bucket Profiles:
+      - business_hours_v1 (TZ: America/New_York, exceptions: 2, schedules: 3, used by: 5 KB(s))
+      - weekend_only (TZ: UTC, exceptions: 0, schedules: 2, used by: 1 KB(s))
+
+    Tips:
+    - Use this to find profile IDs for create_da_config or modify_kb_config
+    - Check usage count before attempting to delete a profile
+    """
+
+
+def _delete_bucket_profile_docstring():
+    return """
+    Delete a bucket profile if not referenced by any KB.
+
+    Required Input:
+    - profile_id (string): The ID of the profile to delete
+
+    Returns:
+    Success message if deleted.
+
+    Referential Integrity:
+    Bucket profiles cannot be deleted if any KB configuration references them.
+    You must first update those KBs to remove the bucket_profile_id reference.
+
+    Common Errors:
+    - Profile not found
+    - Profile is referenced by KB configurations (list of KBs provided in error)
+    """
+
+
+def create_bucket_profile(
+    profile_id: str,
+    timezone: str,
+    exceptions: list | None = None,
+    schedule: list | None = None,
+    fallback: dict | None = None,
+) -> str:
+    from mcp_tools_pkg.bucket_profile_tools import create_bucket_profile as _impl
+    return _impl(profile_id, timezone, exceptions, schedule, fallback)
+
+
+def list_bucket_profiles() -> str:
+    from mcp_tools_pkg.bucket_profile_tools import list_bucket_profiles as _impl
+    return _impl()
+
+
+def delete_bucket_profile(profile_id: str) -> str:
+    from mcp_tools_pkg.bucket_profile_tools import delete_bucket_profile as _impl
+    return _impl(profile_id)
+
+
+mcp.add_tool(
+    create_bucket_profile,
+    description=_create_bucket_profile_docstring()
+)
+
+mcp.add_tool(
+    list_bucket_profiles,
+    description=_list_bucket_profiles_docstring()
+)
+
+mcp.add_tool(
+    delete_bucket_profile,
+    description=_delete_bucket_profile_docstring()
 )

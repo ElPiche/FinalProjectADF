@@ -32,13 +32,25 @@ public class StreamingModeService {
 
         if(kbStreamingConfig != null && kbStreamingConfig.isActive()) {
 
-            var queryElastic = kbStreamingConfig.getQueryElastic();
+            // Use unified elasticsearch_sql_query from root level, 
+            // falling back to legacy detection_query if available
+            String queryElastic = config.getElasticsearchSqlQuery();
+            if (queryElastic == null || queryElastic.isBlank()) {
+                queryElastic = kbStreamingConfig.getQueryElastic();
+            }
+            
             var window = kbStreamingConfig.getWindow();
             var streamingConfigs = kbStreamingConfig.getFrequency();
             var startAt = kbStreamingConfig.getStart();
             var id = config.getId();
 
             List<String> observedValues = config.getObservedValues();
+            
+            // Get timestamp field from query_mode, default to "timestamp" for backwards compatibility
+            String timestampField = "timestamp";
+            if (config.getQueryMode() != null && config.getQueryMode().getTimestampField() != null) {
+                timestampField = config.getQueryMode().getTimestampField();
+            }
 
             SchedulerConfig schedulerConfig = new SchedulerConfig(
                     null,
@@ -53,7 +65,8 @@ public class StreamingModeService {
             PipeMetadata pipeMetadata = new PipeMetadata(
                     id,
                     observedValues,
-                    Mode.DETECTION
+                    Mode.DETECTION,
+                    timestampField
             );
 
             schedulerConfigRepository.findByKbId(id).ifPresent(existingConfig ->

@@ -1,4 +1,3 @@
-from utils import stderr_print
 #!/usr/bin/env python3
 """
 Basic unit tests for KB-MCP models.
@@ -12,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from datetime import datetime
 from models import KBConfig, ZScoreConfig, AlgorithmConfig, CRON
+from utils import stderr_print
 
 
 def test_valid_kb_config():
@@ -20,37 +20,35 @@ def test_valid_kb_config():
         "name": "Test Configuration",
         "description": "Test description",
         "change_flag": 0,
+        "elasticsearch_sql_query": "SELECT @timestamp, field1 FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+        "source_index": "test",
+        "query_mode": {"type": "raw", "timestamp_field": "@timestamp"},
         "scheduling": {
             "training_config": {
-                "training_query": "SELECT * FROM test",
                 "from": "2025-01-01T00:00:00Z",
                 "to": "2025-01-02T00:00:00Z",
-                "training_window": 3600,
                 "is_active": True
             },
             "detection_config": {
-                "detection_query": "SELECT * FROM test",
                 "from": "2025-01-02T00:00:00Z",
                 "frequency": "*/15 * * * *",
                 "detection_window": 3600,
                 "is_active": False
             }
         },
-        "algorithms": [
-            {
-                "alg_name": "zscore",
-                "alg_parameters": [
-                    {"dimension": "field1"}
-                ]
-            }
-        ]
+        "algorithm": {
+            "name": "zscore",
+            "parameters": [
+                {"dimension": "field1"}
+            ]
+        }
     }
 
     config = KBConfig(**config_data)
     assert config.name == "Test Configuration"
     assert config.description == "Test description"
     assert config.change_flag == 0
-    assert len(config.algorithms) == 1
+    assert config.algorithm.name == "zscore"
     stderr_print("PASS: test_valid_kb_config")
 
 
@@ -61,8 +59,23 @@ def test_invalid_kb_config_empty_name():
             name="",
             description="Test",
             change_flag=0,
-            scheduling={},
-            algorithms=[]
+            elasticsearch_sql_query="SELECT @timestamp FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+            source_index="test",
+            query_mode={"type": "raw", "timestamp_field": "@timestamp"},
+            algorithm={"name": "zscore", "parameters": [{"dimension": "field1"}]},
+            scheduling={
+                "training_config": {
+                    "from": "2025-01-01T00:00:00Z",
+                    "to": "2025-01-02T00:00:00Z",
+                    "is_active": True,
+                },
+                "detection_config": {
+                    "from": "2025-01-02T00:00:00Z",
+                    "frequency": "*/10 * * * *",
+                    "detection_window": 3600,
+                    "is_active": True,
+                },
+            },
         )
         assert False, "Should have raised ValueError"
     except ValueError:
@@ -76,8 +89,23 @@ def test_invalid_kb_config_empty_description():
             name="Test",
             description="",
             change_flag=0,
-            scheduling={},
-            algorithms=[]
+            elasticsearch_sql_query="SELECT @timestamp FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+            source_index="test",
+            query_mode={"type": "raw", "timestamp_field": "@timestamp"},
+            algorithm={"name": "zscore", "parameters": [{"dimension": "field1"}]},
+            scheduling={
+                "training_config": {
+                    "from": "2025-01-01T00:00:00Z",
+                    "to": "2025-01-02T00:00:00Z",
+                    "is_active": True,
+                },
+                "detection_config": {
+                    "from": "2025-01-02T00:00:00Z",
+                    "frequency": "*/10 * * * *",
+                    "detection_window": 3600,
+                    "is_active": True,
+                },
+            },
         )
         assert False, "Should have raised ValueError"
     except ValueError:
@@ -87,28 +115,33 @@ def test_invalid_kb_config_empty_description():
 def test_valid_zscore_config():
     """Test creating a valid ZScoreConfig."""
     config = ZScoreConfig(
-        alg_name="zscore",
-        alg_parameters=[{"dimension": "field1"}, {"dimension": "field2"}]
+        parameters=[{"dimension": "field1"}, {"dimension": "field2"}]
     )
-    assert config.alg_name == "zscore"
-    assert [param.dimension for param in config.alg_parameters] == ["field1", "field2"]
+    assert config.name == "zscore"
+    assert [param.dimension for param in config.parameters] == ["field1", "field2"]
     stderr_print("PASS: test_valid_zscore_config")
 
 
 def test_zscore_config_single_dimension():
     """Test ZScoreConfig with single dimension."""
-    config = ZScoreConfig(alg_parameters=[{"dimension": "field1"}])
-    assert [param.dimension for param in config.alg_parameters] == ["field1"]
+    config = ZScoreConfig(parameters=[{"dimension": "field1"}])
+    assert [param.dimension for param in config.parameters] == ["field1"]
     stderr_print("PASS: test_zscore_config_single_dimension")
 
 
 def test_valid_cron():
-    """Test valid CRON expressions."""
+    """Test valid CRON expressions (both 5-field UNIX and 6-field Spring formats)."""
     valid_crons = [
+        # 5-field UNIX format (minute hour day month weekday)
         "*/15 * * * *",
         "0 * * * *",
         "0 0 * * *",
-        "0 0 1 * *"
+        "0 0 1 * *",
+        # 6-field Spring format (second minute hour day month weekday)
+        "*/10 * * * * *",     # every 10 seconds
+        "0 */5 * * * *",      # every 5 minutes at second 0
+        "30 0 * * * *",       # every hour at second 30
+        "0 0 0 * * *",        # daily at midnight
     ]
 
     for cron_expr in valid_crons:
@@ -121,9 +154,9 @@ def test_invalid_cron():
     """Test invalid CRON expressions."""
     invalid_crons = [
         "invalid",
-        "*/15 * * *",
-        "60 * * * *",
-        "not a cron expression"
+        "*/15 * * *",         # 4 fields - invalid
+        "not a cron expression",
+        "* * * * * * *",      # 7 fields - invalid
     ]
 
     for cron_expr in invalid_crons:

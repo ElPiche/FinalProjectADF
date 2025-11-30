@@ -18,8 +18,13 @@ public class IndexKbIdMapping {
     @Id
     private String kbId;
 
-    @Field(name = "indexName")
-    private String indexName;
+    // Source index being monitored (e.g., "app-logs") - used for dashboard naming
+    @Field(name = "sourceIndex")
+    private String sourceIndex;
+    
+    // Anomaly output index (derived from sourceIndex, e.g., "app-logs_anomalies")
+    @Field(name = "anomalyIndex")
+    private String anomalyIndex;
 
     @Field(name = "dataViewId")
     private String dataViewId;

@@ -22,10 +22,10 @@ def train_baseline(kb_id: str, dimension: str, df_train: pd.DataFrame, field: st
 
     # Use full hour-minute-second conversion to seconds, not just seconds
     df_train["train_window"] = (
-                                       (df_train["timestamp"].dt.hour * 3600)
-                                       + (df_train["timestamp"].dt.minute * 60)
-                                       + df_train["timestamp"].dt.second
-                               ) // time_window
+        (df_train["timestamp"].dt.hour * 3600)
+        + (df_train["timestamp"].dt.minute * 60)
+        + df_train["timestamp"].dt.second
+    ) // time_window
 
     if(workday_separation):
 

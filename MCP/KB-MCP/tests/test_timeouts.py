@@ -15,14 +15,12 @@ from mcp_tools_pkg.query_validator import QueryValidator  # noqa: E402  pylint: 
 from mcp_tools_pkg.elasticsearch_sql import elasticsearch_sql  # noqa: E402  pylint: disable=wrong-import-position
 from mcp_tools_pkg.create_da_config import create_da_config  # noqa: E402  pylint: disable=wrong-import-position
 
-DEFAULT_ALGORITHMS = [
-    {
-        "alg_name": "zscore",
-        "alg_parameters": [
-            {"dimension": "response_time"},
-        ],
-    }
-]
+DEFAULT_ALGORITHM = {
+    "name": "zscore",
+    "parameters": [
+        {"dimension": "response_time"},
+    ],
+}
 
 
 def test_query_validator_timeout(monkeypatch):
@@ -72,6 +70,9 @@ def test_create_da_config_logs_steps(monkeypatch, caplog):
 
         def __getitem__(self, _name):
             return self.collection
+        
+        def get_collection(self, _name):
+            return self.collection
 
     class StubClient:
         def __init__(self, collection):
@@ -90,7 +91,13 @@ def test_create_da_config_logs_steps(monkeypatch, caplog):
     monkeypatch.setattr(create_module.QueryValidator, "validate", lambda *_args, **_kwargs: True)
 
     async def _fake_elasticsearch_sql(*_args, **_kwargs):
-        return {"columns": [{"name": "response_time"}], "rows": []}
+        return {
+            "columns": [
+                {"name": "@timestamp", "type": "date"},
+                {"name": "response_time", "type": "long"},
+            ],
+            "rows": [],
+        }
 
     monkeypatch.setattr(create_module, "elasticsearch_sql", _fake_elasticsearch_sql)
     monkeypatch.setattr(create_module, "connect_mongodb", lambda: StubClient(collection))
@@ -99,17 +106,16 @@ def test_create_da_config_logs_steps(monkeypatch, caplog):
         create_da_config(
             name="log-test",
             description="Desc",
-            training_query="SELECT response_time FROM metrics",
-            detection_query="SELECT response_time FROM metrics",
+            elasticsearch_sql_query="SELECT @timestamp, response_time FROM metrics WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+            query_mode={"type": "raw", "timestamp_field": "@timestamp"},
             training_from="2025-01-01T00:00:00Z",
             training_to="2025-01-02T00:00:00Z",
             training_is_active=True,
             detection_is_active=True,
-            training_window=3600,
             detection_window=900,
             detection_frequency="*/15 * * * *",
             detection_start="2025-01-02T00:00:00Z",
-            algorithms=DEFAULT_ALGORITHMS,
+            algorithm=DEFAULT_ALGORITHM,
         )
     )
 

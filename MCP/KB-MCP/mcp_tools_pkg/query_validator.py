@@ -66,6 +66,8 @@ class QueryValidator:
         query_label: str = "query",
         timeout: Optional[int] = None,
         allow_fallback: Optional[bool] = None,
+        query_mode: Optional[str] = None,
+        timestamp_field: Optional[str] = None,
     ) -> bool:
         """Validate the provided query via the extractor.
 
@@ -93,13 +95,23 @@ class QueryValidator:
             "info",
             "query_validator",
             "request",
-            extra_data={"extractor_endpoint": endpoint},
+            extra_data={
+                "extractor_endpoint": endpoint,
+                "query_mode": query_mode,
+                "timestamp_field": timestamp_field,
+            },
         )
 
         start_time = time.time()
 
+        payload = {"query": query}
+        if query_mode:
+            payload["query_mode"] = query_mode
+        if timestamp_field:
+            payload["timestamp_field"] = timestamp_field
+
         try:
-            response = requests.post(endpoint, json={"query": query}, timeout=timeout_seconds)
+            response = requests.post(endpoint, json=payload, timeout=timeout_seconds)
         except Timeout as exc:
             elapsed = time.time() - start_time
             message = (
@@ -248,7 +260,8 @@ class QueryValidator:
 
     @classmethod
     def _build_endpoint(cls) -> str:
-        host = cls._get_env_value("EXTRACTOR_HOST", "http://extractor:8080")
+        # Container name is "etl-app" and internal port is 8080
+        host = cls._get_env_value("EXTRACTOR_HOST", "http://etl-app:8080")
         host = host.rstrip("/")
         return f"{host}/api/validate/query"
 

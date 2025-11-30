@@ -9,16 +9,16 @@ import java.util.*;
 @Service
 public class FilterService {
 
-
     public List<SeriesElement> applyFilter(List<Map<String, Object>> data, PipeMetadata metadata) {
 
         List<SeriesElement> seriesElements = new ArrayList<>();
+        String timestampField = metadata.getTimestampField();
 
         for(Map<String, Object> row : data){
             for(String observedValue : metadata.getObservedValues()){
                 if(row.containsKey(observedValue)){
-                    var val = row.get(observedValue) != null ? (double) row.get(observedValue) : 0;
-                    Date ts = (Date) row.getOrDefault("es_timestamp", row.get("timestamp"));
+                    var val = (double) row.get(observedValue);
+                    Date ts = (Date) row.get(timestampField);
                     seriesElements.add(new SeriesElement(null,
                             val,
                             ts,

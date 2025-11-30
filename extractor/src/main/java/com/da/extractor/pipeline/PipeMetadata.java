@@ -16,4 +16,6 @@ public class PipeMetadata {
     private List<String> observedValues;
 
     private Mode mode;
+
+    private String timestampField;
 }

@@ -3,8 +3,6 @@ package com.da.extractor.pipeline;
 import co.elastic.clients.elasticsearch.sql.Column;
 import co.elastic.clients.elasticsearch.sql.QueryResponse;
 import co.elastic.clients.json.JsonData;
-import com.da.extractor.entity.serie.Mode;
-import com.da.extractor.entity.serie.SeriesElement;
 import com.da.extractor.service.ElasticService;
 import com.da.extractor.utils.Utils;
 import org.springframework.beans.factory.annotation.Autowired;

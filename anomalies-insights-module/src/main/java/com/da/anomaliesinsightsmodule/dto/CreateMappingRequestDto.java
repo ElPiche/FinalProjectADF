@@ -13,7 +13,7 @@ public class CreateMappingRequestDto {
     @NotEmpty(message = "kbId is required")
     private String kbId;
 
-    @NotEmpty(message = "indexName is required")
-    private String indexName;
+    @NotEmpty(message = "sourceIndex is required")
+    private String sourceIndex;
 
 }

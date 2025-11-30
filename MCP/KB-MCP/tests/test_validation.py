@@ -1,4 +1,3 @@
-from utils import stderr_print
 # test_validation.py - Unit tests for validation functions
 
 import sys
@@ -14,6 +13,7 @@ from validation import (
     validate_algorithms,
     validate_window_size,
 )
+from utils import stderr_print
 
 def test_extract_sql_output_fields():
     """Test extraction of output fields from SQL queries."""
@@ -64,48 +64,59 @@ def test_extract_sql_select_fields():
     stderr_print("PASS: test_extract_sql_select_fields")
 
 def test_validate_algorithms():
-    """Test validation of algorithms array."""
-    # Valid algorithms
-    valid_algorithms = [
+    """Test validation for both singular and legacy algorithm payloads."""
+
+    # Valid singular algorithm dict
+    valid_algorithm = {
+        "name": "zscore",
+        "parameters": [
+            {"dimension": "field1"},
+            {"dimension": "field2"},
+        ],
+    }
+    assert validate_algorithms(valid_algorithm) == []
+
+    # Legacy list format still supported
+    legacy_algorithms = [
         {
             "alg_name": "zscore",
-            "alg_parameters": [
-                {"dimension": "field1"},
-                {"dimension": "field2"}
-            ]
+            "alg_parameters": [{"dimension": "field1"}],
         }
     ]
-    errors = validate_algorithms(valid_algorithms)
-    assert errors == [], f"Expected no errors, got {errors}"
+    assert validate_algorithms(legacy_algorithms) == []
 
-    # Empty algorithms
-    errors_empty = validate_algorithms([])
-    assert len(errors_empty) == 1 and "cannot be empty" in errors_empty[0], f"Expected empty error, got {errors_empty}"
+    # Missing algorithm payload entirely
+    payload_none = validate_algorithms(None)
+    assert payload_none and "cannot be empty" in payload_none[0]
 
-    # Invalid algorithm type
-    invalid_type = [{"alg_name": "invalid", "alg_parameters": [{"dimension": "field1"}]}]
+    # Empty list
+    payload_empty = validate_algorithms([])
+    assert payload_empty and "list cannot be empty" in payload_empty[0]
+
+    # Unsupported algorithm name
+    invalid_type = [{"name": "invalid", "parameters": [{"dimension": "field1"}]}]
     errors_invalid = validate_algorithms(invalid_type)
-    assert len(errors_invalid) == 1 and "not supported" in errors_invalid[0], f"Expected unsupported error, got {errors_invalid}"
+    assert errors_invalid and "not supported" in errors_invalid[0]
 
-    # Missing alg_name
-    missing_name = [{"alg_parameters": [{"dimension": "field1"}]}]
+    # Missing name
+    missing_name = [{"parameters": [{"dimension": "field1"}]}]
     errors_missing = validate_algorithms(missing_name)
-    assert len(errors_missing) == 1 and "missing alg_name" in errors_missing[0], f"Expected missing name error, got {errors_missing}"
+    assert errors_missing and "missing algorithm name" in errors_missing[0]
 
-    # Missing alg_parameters
-    missing_params = [{"alg_name": "zscore"}]
+    # Missing parameters
+    missing_params = [{"name": "zscore"}]
     errors_missing_params = validate_algorithms(missing_params)
-    assert len(errors_missing_params) == 1 and "missing alg_parameters" in errors_missing_params[0], f"Expected missing params error, got {errors_missing_params}"
+    assert errors_missing_params and "parameters must be a list" in errors_missing_params[0]
 
-    # Invalid alg_parameters type
-    invalid_params_type = [{"alg_name": "zscore", "alg_parameters": "not_a_list"}]
+    # Invalid parameter type
+    invalid_params_type = [{"name": "zscore", "parameters": "not_a_list"}]
     errors_invalid_params = validate_algorithms(invalid_params_type)
-    assert len(errors_invalid_params) == 1 and "must be a list" in errors_invalid_params[0], f"Expected list error, got {errors_invalid_params}"
+    assert errors_invalid_params and "parameters must be a list" in errors_invalid_params[0]
 
-    # Missing dimension in parameter
-    missing_dimension = [{"alg_name": "zscore", "alg_parameters": [{}]}]
+    # Missing dimension entry
+    missing_dimension = [{"name": "zscore", "parameters": [{}]}]
     errors_missing_dim = validate_algorithms(missing_dimension)
-    assert len(errors_missing_dim) == 1 and "missing dimension" in errors_missing_dim[0], f"Expected missing dimension error, got {errors_missing_dim}"
+    assert errors_missing_dim and "missing dimension" in errors_missing_dim[0]
 
     stderr_print("PASS: test_validate_algorithms")
 

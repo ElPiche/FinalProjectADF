@@ -16,9 +16,9 @@ import java.util.Map;
 @AllArgsConstructor
 public class Algorithm {
 
-    @Field("alg_name")
-    private String algName;
+    // New unified schema uses "name" instead of "alg_name"
+    private String name;
 
-    @Field("alg_parameters")
-    private List<AlgorithmParameter> algParameters;
+    // New unified schema uses "parameters" instead of "alg_parameters"
+    private List<AlgorithmParameter> parameters;
 }

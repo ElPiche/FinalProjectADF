@@ -15,6 +15,6 @@ public class CreateMappingRequestDto {
     @JsonProperty("kbId")
     private String kbId;
 
-    @JsonProperty("indexName")
-    private String indexName;
+    @JsonProperty("sourceIndex")
+    private String sourceIndex;
 }

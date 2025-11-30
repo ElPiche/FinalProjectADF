@@ -29,6 +29,13 @@ public class InsightsController {
         return ResponseEntity.ok("hello world");
     }
 
+    @PostMapping("/mailTest")
+    public ResponseEntity<String> mailTest(@RequestBody String to) throws Exception {
+
+        insightsService.sendMailTest(to);
+        return ResponseEntity.ok("correo enviado");
+    }
+
     @PutMapping("/dashboards")
     public ResponseEntity createMapping(@RequestBody CreateMappingRequestDto kbIdMapping){
 
@@ -36,7 +43,8 @@ public class InsightsController {
 
             insightsService.createKbMapping(new IndexKbIdMapping(
                     kbIdMapping.getKbId(),
-                    kbIdMapping.getIndexName(),
+                    kbIdMapping.getSourceIndex(),
+                    null,  // anomalyIndex will be derived
                     null,
                     null,
                     null
@@ -61,6 +69,12 @@ public class InsightsController {
 
     @PostMapping("/dashboard/{kbId}/anomalies")
     public ResponseEntity insertDocument(@PathVariable String kbId, @RequestBody DocumentDto doc){
+
+        logger.info("================== ANOMALY DOCUMENT RECEIVED ==================");
+        logger.info("kbId: {}", kbId);
+        logger.info("Document: algorithm={}, metric={}, value={}, email={}, kbName={}", 
+                doc.getAlgorithm(), doc.getMetric(), doc.getValue(), doc.getEmail(), doc.getKbName());
+        logger.info("==============================================================");
 
         try{
 

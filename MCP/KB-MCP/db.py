@@ -119,3 +119,36 @@ def safe_close_client(client):
             client.close()
     except Exception:
         pass  # Ignore errors during cleanup
+
+
+class DatabaseWrapper:
+    """Wrapper that provides collection access from a MongoDB database."""
+    
+    def __init__(self, db):
+        self._db = db
+    
+    def get_collection(self, name: str):
+        """Get a collection by name."""
+        return self._db[name]
+    
+    def __getitem__(self, name: str):
+        """Allow dict-style access to collections."""
+        return self._db[name]
+
+
+def get_db() -> DatabaseWrapper:
+    """
+    Get the anomaly_detection database wrapper.
+    
+    Returns:
+        DatabaseWrapper: Wrapper providing access to MongoDB collections.
+    
+    Raises:
+        RuntimeError: If MongoDB connection fails.
+    """
+    client = connect_mongodb()
+    if client is None:
+        raise RuntimeError("Failed to connect to MongoDB")
+    
+    # Use anomaly_detection database for bucket profiles and KB configs
+    return DatabaseWrapper(client["anomaly_detection"])

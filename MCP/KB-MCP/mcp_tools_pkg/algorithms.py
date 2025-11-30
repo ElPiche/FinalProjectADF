@@ -2,40 +2,27 @@
 algorithms.py - Algorithm parsing and validation utilities for MCP tools.
 """
 
-from typing import List, Union
+from typing import Iterable, List, Union
 from mcp.server.fastmcp.exceptions import ToolError
 
 
-def parse_algorithms_to_internal_format(algorithms: List) -> List[dict]:
-    """
-    Convert AlgorithmConfigItem objects to internal dictionary format.
+def _iter_algorithms(algorithms: Union[List, dict, object]) -> Iterable:
+    if algorithms is None:
+        return []
+    if isinstance(algorithms, (list, tuple, set)):
+        return algorithms
+    return [algorithms]
 
-    Args:
-        algorithms: List of AlgorithmConfigItem objects or dictionaries
 
-    Returns:
-        List of algorithm dictionaries in internal format
-    """
-    internal_algorithms = []
+def parse_algorithms_to_internal_format(algorithms: Union[List, dict, object]) -> List[dict]:
+    """Convert AlgorithmConfig objects to internal dictionaries (legacy + new schema)."""
 
-    for alg in algorithms:
-        if hasattr(alg, 'alg_name') and hasattr(alg, 'alg_parameters'):
-            # It's an AlgorithmConfigItem object
-            alg_dict = {
-                "alg_name": alg.alg_name,
-                "alg_parameters": []
-            }
+    internal_algorithms: List[dict] = []
 
-            for param in alg.alg_parameters:
-                if hasattr(param, 'dimension'):
-                    param_dict = {"dimension": param.dimension}
-                    if hasattr(param, 'alg_metadata') and param.alg_metadata is not None:
-                        param_dict["alg_metadata"] = param.alg_metadata
-                    alg_dict["alg_parameters"].append(param_dict)
-
-            internal_algorithms.append(alg_dict)
+    for alg in _iter_algorithms(algorithms):
+        if hasattr(alg, "model_dump"):
+            internal_algorithms.append(alg.model_dump(by_alias=True))
         elif isinstance(alg, dict):
-            # Already in dictionary format
             internal_algorithms.append(alg)
         else:
             raise ToolError(f"Unsupported algorithm format: {type(alg)}")
@@ -43,7 +30,7 @@ def parse_algorithms_to_internal_format(algorithms: List) -> List[dict]:
     return internal_algorithms
 
 
-def validate_algorithm_dimensions(algorithms: List, available_fields: List[str], query_type: str) -> None:
+def validate_algorithm_dimensions(algorithms: Union[List, dict, object], available_fields: List[str], query_type: str) -> None:
     """
     Validate that algorithm dimensions exist in the available fields from SQL query.
 
@@ -55,7 +42,7 @@ def validate_algorithm_dimensions(algorithms: List, available_fields: List[str],
     Raises:
         ToolError: If any algorithm dimension is not found in available fields
     """
-    for alg in algorithms:
+    for alg in _iter_algorithms(algorithms):
         if hasattr(alg, 'alg_parameters'):
             # AlgorithmConfigItem object
             for param in alg.alg_parameters:
@@ -76,3 +63,11 @@ def validate_algorithm_dimensions(algorithms: List, available_fields: List[str],
                             f"Algorithm dimension '{dimension}' not found in {query_type} query output fields. "
                             f"Available fields: {available_fields}"
                         )
+        elif hasattr(alg, "parameters"):
+            for param in getattr(alg, "parameters", []) or []:
+                dimension = getattr(param, "dimension", None)
+                if dimension and dimension not in available_fields:
+                    raise ToolError(
+                        f"Algorithm dimension '{dimension}' not found in {query_type} query output fields. "
+                        f"Available fields: {available_fields}"
+                    )

@@ -1,84 +1,69 @@
 //DESCRIBE ALL THE ELEMENTS IN THIS JSON
-// "name" : Name of the configuration for geographic traffic pattern analysis
+// "name" : Name of the configuration
 // "description" : Description of the configuration's purpose and focus
-// "change_flag" : A flag indicating if there have been changes to the configuration
-// "scheduling" : Object containing scheduling details for training and detection queries
-//   "training_config" : Object containing training query details
-//     "from" : Start date for training data
-//     "to" : End date for training data
+// "change_flag" : Flag indicating if there have been modifications (used by change streams)
+// "elasticsearch_sql_query" : Unified SQL query used for both training and detection phases
+// "query_mode" : Object describing how the SQL query returns data
+//   "type" : Either "raw" or "aggregated"
+//   "timestamp_field" : Column name in the SQL output that contains ISO8601 timestamps
+// "bucket_profile_id" : Optional ID referencing a document in the bucket_profiles collection (null disables bucket contexts)
+// "scheduling" : Object containing scheduling details for training and detection
+//   "training_config" : Object describing the training range
+//     "type" : "static" or "rolling"
+//     "from" : Start date for training data (ISO 8601)
+//     "to" : End date for training data (ISO 8601)
 //     "is_active" : Boolean indicating if training is active
-//   "detection_config" : Object containing detection query details
-//     "from" : Start date for detection data
+//   "detection_config" : Object containing detection scheduling details
+//     "from" : Optional start date for detection (ISO 8601)
 //     "frequency" : Cron expression for how often detection runs
 //     "detection_window" : Time window in seconds for detection
 //     "is_active" : Boolean indicating if detection is active
-// "buckets" : Placeholder for bucket configuration
-// "algorithms" : Array of algorithm configurations
-//   Each algorithm object contains:
-//     "alg_name" : Name of the algorithm (e.g., zscore, k-means)
-//     "alg_parameters" : Array of parameters for the algorithm
-//       Each parameter object contains:
-//         "dimension" : The dimension the algorithm operates on
-//         "alg_metadata" : Optional metadata for the algorithm parameter specific to each dimension
+// "algorithm" : Singular algorithm configuration object
+//   "name" : Name of the algorithm (e.g., zscore)
+//   "parameters" : Array of parameter objects
+//     Each parameter contains:
+//       "dimension" : Column monitored by the algorithm
+//       "is_active" : Boolean toggle for this dimension
+//       "metadata" : Optional metadata array for algorithm-specific options
 
 {
   "name": "Geographic Traffic Pattern Analysis",
-  "description": "Analyze traffic patterns based on geographic data to identify anomalies in specific regions. This configuration focuses on monitoring traffic volume and speed across different geographic locations using Elasticsearch SQL queries.",
+  "description": "Analyze traffic patterns based on geographic data to identify anomalies in specific regions using a unified SQL query.",
   "change_flag": 0,
-  "elasticsearch_sql_query":"SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
+  "elasticsearch_sql_query": "SELECT DATE_TRUNC('HOUR', \"@timestamp\") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM \".ds-kibana_sample_data_logs-*\" WHERE \"@timestamp\" >= '$from' AND \"@timestamp\" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp",
+  "query_mode": {
+    "type": "aggregated",
+    "timestamp_field": "es_timestamp"
+  },
   "scheduling": {
     "training_config": {
+      "type": "static",
       "from": "2025-11-01T00:00:00Z",
       "to": "2025-12-01T00:00:00Z",
-      "is_active": true //false if an algorithm does not require training (ARMA, etc.) OR if training is to be paused
+      "is_active": true
     },
     "detection_config": {
-      "from": "2025-11-01T00:00:00Z",
+      "from": "2025-12-02T00:00:00Z",
       "frequency": "*/1 * * * *",
-      "detection_window": 3600, // en segundos, representa la ventana de detección aka que tan atras tomar datos
-      "is_active": true // turns detection on or off
+      "detection_window": 3600,
+      "is_active": true
     }
   },
-  "bucket_id": "mongo_id", //if null, no bucket is used
+  "bucket_profile_id": "business_hours_v1",
   "algorithm": {
-    "name": "kmeans",
+    "name": "zscore",
     "parameters": [
       {
+        "dimension": "status_code_200_counter",
+        "is_active": true
+      },
+      {
         "dimension": "status_code_5xx_counter",
+        "is_active": true,
         "metadata": [
-          {"key": "clusters", "values": "3"}
+          {"key": "percentile", "values": "99.5"}
         ]
       }
     ]
   }
-  // "algorithms": [
-  //   {
-  //     "alg_name": "zscore",
-  //     "alg_parameters": [
-  //       { 
-  //         "dimension": "status_code_200_counter"
-  //       },
-  //       { 
-  //         "dimension": "status_code_5xx_counter" 
-  //       }
-  //     ]
-  //   },
-  //   {
-  //     "alg_name": "kmeans",
-  //     "alg_parameters": [
-  //       {
-  //         "dimension": "status_code_5xx_counter",
-  //         "alg_metadata": [
-  //           {"key": "clusters", "values": "3"}
-  //         ]
-  //       },
-  //       {
-  //         "dimension": "status_code_5xx_counter",
-  //         "alg_metadata": [
-  //           {"key": "clusters", "values": "5"}
-  //         ]
-  //       }
-  //     ]
-  //   }
-  // ]
 }
