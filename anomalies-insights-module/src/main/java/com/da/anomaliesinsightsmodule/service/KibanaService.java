@@ -829,23 +829,26 @@ public class KibanaService {
             references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "10:indexpattern-datasource-layer-zscore"));
 
             var body = Map.of(
-                    "attributes", Map.of(
-                            "title", title,
-                            "version", 3,
-                            "description", "Comprehensive Anomaly Detection Dashboard - Auto-generated",
-                            "timeRestore", false,
-                            "controlGroupInput", Map.of(
+                    "attributes", Map.ofEntries(
+                            Map.entry("title", title),
+                            Map.entry("version", 3),
+                            Map.entry("description", "Comprehensive Anomaly Detection Dashboard - Auto-generated"),
+                            Map.entry("timeRestore", true),
+                            Map.entry("timeTo", "now"),
+                            Map.entry("timeFrom", "now-15m"),
+                            Map.entry("refreshInterval", Map.of("pause", false, "value", 5000)),
+                            Map.entry("controlGroupInput", Map.of(
                                     "chainingSystem", "HIERARCHICAL",
                                     "controlStyle", "oneLine",
                                     "showApplySelections", false,
                                     "ignoreParentSettingsJSON", "{\"ignoreFilters\":false,\"ignoreQuery\":false,\"ignoreTimerange\":false,\"ignoreValidations\":false}",
                                     "panelsJSON", "{}"
-                            ),
-                            "optionsJSON", "{\"useMargins\":true,\"syncColors\":true,\"syncCursor\":true,\"syncTooltips\":true,\"hidePanelTitles\":false}",
-                            "panelsJSON", objectMapper.writeValueAsString(panels),
-                            "kibanaSavedObjectMeta", Map.of(
+                            )),
+                            Map.entry("optionsJSON", "{\"useMargins\":true,\"syncColors\":true,\"syncCursor\":true,\"syncTooltips\":true,\"hidePanelTitles\":false}"),
+                            Map.entry("panelsJSON", objectMapper.writeValueAsString(panels)),
+                            Map.entry("kibanaSavedObjectMeta", Map.of(
                                     "searchSourceJSON", "{\"filter\":[],\"query\":{\"query\":\"\",\"language\":\"kuery\"}}"
-                            )
+                            ))
                     ),
                     "references", references
             );
