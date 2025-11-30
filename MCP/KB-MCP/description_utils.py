@@ -277,7 +277,7 @@ def generate_kb_config_fields_description() -> str:
   - to (ISO 8601 string): Historical end time for training data.
   - is_active (bool): Toggle to pause training jobs.
 - scheduling.detection_config:
-  - frequency (CRON string): Detection cadence. Must satisfy query-mode minimums (raw ≥ 60s, aggregated ≥ 10s).
+  - frequency (CRON string): Detection cadence. Supports both 5-field (UNIX) and 6-field (Spring with seconds) formats. Must satisfy query-mode minimums (raw ≥ 60s, aggregated ≥ 10s).
   - detection_window (int): Time window in seconds that each detection covers.
   - is_active (bool): Toggle to pause detection jobs.
 - algorithm (AlgorithmConfig): Singular algorithm definition with at least one monitored dimension.

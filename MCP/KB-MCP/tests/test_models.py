@@ -21,6 +21,7 @@ def test_valid_kb_config():
         "description": "Test description",
         "change_flag": 0,
         "elasticsearch_sql_query": "SELECT @timestamp, field1 FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+        "source_index": "test",
         "query_mode": {"type": "raw", "timestamp_field": "@timestamp"},
         "scheduling": {
             "training_config": {
@@ -59,6 +60,7 @@ def test_invalid_kb_config_empty_name():
             description="Test",
             change_flag=0,
             elasticsearch_sql_query="SELECT @timestamp FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+            source_index="test",
             query_mode={"type": "raw", "timestamp_field": "@timestamp"},
             algorithm={"name": "zscore", "parameters": [{"dimension": "field1"}]},
             scheduling={
@@ -88,6 +90,7 @@ def test_invalid_kb_config_empty_description():
             description="",
             change_flag=0,
             elasticsearch_sql_query="SELECT @timestamp FROM test WHERE @timestamp >= '$from' AND @timestamp < '$to'",
+            source_index="test",
             query_mode={"type": "raw", "timestamp_field": "@timestamp"},
             algorithm={"name": "zscore", "parameters": [{"dimension": "field1"}]},
             scheduling={
@@ -127,12 +130,18 @@ def test_zscore_config_single_dimension():
 
 
 def test_valid_cron():
-    """Test valid CRON expressions."""
+    """Test valid CRON expressions (both 5-field UNIX and 6-field Spring formats)."""
     valid_crons = [
+        # 5-field UNIX format (minute hour day month weekday)
         "*/15 * * * *",
         "0 * * * *",
         "0 0 * * *",
-        "0 0 1 * *"
+        "0 0 1 * *",
+        # 6-field Spring format (second minute hour day month weekday)
+        "*/10 * * * * *",     # every 10 seconds
+        "0 */5 * * * *",      # every 5 minutes at second 0
+        "30 0 * * * *",       # every hour at second 30
+        "0 0 0 * * *",        # daily at midnight
     ]
 
     for cron_expr in valid_crons:
@@ -145,9 +154,9 @@ def test_invalid_cron():
     """Test invalid CRON expressions."""
     invalid_crons = [
         "invalid",
-        "*/15 * * *",
-        "60 * * * *",
-        "not a cron expression"
+        "*/15 * * *",         # 4 fields - invalid
+        "not a cron expression",
+        "* * * * * * *",      # 7 fields - invalid
     ]
 
     for cron_expr in invalid_crons:

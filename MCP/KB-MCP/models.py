@@ -268,6 +268,15 @@ class KBConfig(BaseModel):
 
 # CRON class moved before classes that use it
 class CRON:
+    """CRON expression validator supporting both 5-field (UNIX) and 6-field (Spring) formats.
+    
+    5-field format: minute hour day month weekday (UNIX standard)
+    6-field format: second minute hour day month weekday (Spring format)
+    
+    The actual frequency validation is delegated to the extractor service which uses
+    Spring's CronExpression for sub-minute resolution support.
+    """
+    
     def __init__(self, value: str):
         if not self._is_valid_cron(value):
             raise ValueError(f"Invalid CRON format: {value}")
@@ -275,12 +284,30 @@ class CRON:
 
     @staticmethod
     def _is_valid_cron(cron_string: str) -> bool:
-        try:
-            from croniter import croniter
-            croniter(cron_string)
-            return True
-        except Exception:
+        """Basic CRON syntax validation.
+        
+        Accepts both 5-field (UNIX) and 6-field (Spring with seconds) formats.
+        Full validation including frequency floor checks is done by the extractor.
+        """
+        if not cron_string or not isinstance(cron_string, str):
             return False
+        
+        parts = cron_string.strip().split()
+        
+        # Must have 5 fields (UNIX) or 6 fields (Spring with seconds)
+        if len(parts) not in (5, 6):
+            return False
+        
+        # Basic validation: each field should contain valid CRON characters
+        valid_chars = set('0123456789*,-/LW#?')
+        for part in parts:
+            if not part:
+                return False
+            # Allow alphanumeric for day/month names (MON, JAN, etc.)
+            if not all(c in valid_chars or c.isalpha() for c in part):
+                return False
+        
+        return True
 
     def __str__(self):
         return self.value

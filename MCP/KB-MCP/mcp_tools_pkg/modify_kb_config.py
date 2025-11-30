@@ -23,11 +23,16 @@ from models import (
 from utils import log_message as _utils_log_message
 from validation import validate_algorithms, validate_cron_expression, validate_window_size
 from .algorithms import validate_algorithm_dimensions
-from .create_da_config import _enforce_detection_frequency_floor
+from .create_da_config import (
+    _enforce_detection_frequency_floor,
+    _validate_query_via_extractor,
+    _validate_query_mode_via_extractor,
+    _validate_timestamp_field_via_extractor,
+)
 from .config import ENABLE_PROGRESS_REPORTING, MAX_TOOL_EXECUTION_TIME
 from .context_helpers import ContextReporter
 from .elasticsearch_sql import elasticsearch_sql
-from .query_validator import QueryValidator, materialize_query_time_range
+from .query_validator import materialize_query_time_range
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
@@ -355,9 +360,9 @@ async def modify_kb_config(
             )
 
             step_start = time.time()
-            await reporter.step(3, "Step 3/4: Validating algorithms and SQL query")
+            await reporter.step(3, "Step 3/4: Validating updates via extractor")
             log_message(
-                "Step 3/4: Validating algorithms and SQL query",
+                "Step 3/4: Validating updates via extractor (point-to-point)",
                 "info",
                 "modify_kb_config",
                 "step",
@@ -371,9 +376,32 @@ async def modify_kb_config(
                 error_msg = "Algorithm validation failed:\n" + "\n".join(f"- {err}" for err in algorithm_errors)
                 raise ToolError(error_msg)
 
-            needs_unified_validation = query_updated or algorithm_updated or time_range_updated or query_mode_updated
+            # Point-to-point validation: only validate what changed
+            # Each validation uses its own individual endpoint
 
-            if needs_unified_validation:
+            # If query_mode changed, validate it via /query-mode endpoint
+            if query_mode_updated:
+                log_message("Validating query_mode via extractor", "info", "modify_kb_config", "step", request_id=request_id)
+                await asyncio.to_thread(
+                    _validate_query_mode_via_extractor,
+                    resulting_query_mode.type,
+                )
+
+            # If timestamp_field changed, validate via /timestamp-field endpoint
+            timestamp_field_updated = query_mode_updated and (
+                resulting_query_mode.timestamp_field != existing_config.query_mode.timestamp_field
+            )
+            if timestamp_field_updated:
+                log_message("Validating timestamp_field via extractor", "info", "modify_kb_config", "step", request_id=request_id)
+                await asyncio.to_thread(
+                    _validate_timestamp_field_via_extractor,
+                    resulting_query_mode.timestamp_field,
+                )
+
+            # If query, query_mode, or time_range changed, validate query via /query endpoint
+            needs_query_validation = query_updated or query_mode_updated or time_range_updated
+            if needs_query_validation:
+                log_message("Validating query via extractor", "info", "modify_kb_config", "step", request_id=request_id)
                 materialized_query = materialize_query_time_range(
                     new_config.elasticsearch_sql_query,
                     new_config.scheduling.training_config.from_,
@@ -381,11 +409,21 @@ async def modify_kb_config(
                     "elasticsearch_sql_query",
                 )
                 await asyncio.to_thread(
-                    QueryValidator.validate,
+                    _validate_query_via_extractor,
                     materialized_query,
-                    "unified",
-                    query_mode=new_config.query_mode.type,
-                    timestamp_field=new_config.query_mode.timestamp_field,
+                    new_config.query_mode.type,
+                    new_config.query_mode.timestamp_field,
+                )
+
+            # If query, algorithm, or query_mode changed, revalidate dimensions
+            needs_dimension_validation = query_updated or algorithm_updated or query_mode_updated or time_range_updated
+            if needs_dimension_validation:
+                log_message("Validating algorithm dimensions", "info", "modify_kb_config", "step", request_id=request_id)
+                materialized_query = materialize_query_time_range(
+                    new_config.elasticsearch_sql_query,
+                    new_config.scheduling.training_config.from_,
+                    new_config.scheduling.training_config.to,
+                    "elasticsearch_sql_query",
                 )
                 preview = await elasticsearch_sql(f"{materialized_query} LIMIT 0", ctx=ctx)
                 available_fields = [col.get("name") for col in preview.get("columns", []) if col.get("name")]

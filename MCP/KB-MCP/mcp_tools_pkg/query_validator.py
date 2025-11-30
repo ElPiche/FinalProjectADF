@@ -260,7 +260,8 @@ class QueryValidator:
 
     @classmethod
     def _build_endpoint(cls) -> str:
-        host = cls._get_env_value("EXTRACTOR_HOST", "http://extractor:8080")
+        # Container name is "etl-app" and internal port is 8080
+        host = cls._get_env_value("EXTRACTOR_HOST", "http://etl-app:8080")
         host = host.rstrip("/")
         return f"{host}/api/validate/query"
 
