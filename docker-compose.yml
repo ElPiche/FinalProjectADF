@@ -385,6 +385,34 @@ services:
      timeout: 5s
      retries: 10
 
+  stack-profiler:
+    build:
+      context: ./stack-profiler
+      dockerfile: Dockerfile
+    container_name: stack-profiler
+    restart: unless-stopped
+    depends_on:
+      elasticsearch-anomalies:
+        condition: service_healthy
+      kibana-anomalies:
+        condition: service_healthy
+    environment:
+      - ES_URL=http://elasticsearch-anomalies:9200
+      - KIBANA_URL=http://kibana-anomalies:5601
+      - COLLECTION_INTERVAL=5
+      - CREATE_DASHBOARD=true
+    volumes:
+      # Mount Docker socket to access Docker API from inside container
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - adf-network
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "profiler.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 
 volumes:
   mongo_data: null
