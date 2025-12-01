@@ -88,7 +88,9 @@ def _lazy_import_pkg():
 def _create_da_config_docstring():
     return f"""Create anomaly detection configuration.
 
-**Pre-flight:** Validate query with elasticsearch_sql tool first.
+**Pre-flight:** 
+- Validate query with elasticsearch_sql tool first.
+- MUST CREATE BUCKETS IF PLANNING TO CREATE ANY FORM OF BUCKETING, SPECIALLY FOR AGGREGATED MODE, DO NOT BUCKET IN THE QUERY ITSELF.
 
 **Required:**
 - name: Unique config identifier
@@ -105,6 +107,8 @@ def _create_da_config_docstring():
 **Optional:**
 - bucket_profile_id: Link to time-context profile
 - anomaly_config: {{"user_emails": ["email@example.com"]}}
+
+
 
 **Frequency Limits:** raw mode ≥60s, aggregated ≥10s
 
