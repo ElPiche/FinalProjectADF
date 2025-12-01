@@ -441,12 +441,13 @@ services:
       - MONGODB_COLLECTION=kb_configs
       - BUCKET_COLLECTION=bucket_profiles
       - ES_URL=http://elasticsearch-dataset:9200
+      - SOURCE_INDEX=ecommerce-logs
       - MODE=continuous
       - MIN_INTERVAL=1
-      - MAX_INTERVAL=10
+      - MAX_INTERVAL=3
       - BURST_PROBABILITY=0.1
       - BURST_SIZE_MIN=3
-      - BURST_SIZE_MAX=10
+      - BURST_SIZE_MAX=20
       - BUCKET_PROBABILITY=0.3
     networks:
       - adf-network
