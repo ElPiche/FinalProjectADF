@@ -335,23 +335,23 @@ services:
         condition: service_healthy
     environment:
       - ES_HOST=http://elasticsearch-dataset:9200
-      - INDEX_NAME=ecommerce-logs
-      - HISTORICAL_DAYS=365
-      - HISTORICAL_BATCH_SIZE=10000
-      - BASE_REQUESTS_PER_HOUR=5000
-      - PEAK_MULTIPLIER=4.0
-      - HISTORICAL_ANOMALY_RATE=0.015
-      - CONTINUOUS_INTERVAL=1.0
-      - LOGS_PER_INTERVAL_MIN=50
-      - LOGS_PER_INTERVAL_MAX=150
-      - CONTINUOUS_ANOMALY_RATE=0.02
-      - BURST_PROBABILITY=0.03
-      - BURST_SIZE_MIN=200
-      - BURST_SIZE_MAX=1000
+      - INDEX_NAME=ecommerce-logs # Index name to store logs
+      - HISTORICAL_DAYS=365 # Number of historical days to generate
+      - HISTORICAL_BATCH_SIZE=10000 # Number of logs to generate per batch for historical data
+      - BASE_REQUESTS_PER_HOUR=2000 # Adjust base load here
+      - PEAK_MULTIPLIER=4.0 # Peak hours get 4x traffic
+      - HISTORICAL_ANOMALY_RATE=0.015 # 1.5% anomalies in historical data
+      - CONTINUOUS_INTERVAL=1.0 # Interval in seconds for continuous log generation
+      - LOGS_PER_INTERVAL_MIN=50 # Min logs per interval
+      - LOGS_PER_INTERVAL_MAX=150 # Max logs per interval
+      - CONTINUOUS_ANOMALY_RATE=0.02 # 2% anomalies in continuous data
+      - BURST_PROBABILITY=0.03 # 3% chance of burst
+      - BURST_SIZE_MIN=200 # Min logs in a burst
+      - BURST_SIZE_MAX=1000 # Max logs in a burst
       # Performance tuning - balanced for speed + stability
-      - NUM_WORKERS=4
-      - BULK_THREAD_COUNT=16
-      - CHUNK_SIZE=5000
+      - NUM_WORKERS=4 # Number of parallel worker threads
+      - BULK_THREAD_COUNT=16 # Number of parallel bulk streams
+      - CHUNK_SIZE=5000 # Docs per bulk chunk (smaller = more parallelism)
     networks:
       - adf-network
     # Explicitly disable Dockerfile healthcheck during long data generation
@@ -441,12 +441,13 @@ services:
       - MONGODB_COLLECTION=kb_configs
       - BUCKET_COLLECTION=bucket_profiles
       - ES_URL=http://elasticsearch-dataset:9200
+      - SOURCE_INDEX=ecommerce-logs
       - MODE=continuous
       - MIN_INTERVAL=1
-      - MAX_INTERVAL=10
+      - MAX_INTERVAL=3
       - BURST_PROBABILITY=0.1
       - BURST_SIZE_MIN=3
-      - BURST_SIZE_MAX=10
+      - BURST_SIZE_MAX=20
       - BUCKET_PROBABILITY=0.3
     networks:
       - adf-network

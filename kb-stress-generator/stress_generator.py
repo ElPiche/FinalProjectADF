@@ -13,7 +13,7 @@ Features:
 - Burst mode: occasionally spam multiple configs at once
 - Creates bucket profiles with various time-context patterns
 - Randomized query patterns, dimensions, and schedules
-- Uses ONLY app-logs index (dynamic data from log generator)
+- Configurable source index via SOURCE_INDEX env var (default: ecommerce-logs)
 - All queries are pre-validated against Elasticsearch SQL
 """
 
@@ -61,6 +61,7 @@ class StressGeneratorConfig:
     mongodb_collection: str = "kb_configs"  # Must match ETL expectation
     bucket_collection: str = "bucket_profiles"  # For bucket profiles
     es_url: str = "http://elasticsearch-dataset:9200"
+    source_index: str = "ecommerce-logs"  # Target index for KB configs
     
     mode: str = "continuous"  # continuous, burst, single
     min_interval: int = 30  # seconds between configs
@@ -81,6 +82,7 @@ class StressGeneratorConfig:
             mongodb_collection=os.getenv("MONGODB_COLLECTION", cls.mongodb_collection),
             bucket_collection=os.getenv("BUCKET_COLLECTION", cls.bucket_collection),
             es_url=os.getenv("ES_URL", cls.es_url),
+            source_index=os.getenv("SOURCE_INDEX", cls.source_index),
             mode=os.getenv("MODE", cls.mode),
             min_interval=int(os.getenv("MIN_INTERVAL", str(cls.min_interval))),
             max_interval=int(os.getenv("MAX_INTERVAL", str(cls.max_interval))),
@@ -216,51 +218,52 @@ class BucketProfileGenerator:
 class KBConfigGenerator:
     """Generates randomized KB configurations for stress testing."""
     
-    def __init__(self, seed: Optional[int] = None):
+    def __init__(self, source_index: str = "ecommerce-logs", seed: Optional[int] = None):
         self.fake = Faker()
+        self.source_index = source_index
         if seed is not None:
             random.seed(seed)
             Faker.seed(seed)
         
         self.config_counter = 0
         
-        # VALIDATED QUERIES - Only app-logs index (dynamic data)
+        # Query templates - {index} will be replaced with source_index
         # All queries have been validated against Elasticsearch SQL
-        self.validated_queries = [
+        self.query_templates = [
             {
                 "name": "status_codes",
                 "description": "Monitor HTTP status code distribution",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS status_200_count, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS status_5xx_count, COUNT(*) AS total_requests FROM "app-logs" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS status_200_count, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS status_5xx_count, COUNT(*) AS total_requests FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
                 "dimensions": ["status_200_count", "status_5xx_count", "total_requests"],
             },
             {
                 "name": "latency_metrics",
                 "description": "Monitor API response latency",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, AVG(response_time_ms) AS avg_latency, MAX(response_time_ms) AS max_latency, COUNT(*) AS request_count FROM "app-logs" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, AVG(response_time_ms) AS avg_latency, MAX(response_time_ms) AS max_latency, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
                 "dimensions": ["avg_latency", "max_latency", "request_count"],
             },
             {
                 "name": "error_traffic",
                 "description": "Monitor error rates and traffic volume",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count, SUM(bytes_sent) AS total_bytes, COUNT(*) AS total_count FROM "app-logs" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count, SUM(bytes_sent) AS total_bytes, COUNT(*) AS total_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
                 "dimensions": ["error_count", "total_bytes", "total_count"],
             },
             {
                 "name": "user_activity",
                 "description": "Monitor unique users and endpoints",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, COUNT(DISTINCT endpoint) AS unique_endpoints, COUNT(DISTINCT user_id) AS unique_users, COUNT(*) AS request_count FROM "app-logs" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, COUNT(DISTINCT endpoint) AS unique_endpoints, COUNT(DISTINCT user_id) AS unique_users, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
                 "dimensions": ["unique_endpoints", "unique_users", "request_count"],
             },
             {
                 "name": "client_errors",
                 "description": "Monitor 4xx client errors",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS client_errors, SUM(CASE WHEN status_code = 404 THEN 1 ELSE 0 END) AS not_found_count, COUNT(*) AS total_requests FROM "app-logs" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS client_errors, SUM(CASE WHEN status_code = 404 THEN 1 ELSE 0 END) AS not_found_count, COUNT(*) AS total_requests FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
                 "dimensions": ["client_errors", "not_found_count", "total_requests"],
             },
             {
                 "name": "server_health",
                 "description": "Monitor server errors and response times",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS server_errors, AVG(response_time_ms) AS avg_response_time, COUNT(*) AS request_count FROM "app-logs" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS server_errors, AVG(response_time_ms) AS avg_response_time, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
                 "dimensions": ["server_errors", "avg_response_time", "request_count"],
             },
         ]
@@ -334,8 +337,8 @@ class KBConfigGenerator:
         """Generate a random KB configuration."""
         self.config_counter += 1
         
-        # Select random validated query
-        query_template = random.choice(self.validated_queries)
+        # Select random query template
+        query_template = random.choice(self.query_templates)
         
         # Generate training period
         training_from, training_to = self._generate_training_period()
@@ -371,8 +374,8 @@ class KBConfigGenerator:
             "description": f"Auto-generated stress test: {query_template['description']}. "
                           f"Monitoring {', '.join(selected_dims)}.",
             "change_flag": 0,
-            "elasticsearch_sql_query": query_template["sql"],
-            "source_index": "app-logs",
+            "elasticsearch_sql_query": query_template["sql"].format(index=self.source_index),
+            "source_index": self.source_index,
             "query_mode": {
                 "type": "aggregated",
                 "timestamp_field": "es_timestamp",
@@ -408,7 +411,7 @@ class StressGenerator:
     
     def __init__(self, config: StressGeneratorConfig):
         self.config = config
-        self.kb_generator = KBConfigGenerator(config.seed)
+        self.kb_generator = KBConfigGenerator(source_index=config.source_index, seed=config.seed)
         self.bucket_generator = BucketProfileGenerator(config.seed)
         self.mongo_client: Optional[MongoClient] = None
         self.db = None
@@ -544,7 +547,7 @@ class StressGenerator:
         logger.info("=" * 60)
         logger.info("🚀 KB Stress Generator - CONTINUOUS MODE")
         logger.info("=" * 60)
-        logger.info(f"Index: app-logs (dynamic data)")
+        logger.info(f"Index: {self.config.source_index}")
         logger.info(f"Interval: {self.config.min_interval}-{self.config.max_interval}s")
         logger.info(f"Burst probability: {self.config.burst_probability * 100:.0f}%")
         logger.info(f"Burst size: {self.config.burst_size_min}-{self.config.burst_size_max}")
