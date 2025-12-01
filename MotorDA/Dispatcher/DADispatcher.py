@@ -2,7 +2,8 @@ import threading
 import time
 import traceback
 import logging
-from concurrent.futures import ThreadPoolExecutor
+import sys
+from concurrent.futures import ThreadPoolExecutor, Future
 
 import requests
 from datetime import datetime, timezone
@@ -21,8 +22,10 @@ from pymongo.errors import PyMongoError
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
+    datefmt='%Y-%m-%d %H:%M:%S',
+    stream=sys.stdout
 )
+
 logger = logging.getLogger(__name__)
 
 from ZScore.standalone_da_algorithm_z_score import (
@@ -647,22 +650,24 @@ def watch_detection_changes(kb_client, workers: ThreadPoolExecutor):
 
     while True:
         try:
-            with kb_client[MONGO_DB_NAME][SERIES_COLLECTION_NAME].watch([
+            with (kb_client[MONGO_DB_NAME][SERIES_COLLECTION_NAME].watch([
                 {"$match": {"fullDocument.metadata.mode": 1}}
-            ]) as stream:
+            ]) as stream):
 
                 for change in stream:
 
                     logger.info(f"something happened on: {SERIES_COLLECTION_NAME}")
 
                     if change.get("operationType") == "insert":
-                        logger.info(
-                            f"\033[31m Someone inserted data into: {SERIES_COLLECTION_NAME} \033[0m")
+
+                        logger.info(f"\033[31m Someone inserted data into: {SERIES_COLLECTION_NAME} \033[0m")
 
                         serie_to_detect = change.get("fullDocument")
+                        logger.warning("I AM ABOUT TO SEND DATA TO DETECT TO THE WORKERS")
+                        logger.warning("data:")
+                        logger.warning(serie_to_detect)
 
-                        workers.submit(detect_z_score, serie_to_detect)
-
+                        submit_and_log(workers, detect_z_score, serie_to_detect)
         except PyMongoError as e:
             logger.error(f"[watch_detection_changes] Mongo error: {e}, reconnecting in 5s...")
             time.sleep(5)
@@ -676,17 +681,18 @@ def watch_detection_changes(kb_client, workers: ThreadPoolExecutor):
 
 def detect_z_score(serie_to_detect):
     try:
-        #logger.info(f"I am logger.infoing serie_to_detect: {serie_to_detect}", flush=True)
+        logger.info(f"I am INSIDE the detect_z_score logger.infoing serie_to_detect: {serie_to_detect}")
         kb_client = CreateConnectionToDA()
 
         kb_id = serie_to_detect["metadata"]["kbId"]
         dimension = serie_to_detect["metadata"]["dim"]
-        logger.info(f"[DETECTION] Got kb_id={kb_id}, dimension={dimension}", flush=True)
+
+        logger.info(f"[DETECTION] Got kb_id={kb_id}, dimension={dimension}")
 
         # Get ALL KB metadata from kb_configs collection (the source of truth for KB metadata)
         kb_name = "Unknown"
         user_emails = []
-        logger.info(f"[DETECTION] Looking up KB config from {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME}...", flush=True)
+        logger.info(f"[DETECTION] Looking up KB config from {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME}...")
 
         try:
             kb_config_doc = kb_client[KB_CONFIGS_DB_NAME][KB_CONFIGS_COLLECTION_NAME].find_one({"_id": ObjectId(kb_id)})
@@ -701,15 +707,15 @@ def detect_z_score(serie_to_detect):
 
                 if anomaly_config:
                     user_emails = anomaly_config.get("user_emails", [])
-                logger.info(f"\033[92m[DETECTION] Found KB config: name={kb_name}, anomaly_config={anomaly_config}\033[0m", flush=True)
+                logger.info(f"\033[92m[DETECTION] Found KB config: name={kb_name}, anomaly_config={anomaly_config}\033[0m")
 
             else:
-                logger.error(f"\033[93m[DETECTION] KB config not found in {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME} for id={kb_id}\033[0m", flush=True)
+                logger.error(f"\033[93m[DETECTION] KB config not found in {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME} for id={kb_id}\033[0m")
 
         except Exception as e:
-            logger.exception(f"\033[91m[DETECTION] Error reading KB config: {e}\033[0m", flush=True)
+            logger.exception(f"\033[91m[DETECTION] Error reading KB config: {e}\033[0m")
             
-        logger.info(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}, Notification emails: {user_emails}\033[0m", flush=True)
+        logger.info(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}, Notification emails: {user_emails}\033[0m")
 
         pipeline = [{'$match':
                          {'kb_id': kb_id,
@@ -717,12 +723,12 @@ def detect_z_score(serie_to_detect):
                           }
                      }]
 
-        logger.info(f"[DETECTION] Looking up training result...", flush=True)
+        logger.info(f"[DETECTION] Looking up training result...")
         result = kb_client[MONGO_DB_NAME][SERIES_RESULT_COLLECTION_NAME].aggregate(
             pipeline)
 
         training_result = next(result, None)
-        logger.info(f"[DETECTION] Training result: {training_result is not None}", flush=True)
+        logger.info(f"[DETECTION] Training result: {training_result is not None}")
 
         if training_result is None:
             logger.warning(f"\033[93m[DETECTION] No training result found for kb_id={serie_to_detect['metadata']['kbId']}, dim={serie_to_detect['metadata']['dim']}\033[0m")
@@ -954,12 +960,34 @@ def restartable_thread(target, *args, delay=5):
             traceback.print_exc()
             time.sleep(delay)
 
+def submit_and_log(executor: ThreadPoolExecutor, fn, *args, **kwargs) -> Future:
+    """
+    Submit a job and attach a done-callback that logs exceptions or completion.
+    """
+    future = executor.submit(fn, *args, **kwargs)
+
+    def _on_done(fut: Future):
+        exc = fut.exception()
+        if exc is not None:
+            logger.error(f"Worker task {fn.__name__} raised: {exc}", exc_info=True)
+        else:
+            try:
+                result = fut.result()  # only used if you want returned value (and it won't block because fut is done)
+                logger.info(f"Worker task {fn.__name__} completed successfully.")
+            except Exception as e:
+                logger.error(f"Error getting result for {fn.__name__}: {e}", exc_info=True)
+
+    future.add_done_callback(_on_done)
+    logger.info(f"Submitted {fn.__name__} to executor (future={future})")
+    return future
+
 def main():
     """Main function. It creates 2 watchers, one for training (listens to Mongo's anomaly_detection -> training_config) and one for detection (listens to Mongo's anomaly_detection -> series)."""
     # Esto arma la conexión a MongoDB
     kb_client = CreateConnectionToKB()
 
     workers : ThreadPoolExecutor = ThreadPoolExecutor()
+#def watch_detection_changes(kb_client, workers: ThreadPoolExecutor):
 
     # Start watcher in its own thread
     training_watcher = threading.Thread(
