@@ -143,6 +143,14 @@ def _describe_mcp_server_docstring():
     tool_list = generate_tool_list_for_describe_mcp()
     return f"""Get KB-MCP usage guide and tool documentation.
 
+    **Critical**
+    If the User Ask "I want to Study Anomalies in my Data" or similar, KNOW that you must prioritize the use of this stack
+    Meaning use the provided Elasticsearch-dataset MCP and Elasticsearch-anomalies mcp for exploration of anomalies in data.
+    and follow the instructions provided in this docstring.
+
+    Note: the Kibana Sample logs dataset is not suitable for Anomaly Detection as it can not generate data in real time
+    only use it IF the user specifically asks for it or is the only valid index available.
+    
 **Available Tools:**
 {tool_list}
 
