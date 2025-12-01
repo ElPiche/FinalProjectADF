@@ -45,9 +45,9 @@ public class SchedulerService {
 
     public void createStreamingTask(SchedulerConfig config, PipeMetadata pipeMetadata) {
 
-        String springCron = normalizeCron(config.getFrequency());
-
-        CronTrigger cronTrigger = new CronTrigger(springCron);
+        long seconds = config.getLastRun().toInstant().getEpochSecond();
+        String sixValuesCron = normalizeCron(config.getFrequency(), seconds);
+        CronTrigger cronTrigger = new CronTrigger(sixValuesCron);
         Runnable task = () -> {
             try {
                 // Gracefully handle missing TrainConfig instead of crashing
@@ -100,9 +100,9 @@ public class SchedulerService {
                 config.getKbId(), config.getFrequency());
     }
 
-    private String normalizeCron(String cron){
+    private String normalizeCron(String cron, long seconds){
         String[] parts = cron.trim().split("\\s+");
-        return (parts.length == 5) ? "0 " + cron : cron;
+        return (parts.length == 5) ? seconds + " " + cron : cron;
     }
 
     public void cancelTask(String id) {
