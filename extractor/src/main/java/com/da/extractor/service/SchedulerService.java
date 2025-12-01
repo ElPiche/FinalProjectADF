@@ -45,7 +45,7 @@ public class SchedulerService {
 
     public void createStreamingTask(SchedulerConfig config, PipeMetadata pipeMetadata) {
 
-        String springCron = normalizeCron(config.getFrequency(), config.getKbId());
+        String springCron = normalizeCron(config.getFrequency());
 
         CronTrigger cronTrigger = new CronTrigger(springCron);
         Runnable task = () -> {
@@ -100,26 +100,9 @@ public class SchedulerService {
                 config.getKbId(), config.getFrequency());
     }
 
-
-    /**
-     * Normalizes a CRON expression to 6-field Spring format.
-     * For 5-field crons, uses a hash-based second offset derived from the KB ID
-     * to prevent thundering herd (all tasks firing at second=0).
-     * 
-     * @param cron The cron expression (5 or 6 fields)
-     * @param kbId The KB configuration ID used to compute the offset
-     * @return A 6-field Spring cron expression with distributed seconds
-     */
-    private String normalizeCron(String cron, String kbId) {
+    private String normalizeCron(String cron){
         String[] parts = cron.trim().split("\\s+");
-        if (parts.length == 5) {
-            // Use hash of kbId to distribute executions across 0-59 seconds
-            int secondOffset = Math.abs(kbId.hashCode()) % 60;
-            log.debug("Normalized 5-field cron for KB {}: second offset = {}", kbId, secondOffset);
-            return secondOffset + " " + cron;
-        }
-        // Already 6-field, return as-is
-        return cron;
+        return (parts.length == 5) ? "0 " + cron : cron;
     }
 
     public void cancelTask(String id) {
