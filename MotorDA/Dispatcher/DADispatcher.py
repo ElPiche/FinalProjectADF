@@ -548,7 +548,7 @@ def watch_kb_changes(kb_client):
                     logger.info(f"something happened on: {TRAINING_COLLECTION_NAME}")
 
                     op_type = change.get("operationType")
-                    logger.info(change)
+                    #logger.info(change)
 
                     # Only process insert operations - skip updates to avoid race condition
                     # Updates occur when we set is_trained=true after training completes
@@ -570,7 +570,7 @@ def watch_kb_changes(kb_client):
 
                         logger.info(f"\033[90m[DISPATCHER] is_trained value: {is_trained} (type: {type(is_trained).__name__})\033[0m")
 
-                        if is_trained in (True, "true", "True"): #??????????? why? this should re train, besides if you insert the same document, mongo should explode
+                        if is_trained in (True, "true", "True"):
                             logger.info(f"\033[93m[DISPATCHER] Skipping already-trained config: {full_doc.get('kb_id')}\033[0m")
                             continue
 
@@ -578,8 +578,8 @@ def watch_kb_changes(kb_client):
                         #logger.info(full_doc)
 
                         # Save config to file for debugging
-                        with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
-                            f.write(json_util.dumps(full_doc, indent=2))
+                        #with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
+                        #    f.write(json_util.dumps(full_doc, indent=2))
 
                         # we turn the JSON with the config data into a class
                         # Pass mongo_client so parse_config can fetch KB config for bucket_profile_id
@@ -687,20 +687,27 @@ def detect_z_score(serie_to_detect):
         kb_name = "Unknown"
         user_emails = []
         logger.info(f"[DETECTION] Looking up KB config from {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME}...", flush=True)
+
         try:
             kb_config_doc = kb_client[KB_CONFIGS_DB_NAME][KB_CONFIGS_COLLECTION_NAME].find_one({"_id": ObjectId(kb_id)})
+
             if kb_config_doc:
+
                 # Get name/description from kb_configs
                 kb_name = kb_config_doc.get("name", kb_config_doc.get("description", "Unknown"))
+
                 # Get notification emails from anomaly_config
                 anomaly_config = kb_config_doc.get("anomaly_config", {})
+
                 if anomaly_config:
                     user_emails = anomaly_config.get("user_emails", [])
                 logger.info(f"\033[92m[DETECTION] Found KB config: name={kb_name}, anomaly_config={anomaly_config}\033[0m", flush=True)
+
             else:
-                logger.info(f"\033[93m[DETECTION] KB config not found in {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME} for id={kb_id}\033[0m", flush=True)
+                logger.error(f"\033[93m[DETECTION] KB config not found in {KB_CONFIGS_DB_NAME}.{KB_CONFIGS_COLLECTION_NAME} for id={kb_id}\033[0m", flush=True)
+
         except Exception as e:
-            logger.error(f"\033[91m[DETECTION] Error reading KB config: {e}\033[0m", flush=True)
+            logger.exception(f"\033[91m[DETECTION] Error reading KB config: {e}\033[0m", flush=True)
             
         logger.info(f"\033[94m[DETECTION] KB Name: {kb_name}, KB ID: {kb_id}, Notification emails: {user_emails}\033[0m", flush=True)
 

@@ -19,6 +19,16 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from pymongo import MongoClient
 
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
 # Import pure ZScore algorithm - NO bucket logic
 from MotorDA.ZScore import zscore_algorithm as zscore
 
@@ -54,16 +64,17 @@ class TrainingOrchestrator:
         profile_doc = collection.find_one({"_id": bucket_profile_id})
         
         if profile_doc is None:
-            print(f"\033[93m[ORCHESTRATOR] Bucket profile '{bucket_profile_id}' not found, using global_default\033[0m")
+            logger.error(f"\033[93m[ORCHESTRATOR] Bucket profile '{bucket_profile_id}' not found, using global_default\033[0m")
             return cls(bucket_resolver=None, bucket_profile_id=None)
         
         # Create resolver from profile
         try:
             resolver = BucketResolver.from_dict(profile_doc)
-            print(f"\033[92m[ORCHESTRATOR] Loaded bucket profile '{bucket_profile_id}'\033[0m")
+            logger.info(f"\033[92m[ORCHESTRATOR] Loaded bucket profile '{bucket_profile_id}'\033[0m")
             return cls(bucket_resolver=resolver, bucket_profile_id=bucket_profile_id)
+
         except Exception as e:
-            print(f"\033[91m[ORCHESTRATOR] Failed to create resolver: {e}, using global_default\033[0m")
+            logger.error(f"\033[91m[ORCHESTRATOR] Failed to create resolver: {e}, using global_default\033[0m")
             return cls(bucket_resolver=None, bucket_profile_id=None)
     
     def resolve_bucket_key(self, ts: datetime) -> str:
@@ -150,6 +161,7 @@ class TrainingOrchestrator:
                 "global_fallback": {"mean": ..., "std": ..., ...}
             }
         """
+
         if df_train.empty:
             return {
                 "kb_id": kb_id,
@@ -166,23 +178,24 @@ class TrainingOrchestrator:
         # Group training data by bucket key
         grouped = self.group_by_bucket(df_train, timestamp_col)
         
-        print(f"\033[92m[ORCHESTRATOR] Training dimension '{dimension}' with {len(grouped)} buckets\033[0m")
+        logger.info(f"\033[92m[ORCHESTRATOR] Training dimension '{dimension}' with {len(grouped)} buckets\033[0m")
         
         # Train ZScore baseline for each bucket
         buckets: Dict[str, Dict[str, Any]] = {}
         
         for bucket_key, bucket_df in grouped.items():
+
             values = bucket_df[value_col].astype(float).tolist()
             n_points = len(values)
             
             if n_points < min_points:
                 # Use global fallback for insufficient data
-                print(f"\033[93m[ORCHESTRATOR] Bucket '{bucket_key}' has {n_points} points < {min_points}, using global fallback\033[0m")
+                logger.warning(f"\033[93m[ORCHESTRATOR] Bucket '{bucket_key}' has {n_points} points < {min_points}, using global fallback\033[0m")
                 baseline = global_fallback
                 sufficient_data = False
             else:
                 # Train bucket-specific baseline
-                print(f"\033[92m[ORCHESTRATOR] Bucket '{bucket_key}' training with {n_points} data points\033[0m")
+                logger.info(f"\033[92m[ORCHESTRATOR] Bucket '{bucket_key}' training with {n_points} data points\033[0m")
                 baseline = zscore.train(values, percentile, min_points)
                 sufficient_data = True
             
@@ -234,17 +247,19 @@ class DetectionOrchestrator:
         profile_doc = collection.find_one({"_id": bucket_profile_id})
         
         if profile_doc is None:
-            print(f"\033[93m[DETECTION] Bucket profile '{bucket_profile_id}' not found\033[0m")
+            logger.error(f"\033[93m[DETECTION] Bucket profile '{bucket_profile_id}' not found\033[0m")
             return cls(bucket_resolver=None, baselines=baselines)
         
         try:
             resolver = BucketResolver.from_dict(profile_doc)
             return cls(bucket_resolver=resolver, baselines=baselines)
         except Exception as e:
-            print(f"\033[91m[DETECTION] Failed to create resolver: {e}\033[0m")
+            logger.exception(f"\033[91m[DETECTION] Failed to create resolver: {e}\033[0m")
             return cls(bucket_resolver=None, baselines=baselines)
-    
-    def detect(
+
+
+
+    def detect( # where is this function used????
         self,
         dimension: str,
         timestamp: datetime,
@@ -312,7 +327,8 @@ class DetectionOrchestrator:
             "bucket_key": bucket_key,
             **result.to_dict(),
         }
-    
+
+    # for now this is being used only for test
     def detect_batch(
         self,
         dimension: str,
