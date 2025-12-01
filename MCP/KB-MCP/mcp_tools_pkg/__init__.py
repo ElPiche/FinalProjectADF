@@ -11,9 +11,7 @@ __all__ = [
     "modify_kb_config",
     "list_kb_configurations",
     "describe_mcp_server",
-    "list_available_algorithms",
     "elasticsearch_sql",
-    "ping_elasticsearch",
 ]
 
 _MODULE_MAP = {
@@ -21,9 +19,7 @@ _MODULE_MAP = {
     "modify_kb_config": "modify_kb_config",
     "list_kb_configurations": "list_kb_configurations",
     "describe_mcp_server": "describe_mcp_server",
-    "list_available_algorithms": "list_available_algorithms",
     "elasticsearch_sql": "elasticsearch_sql",
-    "ping_elasticsearch": "ping_elasticsearch",
 }
 
 

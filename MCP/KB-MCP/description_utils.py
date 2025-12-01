@@ -412,18 +412,15 @@ def generate_tool_list_for_describe_mcp() -> str:
 
     Returns a formatted string with numbered tool names.
     """
-    # Hardcoded list of tools to avoid circular import issues
     tools = [
         "1) create_da_config",
         "2) modify_kb_config",
         "3) list_kb_configurations",
         "4) describe_mcp_server",
-        "5) list_available_algorithms",
-        "6) ping_elasticsearch",
-        "7) elasticsearch_sql",
-        "8) create_bucket_profile",
-        "9) list_bucket_profiles",
-        "10) delete_bucket_profile"
+        "5) elasticsearch_sql",
+        "6) create_bucket_profile",
+        "7) list_bucket_profiles",
+        "8) delete_bucket_profile"
     ]
     return "\n".join(tools)
 
@@ -432,8 +429,7 @@ def get_tool_count() -> int:
     """
     Get the current number of registered MCP tools.
     """
-    # Hardcoded count to avoid circular import issues
-    return 10
+    return 8
 
 
 def generate_algorithm_config_example() -> str:

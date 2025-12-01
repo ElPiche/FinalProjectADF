@@ -28,107 +28,95 @@ def describe_mcp_server() -> str:
                 request_id=request_id)
 
     text = """
-KB-MCP: How to use the tools
+KB-MCP: Usage Guide
 
-Purpose
-Return human-readable instructions for using KB-MCP tools. The text below lists each
-tool, the inputs it requires, common return shapes, and copy/pasteable examples you can
-use directly.
+**8 Available Tools:**
+1) create_da_config - Create anomaly detection configuration
+2) modify_kb_config - Update existing configuration  
+3) list_kb_configurations - List all saved configurations
+4) describe_mcp_server - This guide
+5) elasticsearch_sql - Run ES SQL query to validate queries
+6) create_bucket_profile - Create time-context bucket profile
+7) list_bucket_profiles - List bucket profiles
+8) delete_bucket_profile - Delete bucket profile
 
-Tools
+**Supported Algorithms:** zscore
 
-1) create_da_config
-- Inputs:
-  - name (string) — Unique configuration name (required)
-  - description (string) — Human-readable description of what this monitors (optional)
-  - scheduling.training_query (string) — SQL query for training data.
-      This query should return historical data used to train the anomaly detection models.
-      Timestamp values in the query should be filtered using placeholders `$from` and `$to` to define the training period.
-      The query result must always include countable integer numeric columns for the algorithms to monitor which going to be the dimensions. (required)
-  - scheduling.detection_query (string) — SQL query for detection
-      This query should return recent or real-time data used for anomaly detection.
-      Timestamp values in the query should be filtered using placeholders `$from` and `$to` and the extractor process will be the one to set these values based on the detection schedule. (required)
-  - scheduling.training_from (ISO format) — Training start timestamp.
-      Defines the beginning of the historical data period used for training the models.
-      Will be substituted for `$from` in the training_query during model training. (required)
-  - scheduling.training_to (ISO format) — Training end timestamp.
-      Defines the end of the historical data period used for training the models.
-      Will be substituted for `$to` in the training_query during model training. (required)
-  - scheduling.training_is_active (boolean) — Flag to indicate if training is active.
-      If training is not active, the extractor process will skip the training phase. (required)
-  - scheduling.detection_is_active (boolean) — Flag to indicate if detection is active.
-      If detection is not active, the extractor process will skip the detection phase. (required)
-  - scheduling.training_window (integer, seconds) — Training window in seconds.
-      Defines the time window size for training data aggregation.
-      This value helps the algorithms to process data points within the specified window. (required)
-  - scheduling.detection_window (integer, seconds) — Detection window in seconds.
-      Defines the time window size for detection data aggregation.
-      The extractor process will take this value to extract the last N seconds of data for anomaly detection. (required)
-  - scheduling.detection_frequency (cron string) — Detection frequency (CRON format)
-      Defines how often the anomaly detection process should run.
-      The extractor process will use this CRON expression to schedule detection runs.
-      Make sure to provide a valid CRON expression to ensure proper scheduling.
-  - algorithms (array) — list of algorithm objects; each must include:
-    - alg_name (string)
-    - alg_parameters (array of objects) where each object includes at least a 'dimension' field naming a column from your query output
-- Return: success message and the stored configuration id or a validation error describing the failing field.
+---
 
-2) modify_kb_config
-- Inputs: config_id (string) and any create fields to update (all optional)
-- Return: confirmation or validation error.
+**1) create_da_config**
+Create anomaly detection configuration.
 
-3) list_kb_configurations
-- Inputs: none
-- Return: Markdown listing saved configurations with name, id, scheduling summary, and algorithms.
+Required:
+- name: Unique config identifier
+- description: What this monitors
+- source_index: ES index being monitored (e.g., 'app-logs')
+- elasticsearch_sql_query: SQL with $from/$to placeholders
+- query_mode: {"type": "raw"|"aggregated", "timestamp_field": "<column>"}
+- training_from/to: ISO 8601 timestamps for training period
+- detection_frequency: CRON (5-field or 6-field with seconds)
+- detection_window: Seconds per detection cycle
+- detection_start: When detection begins (ISO 8601)
+- algorithm: {"name": "zscore", "parameters": [{"dimension": "<column>", "is_active": true}]}
 
-4) list_available_algorithms
-- Inputs: none
-- Return: Markdown showing implemented algorithms and a JSON example showing how to fill the 'algorithms' array.
-  - Note: current implemented algorithms: zscore
+Optional:
+- bucket_profile_id: Link to time-context profile
+- anomaly_config: {"user_emails": ["email@example.com"]}
 
-5) ping_elasticsearch
-- Inputs: none
-- Return: JSON with ping_success (boolean) and duration_ms (float).
+---
 
-6) elasticsearch_sql
-- Inputs: query (string) — the SQL query to run
-- Return: JSON with columns and rows so you can confirm which column names your queries produce.
+**2) modify_kb_config**
+Update existing configuration.
 
-Common notes for callers
-- Use `elasticsearch_sql` to validate your queries and inspect column names before using them in `algorithms`.
-- The `algorithms` array must use objects like { "alg_name": "zscore", "alg_parameters": [ { "dimension": "your_field" } ] }.
-- Timestamps must be ISO 8601 strings.
+Required: config_id (MongoDB ObjectId from list_kb_configurations)
+Optional: Any field from create_da_config
 
-Plain labelled example (easy to paste):
-Name: Geographic Traffic Pattern Analysis
-Description: Monitor hourly status code counts and detect spikes in 5xx errors.
-scheduling.training_query: SELECT DATE_TRUNC('HOUR', "@timestamp") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM ".ds-kibana_sample_data_logs-*" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp
-scheduling.training_from: 2025-10-01T00:00:00Z
-scheduling.training_to: 2025-10-09T23:59:59Z
-scheduling.training_is_active: true
-scheduling.detection_is_active: true
-scheduling.training_window: 3600
-scheduling.detection_window: 3600
-scheduling.detection_query: SELECT DATE_TRUNC('HOUR', "@timestamp") AS es_timestamp, SUM(CASE WHEN response = '200' THEN 1 ELSE 0 END) AS status_code_200_counter, SUM(CASE WHEN CAST(response AS INTEGER) >= 500 AND CAST(response AS INTEGER) < 600 THEN 1 ELSE 0 END) AS status_code_5xx_counter FROM ".ds-kibana_sample_data_logs-*" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp
-scheduling.detection_frequency: */15 * * * *
-algorithms:
-  - alg_name: zscore
-    alg_parameters:
-      - dimension: status_code_200_counter
-      - dimension: status_code_5xx_counter
+---
 
-JSON example (algorithms only):
+**3) list_kb_configurations**
+Returns: name, ID, description, query, training/detection ranges, CRON, algorithm dimensions
+
+---
+
+**5) elasticsearch_sql**
+Execute ES SQL query. CRITICAL: List indices first. Never assume index exists.
+
+ES SQL Syntax (differs from standard SQL):
+- Identifiers: Double quotes → "field-name", "@timestamp"
+- Strings: Single quotes → 'value'
+- FROM: Double-quoted index → FROM "my-index-*"
+- GROUP BY: Use aliases or positional (1, 2) or repeat expression
+- Date truncation: DATE_TRUNC('hour', "@timestamp") AS bucket
+- Conditionals: CASE WHEN condition THEN x ELSE y END
+
+---
+
+**6-8) Bucket Profile Tools**
+create_bucket_profile: Create time-context profile for context-aware detection
+list_bucket_profiles: List all profiles with usage metadata
+delete_bucket_profile: Delete profile (cannot delete if referenced by KBs)
+
+---
+
+**Example Configuration:**
 ```json
 {
-  "algorithms": [
-    {
-      "alg_name": "zscore",
-      "alg_parameters": [
-        { "dimension": "status_code_200_counter" },
-        { "dimension": "status_code_5xx_counter" }
-      ]
-    }
-  ]
+  "name": "Web Traffic Monitor",
+  "description": "Monitor HTTP status codes",
+  "source_index": "kibana_sample_data_logs",
+  "elasticsearch_sql_query": "SELECT DATE_TRUNC('hour', \\"@timestamp\\") AS bucket, COUNT(*) AS requests FROM \\".ds-kibana_sample_data_logs-*\\" WHERE \\"@timestamp\\" >= '$from' AND \\"@timestamp\\" < '$to' GROUP BY bucket ORDER BY bucket",
+  "query_mode": {"type": "aggregated", "timestamp_field": "bucket"},
+  "training_from": "2025-10-01T00:00:00Z",
+  "training_to": "2025-10-14T23:59:59Z",
+  "training_is_active": true,
+  "detection_is_active": true,
+  "detection_frequency": "*/15 * * * *",
+  "detection_window": 3600,
+  "detection_start": "2025-10-15T00:00:00Z",
+  "algorithm": {
+    "name": "zscore",
+    "parameters": [{"dimension": "requests", "is_active": true}]
+  }
 }
 ```
 

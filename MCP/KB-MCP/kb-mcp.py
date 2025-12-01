@@ -14,14 +14,14 @@ import argparse
 sys.path.insert(0, os.path.dirname(__file__))
 
 # Import from our modules
-from mcp_tools import mcp, create_da_config, modify_kb_config, list_kb_configurations, describe_mcp_server, list_available_algorithms, elasticsearch_sql
+from mcp_tools import mcp, create_da_config, modify_kb_config, list_kb_configurations, describe_mcp_server, elasticsearch_sql
 from utils import structured_logger, log_message, initialize_logging, shutdown_logging, stderr_print
 from db import connect_mongodb
 
 # Re-export for backward compatibility
 __all__ = [
     'create_da_config', 'modify_kb_config', 'list_kb_configurations',
-    'describe_mcp_server', 'list_available_algorithms', 'elasticsearch_sql',
+    'describe_mcp_server', 'elasticsearch_sql',
     'mcp', 'structured_logger', 'log_message', 'connect_mongodb'
 ]
 
