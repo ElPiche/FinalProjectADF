@@ -569,7 +569,7 @@ def watch_kb_changes(kb_client):
                             continue
 
                         print(f"\033[92m[DISPATCHER] Processing training_config for kb_id: {full_doc.get('kb_id')}\033[0m")
-                        print(full_doc)
+                        #print(full_doc)
 
                         # Save config to file for debugging
                         with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
@@ -585,7 +585,39 @@ def watch_kb_changes(kb_client):
                     elif op_type == "update": # TODO: add support for is_trained = true cuz when it's an is_trained
                                               # TODO: it always brings data, so it won't explode
 
+
+
                         print(f"\033[90m[DISPATCHER] Ignoring update event (likely is_trained flag change)\033[0m")
+
+                        # Get the document directly from the change event instead of querying
+                        # This ensures we process the exact document that triggered the event
+                        full_doc = change.get("fullDocument")
+
+                        if not full_doc:
+                          print(
+                              f"\033[93m[DISPATCHER] No fullDocument in change event, falling back to query\033[0m")
+                          full_doc = ExtractLatestConfigurationKB(kb_client)
+
+                        # Check if already trained to avoid duplicate processing
+                        # Handle both boolean True and string "true"
+                        is_trained = full_doc.get("is_trained")
+
+                        print(
+                          f"\033[90m[DISPATCHER] is_trained value: {is_trained} (type: {type(is_trained).__name__})\033[0m")
+
+                        if is_trained in (True, "true","True"):
+                          print(f"\033[93m[DISPATCHER] Re training a modified KB : {full_doc.get('kb_id')}\033[0m")
+
+                        # Save config to file for debugging
+                        with open("Series_Mongo_Result.json", "w", encoding="utf-8") as f:
+                          f.write(json_util.dumps(full_doc, indent=2))
+
+                        # we turn the JSON with the config data into a class
+                        # Pass mongo_client so parse_config can fetch KB config for bucket_profile_id
+                        config: Config = parse_config(full_doc, kb_client)
+
+                        # now we go thru each algorithm call we extracted, and try to execute training on them
+                        config.execute_algos()
 
         except PyMongoError as e:
             print(f"[watch_kb_changes] Mongo error: {e}, reconnecting in 5s...")
