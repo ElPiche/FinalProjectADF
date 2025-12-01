@@ -6,7 +6,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx1g
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g
     ports:
       - 9200:9200
     networks:
@@ -16,9 +16,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2g
+          memory: 4g
         reservations:
-          memory: 512m
+          memory: 1g
     healthcheck:
       test:
         - CMD
@@ -328,29 +328,35 @@ services:
     container_name: log-generator
     restart: unless-stopped
     profiles:
-      - stress  # Only starts with: docker-compose --profile stress up
+      - stress  # Only starts with: docker-compose --profile stress up -d
+      - generate-logs # Only starts with: docker-compose --profile generate-logs up -d
     depends_on:
       elasticsearch-dataset:
         condition: service_healthy
     environment:
       - ES_HOST=http://elasticsearch-dataset:9200
-      - INDEX_NAME=app-logs
+      - INDEX_NAME=ecommerce-logs
       - HISTORICAL_DAYS=365
-      - HISTORICAL_BATCH_SIZE=5000
-      - HISTORICAL_ANOMALY_RATE=0.02
+      - HISTORICAL_BATCH_SIZE=10000
+      - BASE_REQUESTS_PER_HOUR=5000
+      - PEAK_MULTIPLIER=4.0
+      - HISTORICAL_ANOMALY_RATE=0.015
       - CONTINUOUS_INTERVAL=1.0
-      - LOGS_PER_INTERVAL_MIN=15
-      - LOGS_PER_INTERVAL_MAX=30
+      - LOGS_PER_INTERVAL_MIN=50
+      - LOGS_PER_INTERVAL_MAX=150
       - CONTINUOUS_ANOMALY_RATE=0.02
-      - BURST_PROBABILITY=0.05
+      - BURST_PROBABILITY=0.03
+      - BURST_SIZE_MIN=200
+      - BURST_SIZE_MAX=1000
+      # Performance tuning - balanced for speed + stability
+      - NUM_WORKERS=4
+      - BULK_THREAD_COUNT=16
+      - CHUNK_SIZE=5000
     networks:
       - adf-network
+    # Explicitly disable Dockerfile healthcheck during long data generation
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "unified_log_generator.py"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      disable: true
 
   logstash:
     image: docker.elastic.co/logstash/logstash:8.15.0
