@@ -31,4 +31,9 @@ public class Utils {
             default -> Object.class;
         };
     }
+
+    public static String normalizeCron(String cron, long seconds){
+        String[] parts = cron.trim().split("\\s+");
+        return (parts.length == 5) ? seconds + " " + cron : cron;
+    }
 }

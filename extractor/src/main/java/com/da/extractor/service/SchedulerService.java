@@ -45,9 +45,7 @@ public class SchedulerService {
 
     public void createStreamingTask(SchedulerConfig config, PipeMetadata pipeMetadata) {
 
-        long seconds = config.getLastRun().toInstant().getEpochSecond();
-        String sixValuesCron = normalizeCron(config.getFrequency(), seconds);
-        CronTrigger cronTrigger = new CronTrigger(sixValuesCron);
+        CronTrigger cronTrigger = new CronTrigger(config.getFrequency());
         Runnable task = () -> {
             try {
                 // Gracefully handle missing TrainConfig instead of crashing
@@ -98,11 +96,6 @@ public class SchedulerService {
         scheduledTasks.put(config.getKbId(), future);
         log.info("Scheduled task saved for KB ID: {} with frequency: {}",
                 config.getKbId(), config.getFrequency());
-    }
-
-    private String normalizeCron(String cron, long seconds){
-        String[] parts = cron.trim().split("\\s+");
-        return (parts.length == 5) ? seconds + " " + cron : cron;
     }
 
     public void cancelTask(String id) {
