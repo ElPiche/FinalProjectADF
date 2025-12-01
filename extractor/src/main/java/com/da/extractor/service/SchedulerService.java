@@ -6,7 +6,6 @@ import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
 import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
-import com.da.extractor.utils.Utils;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
 import org.springframework.scheduling.support.CronTrigger;
@@ -15,7 +14,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ScheduledFuture;
