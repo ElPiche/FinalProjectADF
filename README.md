@@ -7,10 +7,17 @@ Proyecto final tecnólogo en informática Framework de detección de anomalías
 [Jira](https://braian-granero.atlassian.net/jira/software/projects/KAN/boards/1)
 
 
+## Configuración de envío de correos
+Al clonar/descargar el proyecto dirigirse a la siguiente carpeta: `anomalies-insights-module\src\main\resources`
+
+Dentro de  la  misma crear el siguiente archivo: application-secrets.properties
+
+Colocar dentro del mismo lo siguiente: spring.mail.password=<MAIL_APP_PASSWORD>, esto permite guardar la contraseña del correo sin exponerla.
+
 ## Setup 
 
 ### Infraestructura principal
-Utilizando Docker: En la raiz del proyecto ejecutar: `docker-compose up --b -d`
+Utilizando Docker: En la raiz del proyecto ejecutar: `docker compose up -d`
 
 ### Configuración de MCP's para Claude Desktop
 El framework funciona mediante conversaciones con un modelo LLM que tenga capacidades 
@@ -77,3 +84,4 @@ Una vez alli agregamos la siguiente configuración:
 Una vez completado estos pasos solo bastaria con empezar a conversar con Claude. Se recomienda utilizar el modelo de Sonnet en sus versiones 4.1 o 4.5.
 
 En caso de que falle a la hora de conectarse con los MCP's, cerrar Claude Desktop, volverlo a abrir y reintentar.
+
