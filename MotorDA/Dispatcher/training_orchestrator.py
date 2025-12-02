@@ -1,3 +1,5 @@
+#TODO: rename file to orchestrator.py
+
 """Training Orchestrator - Algorithm-Agnostic Training and Detection.
 
 This module provides bucket-aware training and detection orchestration.
@@ -117,6 +119,8 @@ class TrainingOrchestrator:
             return "global_default"
         return self.bucket_resolver.resolve(ts)
     
+
+    #TODO: change observed_value to dimnesions
     def group_by_bucket(
         self,
         observed_values: List[Dict[str, Any]],
@@ -136,6 +140,7 @@ class TrainingOrchestrator:
         
         groups: Dict[str, List[Dict[str, Any]]] = {}
         failed_parse_count = 0
+        
         
         for i, obs in enumerate(observed_values):
             # Try the specified timestamp field first, then fallback to common fields
@@ -167,6 +172,8 @@ class TrainingOrchestrator:
         
         return groups
     
+    #TODO: get percentile from kb metadata
+    #TODO: change observed_values to dimensions
     def train(
         self,
         observed_values: List[Dict[str, Any]],
@@ -220,6 +227,7 @@ class TrainingOrchestrator:
         for bucket_key, bucket_obs in groups.items():
             logger.info(f"[ORCHESTRATOR] Training bucket '{bucket_key}' with {len(bucket_obs)} observations")
             
+            #TODO: mimimum shouldn't be hardcoded
             if len(bucket_obs) < 3:  # Minimum for meaningful stats
                 logger.warning(f"[ORCHESTRATOR] Bucket '{bucket_key}' has insufficient data, using global fallback")
                 buckets[bucket_key] = {
@@ -329,6 +337,7 @@ class DetectionOrchestrator:
         
         if ts is None:
             bucket_key = "global_default"
+            logger.warning(f"[DETECTION] Timestamp is None for observation: {observation}")
         else:
             bucket_key = self.resolve_bucket_key(ts)
         
@@ -348,6 +357,7 @@ class DetectionOrchestrator:
         
         return result
     
+    #TODO: remove unused (only used for testing hehe)
     def detect_batch(
         self,
         observations: List[Dict[str, Any]],

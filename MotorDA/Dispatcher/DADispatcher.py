@@ -360,6 +360,7 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
     except Exception:
         kb_config = None
     
+    #TODO: FIX remove fallback to old training_config
     if not kb_config:
         # Fallback to training_config (old style)
         kb_config = get_collection(TRAINING_CONFIG_COLLECTION).find_one(
@@ -374,6 +375,8 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
     # New schema: kb_config.algorithm.name, kb_config.algorithm.parameters
     # Old schema: kb_config.algorithms[0].name, kb_config.algorithms[0].parameters.observed_values
     alg_config = kb_config.get("algorithm")  # New schema
+    
+    #TODO: FIX remove fallback to old schema
     if not alg_config:
         # Old schema with algorithms list
         algorithms = kb_config.get("algorithms", [])
@@ -384,13 +387,17 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
         logger.error(f"[DETECTION] No algorithm in config {config_id}")
         return None
     
+
     # Get algorithm name
+    # TODO: Remove fallback to ZScore
     alg_name = alg_config.get("name") or alg_config.get("alg_name", "zscore")
     alg_name = alg_name.lower()
     
     # Get algorithm parameters (dimensions)
     # New schema: algorithm.parameters is a list of {dimension, is_active}
     # Old schema: algorithms[0].parameters.observed_values
+
+    # TODO: Remove ifs only alg_params = alg_config["parameters"] remains.
     if isinstance(alg_config.get("parameters"), list):
         alg_params = alg_config["parameters"]
     elif isinstance(alg_config.get("parameters"), dict):
@@ -409,6 +416,8 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
         )
         if bucket_profile:
             logger.info(f"[DETECTION] Using bucket profile: {bucket_profile_id}")
+        else:
+            logger.warning(f"[DETECTION] Bucket profile not found: {bucket_profile_id}")
     
     # Create detection orchestrator
     orchestrator = DetectionOrchestrator(
@@ -423,6 +432,7 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
     timestamp_field = query_mode.get("timestamp_field", "@timestamp")
     
     # Get observations to analyze
+    #TODO: change to dimensions it is confusing. 
     observed_values = serie_to_detect.get("observed_values", [])
     if not observed_values:
         logger.warning(f"[DETECTION] No observations in series for {config_id}")
@@ -431,6 +441,7 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
     logger.info(f"[DETECTION] Analyzing {len(observed_values)} observations")
     
     # Detect anomalies
+    #TODO: change to dimensions and we don't have multiple dimensions in one kb. 
     anomalies = []
     for obs in observed_values:
         result = orchestrator.detect(
@@ -508,6 +519,7 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
         return obj
     
     for anomaly in anomalies:
+        
         observation = anomaly.get("observation", {})
         detection_details = anomaly.get("detection_result", {})
         
@@ -536,7 +548,8 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
         # Ensure timestamp is string
         if isinstance(ts, datetime):
             ts = ts.isoformat()
-        
+        #TODO: remove hardcoded fields for dashboard, must be defined by each algorithm from line 551 to 580
+
         # Extract top-level score for Kibana dashboard compatibility
         # The dashboard expects flat fields like algorithm_details.z_score
         primary_details = dimension_results.get(primary_metric, {}) if primary_metric else {}
@@ -565,7 +578,8 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
             algorithm_details_with_flat["std"] = flat_std
         if flat_threshold is not None:
             algorithm_details_with_flat["threshold"] = flat_threshold
-        
+        # End of TODO
+
         # Build DocumentDto matching Java DTO
         doc = {
             "algorithm": algorithm,
@@ -668,6 +682,7 @@ def watch_training_changes():
     collection = get_collection(TRAINING_CONFIG_COLLECTION)
     
     # Watch for inserts and updates where is_trained becomes false
+    #TODO: check for replace operationType
     pipeline = [
         {"$match": {
             "$or": [
@@ -697,6 +712,8 @@ def watch_training_changes():
                     logger.info(f"[WATCHER] Training triggered for config {config_id}")
                     
                     # Load training series from the series collection
+                    
+                    #TODO: change to dimensions
                     observed_values = load_training_series(config_id)
                     
                     if not observed_values:
@@ -754,7 +771,7 @@ def watch_training_changes():
         logger.error(f"[WATCHER] Training change stream error: {e}")
         raise
 
-
+#TODO: unused
 def load_detection_observations(kb_id: str) -> list:
     """
     Load recent detection series from MongoDB and aggregate into observations.
