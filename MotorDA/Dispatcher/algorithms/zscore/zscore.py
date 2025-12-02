@@ -1,14 +1,14 @@
 """Z-Score Algorithm - Statistical anomaly detection.
 
 Self-contained algorithm implementation. Uses the pure zscore_algorithm module
-from MotorDA.ZScore for the actual statistical computations.
+co-located in this package for the actual statistical computations.
 """
 
 from dataclasses import dataclass
 from typing import Dict, Any, List
 import logging
 
-from ..algorithm_interface import register_algorithm
+from ...algorithm_interface import register_algorithm
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class ZScoreAlgorithm:
         Returns:
             Baseline dict with mean, std, threshold
         """
-        from MotorDA.ZScore import zscore_algorithm
+        from . import zscore_algorithm
         baseline = zscore_algorithm.train(values, percentile, min_points)
         return baseline.to_dict()
     
@@ -102,7 +102,7 @@ class ZScoreAlgorithm:
         Returns:
             Dict with is_anomaly, z_score, etc.
         """
-        from MotorDA.ZScore import zscore_algorithm
+        from . import zscore_algorithm
         baseline_obj = zscore_algorithm.ZScoreBaseline.from_dict(baseline)
         result = zscore_algorithm.detect(value, baseline_obj)
         return result.to_dict()

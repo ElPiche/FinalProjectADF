@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Dict, Any, List
 import logging
 
-from ..algorithm_interface import register_algorithm
+from ...algorithm_interface import register_algorithm
 
 logger = logging.getLogger(__name__)
 

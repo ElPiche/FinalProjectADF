@@ -6,7 +6,7 @@ WITHOUT any bucket/time logic - that's the Dispatcher's job.
 
 import pytest
 import numpy as np
-from MotorDA.ZScore.zscore_algorithm import (
+from MotorDA.Dispatcher.algorithms.zscore.zscore_algorithm import (
     train,
     detect,
     detect_batch,
