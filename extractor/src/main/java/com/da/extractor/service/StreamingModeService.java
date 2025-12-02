@@ -6,6 +6,7 @@ import com.da.extractor.entity.kb.KbMongo;
 import com.da.extractor.entity.serie.Mode;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
+import com.da.extractor.utils.Utils;
 import org.springframework.stereotype.Service;
 
 import java.util.Date;
@@ -40,7 +41,13 @@ public class StreamingModeService {
             }
             
             var window = kbStreamingConfig.getWindow();
-            var streamingConfigs = kbStreamingConfig.getFrequency();
+            var creationDate = new Date();
+            var seconds = creationDate
+                    .toInstant()
+                    .atZone(java.time.ZoneId.systemDefault())
+                    .toLocalTime()
+                    .getSecond();
+            var frequency = Utils.normalizeCron(kbStreamingConfig.getFrequency(), seconds);
             var startAt = kbStreamingConfig.getStart();
             var id = config.getId();
 
@@ -56,7 +63,7 @@ public class StreamingModeService {
                     null,
                     id,
                     window,
-                    streamingConfigs,
+                    frequency,
                     queryElastic,
                     startAt,
                     new Date()

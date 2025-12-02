@@ -90,10 +90,7 @@ public class ElasticsearchService {
         if (dto.metric != null)    m.put("metric", dto.metric);
         if (dto.text != null)      m.put("text", dto.text);
         if (dto.value != null)     m.put("value", dto.value);
-
         if (dto.email != null)     m.put("email", dto.email);
-        //if (dto.zScore != null)     m.put("zScore", dto.zScore);
-        //if (dto.std != null)     m.put("std", dto.std);
         if (dto.kbName != null)     m.put("kbName", dto.kbName);
 
         // KB identification

@@ -1,5 +1,4 @@
 package com.da.anomaliesinsightsmodule.service;
-import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch.core.IndexResponse;
 import com.da.anomaliesinsightsmodule.dto.DocumentDto;
 import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
@@ -125,13 +124,6 @@ public class InsightsService {
         return response;
     }
 
-    public void sendAnomalyEmail(DocumentDto doc, IndexKbIdMapping mapping) throws Exception {
-        // Legacy method - sends to the email in the document
-        if (doc.getEmail() != null && !doc.getEmail().isBlank()) {
-            sendAnomalyEmailToRecipient(doc, mapping, doc.getEmail());
-        }
-    }
-
     public void sendAnomalyEmailToRecipient(DocumentDto doc, IndexKbIdMapping mapping, String recipientEmail) throws Exception {
 
         logger.info(">>> sendAnomalyEmailToRecipient called for email: {}", recipientEmail);
@@ -175,17 +167,18 @@ public class InsightsService {
             //throw e;
         }
     }
+
     public void sendMailTest(String to) throws Exception {
 
-        var kbName = "test";
+        var kbName = "Prueba";
 
-        var anomalyMetric = "httpcodes";
+        var anomalyMetric = "Http codes 5xx";
 
-        var anomalyValue = "muchos values";
+        var anomalyValue = "999";
 
         var timestamp = Instant.now();
 
-        var indexName = "nombre facha";
+        var indexName = "Indice de prueba";
 
         var kibanaId = "70a44f12-a013-47ba-96ee-e046aa8b00c9";
 
@@ -196,7 +189,7 @@ public class InsightsService {
                 Map.of(
                         "kbName", kbName,
                         "anomalyMetric", anomalyMetric,
-                        "anomalyValue", anomalyValue.toString(),
+                        "anomalyValue", anomalyValue,
                         "anomalyTimestamp", timestamp.toString(),
                         "resultsIndexName", indexName,
                         "kibanaUrl", "http://localhost:5602/app/dashboards#/view/" + kibanaId
