@@ -27,6 +27,11 @@ COPY *.py .
 COPY mcp_tools_pkg/ ./mcp_tools_pkg/
 COPY tests/ ./tests/
 
+# Note: 
+# - shared/ directory is mounted as volume in docker-compose.yml
+# - mcp_tools/ directory is NOT copied (it's a dev-time split package)
+#   The mcp_tools.py file is the main module used at runtime
+
 # Create logs directory
 RUN mkdir -p logs
 

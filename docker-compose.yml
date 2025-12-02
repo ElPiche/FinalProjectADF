@@ -207,12 +207,14 @@ services:
     environment:
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
       - ES_HOSTS=http://elasticsearch-dataset:9200,http://elasticsearch-anomalies:9200
+      - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
     ports:
       - "8000:8000"
     networks:
       - adf-network
     volumes:
       - kb_mcp_logs:/app/logs
+      - algorithm_registry:/app/registry:ro
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -313,12 +315,11 @@ services:
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
       - ES_HOSTS=http://elasticsearch-anomalies:9200
       - PYTHONUNBUFFERED=1
+      - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
+    volumes:
+      - algorithm_registry:/app/registry
     networks:
       - adf-network
-    # optional: mount a log folder or the code for dev
-    # volumes:
-    #   - ./logs/dispatcher:/app/logs
-    #   - ./MotorDA:/app/MotorDA
 
 
   log-generator:
@@ -338,7 +339,7 @@ services:
       - INDEX_NAME=ecommerce-logs # Index name to store logs
       - HISTORICAL_DAYS=365 # Number of historical days to generate
       - HISTORICAL_BATCH_SIZE=10000 # Number of logs to generate per batch for historical data
-      - BASE_REQUESTS_PER_HOUR=2000 # Adjust base load here
+      - BASE_REQUESTS_PER_HOUR=500 # Adjust base load here
       - PEAK_MULTIPLIER=4.0 # Peak hours get 4x traffic
       - HISTORICAL_ANOMALY_RATE=0.015 # 1.5% anomalies in historical data
       - CONTINUOUS_INTERVAL=1.0 # Interval in seconds for continuous log generation
@@ -459,6 +460,7 @@ volumes:
   elastic_anomalies_data: null
   mongo_key: null
   kb_mcp_logs: null
+  algorithm_registry: null
 
 networks:
   adf-network:

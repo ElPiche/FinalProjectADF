@@ -274,15 +274,16 @@ private void runStream() {
 
 | Feature | Spec Reference | Current State | Gap |
 |---------|---------------|---------------|-----|
-| Detection uses bucket-aware logic | §5.3 | Inline in `detect_z_score()` | Should use `DetectionOrchestrator` |
+| Detection uses bucket-aware logic | §5.3 | Uses `DetectionOrchestrator` | ✅ Complete |
+| Collection naming | §3.4 | Uses `trained_models` | ✅ Complete (renamed from series_result) |
 | Stress tests | §6.8 | Tests exist for current arch | Don't test spec's micro-batch |
-| Collection naming | §3.4 | Uses `series_result` | Spec says `trained_models` |
 
 ### 2.3 ❌ NOT IMPLEMENTED
 
 | Feature | Spec Reference | Priority | Effort |
 |---------|---------------|----------|--------|
-| **DetectionOrchestrator integration** | §5.3 | HIGH | Medium |
+| **DetectionOrchestrator integration** | §5.3 | ✅ DONE | ✅ Complete |
+| **`trained_models` collection** | §3.4 | ✅ DONE | ✅ Complete (renamed) |
 | **`staging_buckets` collection** | §3.4, §5.2 | LOW | High |
 | **Micro-batch detection (`_msearch`)** | §5.3, §7.3 | LOW | Very High |
 | **`DetectionBatchScheduler.java`** | §8 Phase 4 | LOW | Very High |

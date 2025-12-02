@@ -19,11 +19,14 @@ from bson import ObjectId
 from pymongo import MongoClient
 from pymongo.collection import Collection
 
+# Import algorithms package to trigger registration
+from MotorDA.Dispatcher import algorithms  # noqa: F401
+
 # Algorithm registry - the ONLY way to access algorithms
-from Dispatcher.algorithm_interface import get_algorithm, list_algorithms
+from MotorDA.Dispatcher.algorithm_interface import get_algorithm, list_algorithms
 
 # Orchestrators for bucket-aware training and detection
-from Dispatcher.training_orchestrator import TrainingOrchestrator, DetectionOrchestrator
+from MotorDA.Dispatcher.training_orchestrator import TrainingOrchestrator, DetectionOrchestrator
 
 # Configure logging
 logging.basicConfig(
@@ -42,12 +45,13 @@ MONGO_URI = os.environ.get(
     "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin&replicaSet=rs0"
 )
 MONGO_DB = os.environ.get("MONGO_DB", "anomaly_detection")
+KB_DB = os.environ.get("KB_DB", "knowledge_base")  # KB configs database
 
 # Collection names
 SERIES_COLLECTION = "series"
-SERIES_RESULT_COLLECTION = "series_result"
+TRAINED_MODELS_COLLECTION = "trained_models"  # Per spec §3.4
 TRAINING_CONFIG_COLLECTION = "training_config"
-KB_CONFIG_COLLECTION = "training_config"  # KB configs are stored here
+KB_CONFIGS_COLLECTION = "kb_configs"  # In knowledge_base DB
 BUCKET_PROFILES_COLLECTION = "bucket_profiles"
 
 
@@ -62,10 +66,22 @@ def get_database():
     return client[MONGO_DB]
 
 
+def get_kb_database():
+    """Get the knowledge_base database for KB configs."""
+    client = get_mongo_client()
+    return client[KB_DB]
+
+
 def get_collection(name: str) -> Collection:
-    """Get a specific collection."""
+    """Get a specific collection from anomaly_detection DB."""
     db = get_database()
     return db[name]
+
+
+def get_kb_collection() -> Collection:
+    """Get the kb_configs collection from knowledge_base DB."""
+    db = get_kb_database()
+    return db[KB_CONFIGS_COLLECTION]
 
 
 # =============================================================================
@@ -84,7 +100,7 @@ def get_cached_training_result(config_id: str, result_hash: str) -> Optional[dic
     Returns:
         Training result dict or None
     """
-    collection = get_collection(SERIES_RESULT_COLLECTION)
+    collection = get_collection(TRAINED_MODELS_COLLECTION)
     result = collection.find_one({"config_id": ObjectId(config_id)})
     if result:
         # Convert ObjectId to string for JSON serialization
@@ -95,15 +111,15 @@ def get_cached_training_result(config_id: str, result_hash: str) -> Optional[dic
 
 def get_training_result(config_id: str) -> Optional[dict]:
     """
-    Get training result, using cache when possible.
+    Get trained model, using cache when possible.
     
     Args:
         config_id: The configuration ID
         
     Returns:
-        Training result dict or None
+        Trained model dict or None
     """
-    collection = get_collection(SERIES_RESULT_COLLECTION)
+    collection = get_collection(TRAINED_MODELS_COLLECTION)
     result = collection.find_one({"config_id": ObjectId(config_id)})
     
     if not result:
@@ -276,16 +292,16 @@ def run_training(
 
 def save_training_result(config_id: str, result: dict) -> str:
     """
-    Save training result to MongoDB.
+    Save trained model to MongoDB.
     
     Args:
         config_id: Configuration ID
-        result: Training result dict
+        result: Trained model dict
         
     Returns:
         Inserted document ID as string
     """
-    collection = get_collection(SERIES_RESULT_COLLECTION)
+    collection = get_collection(TRAINED_MODELS_COLLECTION)
     
     # Add metadata
     result["config_id"] = ObjectId(config_id)
@@ -335,39 +351,47 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
         logger.error(f"[DETECTION] No training result found for config {config_id}")
         return None
     
-    # Get KB config for algorithm info - lookup by kb_id field, not _id
-    kb_config = get_collection(KB_CONFIG_COLLECTION).find_one(
-        {"kb_id": config_id}
-    )
+    # Get KB config from knowledge_base.kb_configs - the authoritative source
+    try:
+        kb_config = get_kb_collection().find_one({"_id": ObjectId(config_id)})
+    except Exception:
+        kb_config = None
+    
     if not kb_config:
-        # Try by _id as fallback
-        try:
-            kb_config = get_collection(KB_CONFIG_COLLECTION).find_one(
-                {"_id": ObjectId(config_id)}
-            )
-        except Exception:
-            pass
+        # Fallback to training_config (old style)
+        kb_config = get_collection(TRAINING_CONFIG_COLLECTION).find_one(
+            {"kb_id": config_id}
+        )
     
     if not kb_config:
         logger.error(f"[DETECTION] No KB config found for {config_id}")
         return None
     
-    # Extract algorithm info - support both old and new config formats
-    algorithms = kb_config.get("algorithms", [])
-    if not algorithms:
-        logger.error(f"[DETECTION] No algorithms in config {config_id}")
+    # Extract algorithm info - handle both schemas
+    # New schema: kb_config.algorithm.name, kb_config.algorithm.parameters
+    # Old schema: kb_config.algorithms[0].name, kb_config.algorithms[0].parameters.observed_values
+    alg_config = kb_config.get("algorithm")  # New schema
+    if not alg_config:
+        # Old schema with algorithms list
+        algorithms = kb_config.get("algorithms", [])
+        if algorithms:
+            alg_config = algorithms[0]
+    
+    if not alg_config:
+        logger.error(f"[DETECTION] No algorithm in config {config_id}")
         return None
     
-    alg_config = algorithms[0]
-    
-    # Support both formats: "name" (new) and "alg_name" (old)
+    # Get algorithm name
     alg_name = alg_config.get("name") or alg_config.get("alg_name", "zscore")
     alg_name = alg_name.lower()
     
-    # Support both formats for parameters
-    if "parameters" in alg_config:
-        params = alg_config["parameters"]
-        alg_params = params.get("observed_values", [])
+    # Get algorithm parameters (dimensions)
+    # New schema: algorithm.parameters is a list of {dimension, is_active}
+    # Old schema: algorithms[0].parameters.observed_values
+    if isinstance(alg_config.get("parameters"), list):
+        alg_params = alg_config["parameters"]
+    elif isinstance(alg_config.get("parameters"), dict):
+        alg_params = alg_config["parameters"].get("observed_values", [])
     else:
         alg_params = alg_config.get("alg_parameters", [])
     
@@ -440,207 +464,361 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
 
 def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
     """
-    Post anomaly detection result to the Insights API.
+    Post each anomaly to the Insights API in DocumentDto format.
     
-    Also handles email notifications if configured.
+    The insights API handles:
+    1. Storing anomalies in Elasticsearch
+    2. Sending email notifications (based on 'email' field in document)
     
     Args:
-        detection_result: Detection result dict
+        detection_result: Detection result dict with anomalies list
         kb_config: KB configuration dict (for email settings)
     """
-    insights_url = os.environ.get(
+    insights_base_url = os.environ.get(
         "INSIGHTS_URL",
-        "http://anomalies-insights:8087/api/anomalies"
+        "http://anomalies-insights:8081"
     )
     
-    try:
-        response = requests.post(
-            insights_url,
-            json=detection_result,
-            timeout=30
-        )
-        if response.status_code in (200, 201):
-            logger.info(f"[DETECTION] Posted anomaly to insights API")
-        else:
-            logger.warning(
-                f"[DETECTION] Insights API returned {response.status_code}: "
-                f"{response.text}"
-            )
-    except requests.RequestException as e:
-        logger.error(f"[DETECTION] Failed to post to insights API: {e}")
+    config_id = detection_result.get("config_id", "unknown")
+    config_name = detection_result.get("config_name", "unknown")
+    algorithm = detection_result.get("algorithm", "unknown")
+    source_index = detection_result.get("source_index", "unknown")
+    detected_at = detection_result.get("detected_at", datetime.now(timezone.utc).isoformat())
     
-    # Handle email notifications
-    anomaly_config = kb_config.get("anomaly_config", {})
+    # Get email recipients from anomaly_config
+    anomaly_config = kb_config.get("anomaly_config") or {}
     user_emails = anomaly_config.get("user_emails", [])
+    email_str = ",".join(user_emails) if user_emails else ""
     
-    if user_emails:
-        send_email_notifications(detection_result, user_emails)
-
-
-def send_email_notifications(detection_result: dict, emails: list[str]):
-    """
-    Send email notifications for detected anomalies.
+    # Post each anomaly as a separate DocumentDto
+    anomalies = detection_result.get("anomalies", [])
+    posted_count = 0
     
-    Args:
-        detection_result: Detection result dict
-        emails: List of email addresses to notify
-    """
-    # Email service configuration
-    email_service_url = os.environ.get("EMAIL_SERVICE_URL")
+    def serialize_for_json(obj):
+        """Convert datetime and other non-JSON objects to strings."""
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, dict):
+            return {k: serialize_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [serialize_for_json(v) for v in obj]
+        return obj
     
-    if not email_service_url:
-        logger.info(
-            f"[EMAIL] Would notify {len(emails)} recipients about "
-            f"{detection_result['anomaly_count']} anomalies "
-            f"(EMAIL_SERVICE_URL not configured)"
-        )
-        return
-    
-    try:
-        payload = {
-            "recipients": emails,
-            "subject": f"Anomaly Alert: {detection_result['config_name']}",
-            "body": {
-                "config_name": detection_result["config_name"],
-                "anomaly_count": detection_result["anomaly_count"],
-                "detected_at": detection_result["detected_at"],
-                "algorithm": detection_result["algorithm"],
-                "source_index": detection_result["source_index"]
-            }
+    for anomaly in anomalies:
+        observation = anomaly.get("observation", {})
+        detection_details = anomaly.get("detection_result", {})
+        
+        # Get dimension results for algorithm_details
+        # The algorithm returns 'dimensions' key, not 'dimension_results'
+        dimension_results = detection_details.get("dimensions", {}) or detection_details.get("dimension_results", {})
+        
+        # Find the first anomalous dimension to use as primary metric
+        primary_metric = None
+        primary_value = None
+        for dim_name, dim_result in dimension_results.items():
+            if dim_result.get("is_anomaly", False):
+                primary_metric = dim_name
+                primary_value = dim_result.get("value")
+                break
+        
+        if not primary_metric:
+            # Fallback to first dimension
+            for dim_name, dim_result in dimension_results.items():
+                primary_metric = dim_name
+                primary_value = dim_result.get("value")
+                break
+        
+        # Get timestamp - could be 'bucket' or 'timestamp' depending on query_mode
+        ts = observation.get("bucket") or observation.get("timestamp") or detection_details.get("timestamp") or detected_at
+        # Ensure timestamp is string
+        if isinstance(ts, datetime):
+            ts = ts.isoformat()
+        
+        # Build DocumentDto matching Java DTO
+        doc = {
+            "algorithm": algorithm,
+            "metric": primary_metric or "unknown",
+            "text": f"Anomaly detected in {config_name}",
+            "timestamp": ts,
+            "value": primary_value if primary_value is not None else 0.0,  # Ensure not null
+            "created_at": detected_at,
+            "email": email_str,  # Insights API will send emails based on this
+            "kbName": config_name,
+            "bucket_key": detection_details.get("bucket_key"),
+            "bucket_profile_id": kb_config.get("bucket_profile_id"),
+            "algorithm_details": serialize_for_json(dimension_results)  # Serialized for JSON
         }
         
-        response = requests.post(
-            email_service_url,
-            json=payload,
-            timeout=30
-        )
+        # Post to insights API: /api/insights/dashboard/{kbId}/anomalies
+        url = f"{insights_base_url}/api/insights/dashboard/{config_id}/anomalies"
         
-        if response.status_code in (200, 201):
-            logger.info(f"[EMAIL] Notified {len(emails)} recipients")
-        else:
-            logger.warning(f"[EMAIL] Service returned {response.status_code}")
-            
-    except requests.RequestException as e:
-        logger.error(f"[EMAIL] Failed to send notifications: {e}")
+        try:
+            response = requests.post(url, json=doc, timeout=30)
+            if response.status_code in (200, 201):
+                posted_count += 1
+                logger.info(f"[INSIGHTS] Posted anomaly for {primary_metric}={primary_value}")
+            else:
+                logger.warning(
+                    f"[INSIGHTS] API returned {response.status_code}: {response.text}"
+                )
+        except requests.RequestException as e:
+            logger.error(f"[INSIGHTS] Failed to post anomaly: {e}")
+    
+    if posted_count > 0:
+        logger.info(f"[INSIGHTS] Posted {posted_count}/{len(anomalies)} anomalies to insights API")
+        if email_str:
+            logger.info(f"[INSIGHTS] Email notifications will be sent to: {email_str}")
+
+
+# =============================================================================
 
 
 # =============================================================================
 # Change Stream Watchers
 # =============================================================================
 
+def load_training_series(config_id: str) -> list[dict]:
+    """
+    Load all training series for a config from MongoDB.
+    
+    The extractor stores series as individual documents with:
+    - value: numeric value
+    - timestamp: ISO timestamp
+    - metadata.kbId: config ID
+    - metadata.dim: dimension name
+    - metadata.mode: 0 for training
+    
+    This function aggregates them into the format expected by training.
+    
+    Args:
+        config_id: KB configuration ID
+        
+    Returns:
+        List of observation dicts with dimensions as keys
+    """
+    collection = get_collection(SERIES_COLLECTION)
+    
+    # Get all series for this config (mode=0 is training)
+    cursor = collection.find({
+        "metadata.kbId": config_id,
+        "metadata.mode": 0
+    })
+    
+    # Aggregate by timestamp
+    observations = {}
+    for doc in cursor:
+        ts = doc.get("timestamp")
+        if ts is None:
+            continue
+        
+        ts_key = ts.isoformat() if hasattr(ts, 'isoformat') else str(ts)
+        
+        if ts_key not in observations:
+            observations[ts_key] = {"timestamp": ts}
+        
+        dim = doc.get("metadata", {}).get("dim", "value")
+        observations[ts_key][dim] = doc.get("value")
+    
+    result = list(observations.values())
+    logger.info(f"[TRAINING] Loaded {len(result)} observations for config {config_id}")
+    return result
+
+
 def watch_training_changes():
     """
-    Watch for new training series in MongoDB and trigger training.
+    Watch for training_config documents with is_trained=false.
     
-    Watches the 'series' collection for inserts and runs training
-    for each new series using the algorithm registry.
+    Watches the training_config collection for inserts/updates where
+    is_trained is false, indicating training needs to run.
     """
     logger.info("[WATCHER] Starting training change stream watcher")
     
-    collection = get_collection(SERIES_COLLECTION)
+    collection = get_collection(TRAINING_CONFIG_COLLECTION)
     
+    # Watch for inserts and updates where is_trained becomes false
     pipeline = [
-        {"$match": {"operationType": "insert"}}
+        {"$match": {
+            "$or": [
+                {"operationType": "insert"},
+                {"operationType": "update"}
+            ]
+        }}
     ]
     
     try:
-        with collection.watch(pipeline) as stream:
+        with collection.watch(pipeline, full_document="updateLookup") as stream:
             for change in stream:
                 try:
                     document = change.get("fullDocument", {})
-                    config_id = str(document.get("config_id", ""))
+                    
+                    # Check if this is an untrained config
+                    if document.get("is_trained", True):
+                        continue  # Already trained, skip
+                    
+                    config_id = document.get("kb_id", "")
+                    if not config_id:
+                        config_id = str(document.get("_id", ""))
                     
                     if not config_id:
                         continue
                     
-                    logger.info(f"[WATCHER] New training series for config {config_id}")
+                    logger.info(f"[WATCHER] Training triggered for config {config_id}")
                     
-                    # Get KB config - lookup by kb_id field, not _id
-                    kb_config = get_collection(KB_CONFIG_COLLECTION).find_one(
-                        {"kb_id": config_id}
-                    )
+                    # Load training series from the series collection
+                    observed_values = load_training_series(config_id)
                     
-                    if not kb_config:
-                        # Try by _id as fallback
-                        try:
-                            kb_config = get_collection(KB_CONFIG_COLLECTION).find_one(
-                                {"_id": ObjectId(config_id)}
-                            )
-                        except Exception:
-                            pass
-                    
-                    if not kb_config:
-                        logger.error(f"[WATCHER] KB config not found: {config_id}")
+                    if not observed_values:
+                        logger.warning(f"[WATCHER] No training data for config {config_id}")
                         continue
                     
                     # Get bucket profile if configured
                     bucket_profile = None
-                    bucket_profile_id = kb_config.get("bucket_profile_id")
-                    if bucket_profile_id:
-                        bucket_profile = get_collection(
-                            BUCKET_PROFILES_COLLECTION
-                        ).find_one({"profile_id": bucket_profile_id})
+                    # Note: bucket_profile_id would be in kb_configs, not training_config
+                    # For now we skip bucket profiles in training_config
                     
-                    # Run training
-                    observed_values = document.get("observed_values", [])
-                    result = run_training(kb_config, observed_values, bucket_profile)
+                    # Run training using the training_config as our config
+                    result = run_training(document, observed_values, bucket_profile)
                     
                     # Save result
                     result_id = save_training_result(config_id, result)
                     logger.info(f"[WATCHER] Saved training result: {result_id}")
                     
+                    # Mark as trained
+                    collection.update_one(
+                        {"_id": document["_id"]},
+                        {"$set": {"is_trained": True}}
+                    )
+                    logger.info(f"[WATCHER] Marked config {config_id} as trained")
+                    
                 except Exception as e:
                     logger.error(f"[WATCHER] Error processing training change: {e}")
+                    import traceback
+                    traceback.print_exc()
                     
     except Exception as e:
         logger.error(f"[WATCHER] Training change stream error: {e}")
         raise
 
 
+def load_detection_observations(kb_id: str) -> list:
+    """
+    Load recent detection series from MongoDB and aggregate into observations.
+    
+    The extractor inserts individual series documents per dimension:
+    {value: 123, timestamp: "...", metadata: {kbId: "...", dim: "...", mode: 1}}
+    
+    This function aggregates them into observation dicts:
+    {timestamp: "...", dimension1: val1, dimension2: val2, ...}
+    
+    Args:
+        kb_id: The KB configuration ID
+        
+    Returns:
+        List of observation dicts
+    """
+    collection = get_collection(SERIES_COLLECTION)
+    
+    # Find all detection series for this kbId (mode=1)
+    cursor = collection.find({
+        "metadata.kbId": kb_id,
+        "metadata.mode": 1
+    }).sort("timestamp", 1)
+    
+    # Aggregate by timestamp
+    observations_by_ts = {}
+    for doc in cursor:
+        ts = doc.get("timestamp")
+        dim = doc.get("metadata", {}).get("dim")
+        value = doc.get("value")
+        
+        if ts not in observations_by_ts:
+            observations_by_ts[ts] = {"bucket": ts}
+        
+        if dim:
+            observations_by_ts[ts][dim] = value
+    
+    return list(observations_by_ts.values())
+
+
 def watch_detection_changes():
     """
     Watch for new detection series in MongoDB and trigger detection.
     
-    Watches the 'series' collection for detection-type inserts and runs
-    detection using the algorithm registry.
+    Watches the 'series' collection for detection-type inserts (mode=1) and runs
+    detection using the algorithm registry. Debounces to collect all dimensions
+    before triggering detection.
     """
+    import time
+    
     logger.info("[WATCHER] Starting detection change stream watcher")
     
     collection = get_collection(SERIES_COLLECTION)
     
-    # Watch for detection series (type: "detection")
+    # Watch for detection series (metadata.mode: 1 = DETECTION)
     pipeline = [
         {"$match": {
             "operationType": "insert",
-            "fullDocument.type": "detection"
+            "fullDocument.metadata.mode": 1  # DETECTION mode
         }}
     ]
+    
+    # Track recently processed kbIds to debounce
+    processed = {}
+    DEBOUNCE_SECONDS = 5  # Wait for all dimensions to arrive
     
     try:
         with collection.watch(pipeline) as stream:
             for change in stream:
                 try:
                     document = change.get("fullDocument", {})
-                    config_id = str(document.get("config_id", ""))
+                    metadata = document.get("metadata", {})
+                    kb_id = metadata.get("kbId", "")
                     
-                    if not config_id:
+                    if not kb_id:
                         continue
                     
-                    logger.info(f"[WATCHER] New detection series for config {config_id}")
+                    # Debounce: skip if recently processed
+                    now = time.time()
+                    if kb_id in processed:
+                        if now - processed[kb_id] < DEBOUNCE_SECONDS:
+                            continue
                     
-                    # Run detection using the generic detect_anomaly function
-                    result = detect_anomaly(document)
+                    # Wait a moment for all dimensions to arrive
+                    time.sleep(1)
+                    
+                    logger.info(f"[WATCHER] Detection triggered for kb {kb_id}")
+                    processed[kb_id] = now
+                    
+                    # Load all detection observations for this kb
+                    observations = load_detection_observations(kb_id)
+                    
+                    if not observations:
+                        logger.warning(f"[WATCHER] No detection observations for kb {kb_id}")
+                        continue
+                    
+                    logger.info(f"[WATCHER] Loaded {len(observations)} observations for kb {kb_id}")
+                    
+                    # Build series document for detect_anomaly
+                    serie_to_detect = {
+                        "config_id": kb_id,
+                        "observed_values": observations
+                    }
+                    
+                    # Run detection
+                    result = detect_anomaly(serie_to_detect)
                     
                     if result:
                         logger.info(
                             f"[WATCHER] Detected {result['anomaly_count']} anomalies "
-                            f"for config {config_id}"
+                            f"for kb {kb_id}"
                         )
                     else:
-                        logger.info(f"[WATCHER] No anomalies for config {config_id}")
+                        logger.info(f"[WATCHER] No anomalies for kb {kb_id}")
                     
                 except Exception as e:
                     logger.error(f"[WATCHER] Error processing detection change: {e}")
+                    import traceback
+                    traceback.print_exc()
                     
     except Exception as e:
         logger.error(f"[WATCHER] Detection change stream error: {e}")

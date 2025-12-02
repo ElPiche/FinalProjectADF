@@ -399,3 +399,51 @@ mcp.add_tool(
     delete_bucket_profile,
     description=_delete_bucket_profile_docstring()
 )
+
+
+# ============== Algorithm Discovery Tools ==============
+
+def _list_available_algorithms_docstring():
+    return """List all available anomaly detection algorithms with metadata.
+
+Returns detailed information about each supported algorithm:
+- name: Algorithm identifier (use in create_da_config)
+- description: What the algorithm does
+- parameters: Algorithm-specific parameters
+
+Use this tool to discover which algorithms are available
+before creating anomaly detection configurations."""
+
+
+def list_available_algorithms() -> str:
+    """List all available anomaly detection algorithms with metadata."""
+    from models import get_supported_algorithms
+    import json
+    
+    # Get metadata from shared volume (written by DA-Dispatcher)
+    available = get_supported_algorithms()
+    
+    # Format for human readability
+    result_lines = ["# Available Anomaly Detection Algorithms\n"]
+    
+    for name, info in available.items():
+        result_lines.append(f"## {name.upper()}\n")
+        result_lines.append(f"**Description:** {info.get('description', 'N/A')}\n")
+        if info.get('best_for'):
+            result_lines.append(f"**Best for:** {info['best_for']}\n")
+        if info.get('parameters'):
+            result_lines.append(f"**Parameters:** {', '.join(info['parameters'])}\n")
+        result_lines.append("")
+    
+    # Also include JSON for programmatic use
+    result_lines.append("\n---\n**Raw JSON:**\n```json")
+    result_lines.append(json.dumps(available, indent=2))
+    result_lines.append("```")
+    
+    return "\n".join(result_lines)
+
+
+mcp.add_tool(
+    list_available_algorithms,
+    description=_list_available_algorithms_docstring()
+)

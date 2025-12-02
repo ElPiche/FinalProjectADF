@@ -8,7 +8,7 @@ Run inside the kb-mcp or dispatcher container:
     docker exec da-dispatcher python create_indexes.py
 
 Indexes created:
-1. series_result: (kb_id, dimension) - For fast training result lookups
+1. trained_models: (kb_id, dimension) - For fast trained model lookups
 2. series: (metadata.kbId, metadata.dim, metadata.mode) - For series data queries
 3. training_config: (kb_id) - For training config lookups
 4. bucket_profiles: (_id) - Already indexed as _id, but we add for consistency
@@ -41,10 +41,10 @@ def create_indexes():
     db = client[DB_NAME]
     indexes_created = 0
     
-    # 1. series_result collection - for training result lookups during detection
-    print("\n1. Creating indexes on 'series_result' collection...")
+    # 1. trained_models collection - for trained model lookups during detection
+    print("\n1. Creating indexes on 'trained_models' collection...")
     try:
-        result = db["series_result"].create_index(
+        result = db["trained_models"].create_index(
             [("kb_id", ASCENDING), ("dimension", ASCENDING)],
             name="kb_id_dimension_idx",
             background=True
@@ -116,7 +116,7 @@ def create_indexes():
     
     # List all indexes for verification
     print("\nFinal index summary:")
-    for collection_name in ["series_result", "series", "training_config", "bucket_profiles"]:
+    for collection_name in ["trained_models", "series", "training_config", "bucket_profiles"]:
         try:
             indexes = list(db[collection_name].list_indexes())
             print(f"\n  {collection_name}:")

@@ -18,10 +18,10 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
 # Algorithm registry - the ONLY way to access algorithms
-from Dispatcher.algorithm_interface import get_algorithm
+from MotorDA.Dispatcher.algorithm_interface import get_algorithm
 
 # Bucket resolver for time-context bucketing
-from Dispatcher.bucket_resolver import BucketResolver
+from MotorDA.Dispatcher.bucket_resolver import BucketResolver
 
 # Configure logging
 logging.basicConfig(

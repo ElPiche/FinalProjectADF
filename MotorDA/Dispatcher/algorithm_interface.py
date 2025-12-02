@@ -1,34 +1,32 @@
 """Algorithm Interface - Protocol + Registry for Anomaly Detection Algorithms.
 
-This module defines the interface contract for all anomaly detection algorithms
-and provides a registry for dynamic algorithm lookup.
+This module defines:
+1. The AnomalyAlgorithm protocol (interface contract)
+2. The ALGORITHM_REGISTRY (populated by @register_algorithm)
+3. The export_registry() function (writes to shared volume for KB-MCP)
 
-Design Pattern: Protocol (structural subtyping) + Registry (factory pattern)
+Algorithms are self-contained in the algorithms/ folder.
+Import the algorithms package to register all algorithms.
 
 Usage:
-    from MotorDA.Dispatcher.algorithm_interface import get_algorithm, ALGORITHM_REGISTRY
+    from MotorDA.Dispatcher.algorithm_interface import get_algorithm
+    from MotorDA.Dispatcher import algorithms  # Triggers registration
     
-    # Get an algorithm by name
-    algorithm = get_algorithm("zscore")
-    
-    # Train a baseline
-    baseline = algorithm.train(values=[10, 20, 30], percentile=99.5)
-    
-    # Detect anomaly
-    result = algorithm.detect(value=100.0, baseline=baseline)
-    
-    # Check available algorithms
-    print(list(ALGORITHM_REGISTRY.keys()))  # ['zscore']
+    algo = get_algorithm("zscore")
+    baseline = algo.train([10, 20, 30])
+    result = algo.detect(100, baseline)
 """
 
 from __future__ import annotations
 
-from typing import Protocol, Dict, Any, List, runtime_checkable
+import json
+import os
+from pathlib import Path
+from typing import Protocol, Dict, Any, List, Type, runtime_checkable
 from dataclasses import dataclass
 
 import logging
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -37,246 +35,94 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# === ALGORITHM REGISTRY ======================================================
+
+ALGORITHM_REGISTRY: Dict[str, "AnomalyAlgorithm"] = {}
+
+
+def register_algorithm(cls: Type) -> Type:
+    """Decorator to auto-register an algorithm.
+    
+    Just add @register_algorithm above your class.
+    The decorator:
+    1. Creates an instance
+    2. Validates it implements the protocol
+    3. Registers it by name
+    4. Exports registry to shared volume (if available)
+    
+    Usage:
+        @register_algorithm
+        @dataclass
+        class MyAlgorithm:
+            __algorithm_meta__ = {
+                "description": "My algorithm",
+                "parameters": ["param1"],
+            }
+            
+            @property
+            def name(self) -> str:
+                return "my_algo"
+            
+            def train(self, values, **kwargs): ...
+            def detect(self, value, baseline): ...
+            def detect_batch(self, values, baseline): ...
+    """
+    instance = cls()
+    
+    # Verify protocol compliance
+    required = ['name', 'train', 'detect', 'detect_batch']
+    missing = [m for m in required if not hasattr(instance, m)]
+    if missing:
+        raise TypeError(
+            f"Class {cls.__name__} must implement AnomalyAlgorithm protocol. "
+            f"Missing: {missing}"
+        )
+    
+    name = instance.name.lower()
+    
+    if name in ALGORITHM_REGISTRY:
+        logger.warning(f"Overwriting existing algorithm: {name}")
+    
+    ALGORITHM_REGISTRY[name] = instance
+    logger.info(f"Registered algorithm: {name}")
+    
+    # Export registry after each registration
+    _export_registry_if_available()
+    
+    return cls
+
+
 @runtime_checkable
 class AnomalyAlgorithm(Protocol):
     """Interface for anomaly detection algorithms.
     
-    All anomaly detection algorithms MUST implement this protocol.
-    
-    This is a PURE statistical interface - no bucket logic here.
-    Bucketing is the Dispatcher/Orchestrator's responsibility.
-    
-    Methods:
-        name: Algorithm identifier (e.g., 'zscore', 'arma', 'kmeans')
-        train: Train a baseline from values
-        detect: Detect if a single value is anomalous
-        detect_batch: Detect anomalies for multiple values
+    All algorithms MUST implement this protocol.
+    This is a PURE statistical interface - no bucket logic.
     """
     
     @property
     def name(self) -> str:
-        """Algorithm identifier (e.g., 'zscore', 'arma', 'kmeans')."""
+        """Algorithm identifier (e.g., 'zscore', 'iqr')."""
         ...
     
-    def train(self, values: List[float], percentile: float = 99.5, **kwargs) -> Dict[str, Any]:
-        """Train model from values, return serializable baseline.
-        
-        Args:
-            values: List of numeric values to train on
-            percentile: Percentile for threshold calculation
-            **kwargs: Algorithm-specific parameters
-        
-        Returns:
-            Dict containing the trained baseline (must be JSON-serializable)
-        """
+    def train(self, values: List[float], **kwargs) -> Dict[str, Any]:
+        """Train model from values, return serializable baseline."""
         ...
     
     def detect(self, value: float, baseline: Dict[str, Any]) -> Dict[str, Any]:
-        """Detect if a single value is anomalous.
-        
-        Args:
-            value: The value to check
-            baseline: Trained baseline dict from train()
-        
-        Returns:
-            Dict with at least 'is_anomaly' (bool) key
-        """
+        """Detect if a single value is anomalous. Must return 'is_anomaly' key."""
         ...
     
     def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Detect anomalies for multiple values.
-        
-        Args:
-            values: List of values to check
-            baseline: Trained baseline dict from train()
-        
-        Returns:
-            List of detection result dicts
-        """
+        """Detect anomalies for multiple values."""
         ...
 
 
-@dataclass
-class ZScoreAlgorithm:
-    """Z-Score implementation of AnomalyAlgorithm protocol.
-    
-    This is a thin wrapper around the pure zscore_algorithm module.
-    It implements the AnomalyAlgorithm protocol to allow dynamic dispatch.
-    
-    It also provides higher-level train/detect methods that accept
-    observed_values dicts (multi-dimensional) instead of raw float lists.
-    """
-    
-    @property
-    def name(self) -> str:
-        return "zscore"
-    
-    def train(self, values: List[float], percentile: float = 99.5, min_points: int = 3, **_) -> Dict[str, Any]:
-        """Train Z-Score baseline from raw float values.
-        
-        Args:
-            values: List of numeric values
-            percentile: Percentile for threshold (default 99.5)
-            min_points: Minimum points for valid stats (default 3)
-        
-        Returns:
-            Baseline dict with mean, std, threshold
-        """
-        from MotorDA.ZScore import zscore_algorithm
-        baseline = zscore_algorithm.train(values, percentile, min_points)
-        return baseline.to_dict()
-    
-    def train_multi_dimension(
-        self,
-        observed_values: List[Dict[str, Any]],
-        parameters: List[Dict[str, Any]],
-        percentile: float = 99.5
-    ) -> Dict[str, Any]:
-        """Train Z-Score baseline for multiple dimensions.
-        
-        This is the high-level interface used by TrainingOrchestrator.
-        
-        Args:
-            observed_values: List of observation dicts with dimension values
-            parameters: Algorithm parameters with 'dimension' keys
-            percentile: Percentile for threshold calculation
-        
-        Returns:
-            Dict with per-dimension baselines: {dimension_name: baseline_dict}
-        """
-        result = {}
-        
-        for param in parameters:
-            dimension = param.get("dimension")
-            if not dimension:
-                continue
-            
-            # Extract values for this dimension
-            values = []
-            for obs in observed_values:
-                val = obs.get(dimension)
-                if val is not None:
-                    try:
-                        values.append(float(val))
-                    except (ValueError, TypeError):
-                        pass
-            
-            if len(values) >= 3:  # Minimum points
-                baseline = self.train(values, percentile)
-                result[dimension] = baseline
-                logger.info(f"[ZSCORE] Trained dimension '{dimension}' with {len(values)} values")
-            else:
-                logger.warning(f"[ZSCORE] Insufficient values for dimension '{dimension}': {len(values)}")
-        
-        return result
-    
-    def detect(self, value: float, baseline: Dict[str, Any]) -> Dict[str, Any]:
-        """Detect if a single value is anomalous based on trained baseline.
-        
-        Args:
-            value: The value to check
-            baseline: Trained baseline dict
-        
-        Returns:
-            Dict with is_anomaly, z_score, etc.
-        """
-        from MotorDA.ZScore import zscore_algorithm
-        baseline_obj = zscore_algorithm.ZScoreBaseline.from_dict(baseline)
-        result = zscore_algorithm.detect(value, baseline_obj)
-        return result.to_dict()
-    
-    def detect_multi_dimension(
-        self,
-        observation: Dict[str, Any],
-        baselines: Dict[str, Dict[str, Any]],
-        parameters: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Detect anomalies across multiple dimensions.
-        
-        This is the high-level interface used by DetectionOrchestrator.
-        
-        Args:
-            observation: Observation dict with dimension values
-            baselines: Per-dimension baselines from train_multi_dimension
-            parameters: Algorithm parameters with 'dimension' keys
-        
-        Returns:
-            Dict with is_anomaly, dimension_results, etc.
-        """
-        dimension_results = {}
-        is_any_anomaly = False
-        
-        for param in parameters:
-            dimension = param.get("dimension")
-            if not dimension:
-                continue
-            
-            baseline = baselines.get(dimension)
-            if not baseline:
-                logger.warning(f"[ZSCORE] No baseline for dimension '{dimension}'")
-                continue
-            
-            value = observation.get(dimension)
-            if value is None:
-                continue
-            
-            try:
-                value = float(value)
-            except (ValueError, TypeError):
-                continue
-            
-            result = self.detect(value, baseline)
-            dimension_results[dimension] = result
-            
-            if result.get("is_anomaly", False):
-                is_any_anomaly = True
-        
-        return {
-            "is_anomaly": is_any_anomaly,
-            "dimensions": dimension_results,
-            "observation": observation
-        }
-    
-    def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Detect anomalies for multiple values.
-        
-        Args:
-            values: List of values to check
-            baseline: Trained baseline dict
-        
-        Returns:
-            List of detection result dicts
-        """
-        return [self.detect(v, baseline) for v in values]
-
-
-# === ALGORITHM REGISTRY ======================================================
-# This is the single source of truth for available algorithms.
-# To add a new algorithm:
-#   1. Create a class implementing AnomalyAlgorithm protocol
-#   2. Add it to this registry
-
-ALGORITHM_REGISTRY: Dict[str, AnomalyAlgorithm] = {
-    "zscore": ZScoreAlgorithm(),
-    # Future additions:
-    # "arma": ARMAAlgorithm(),
-    # "kmeans": KMeansAlgorithm(),
-    # "isolation_forest": IsolationForestAlgorithm(),
-}
+# === REGISTRY ACCESS =========================================================
 
 
 def get_algorithm(name: str) -> AnomalyAlgorithm:
-    """Get an algorithm by name from the registry.
-    
-    Args:
-        name: Algorithm identifier (case-insensitive)
-    
-    Returns:
-        AnomalyAlgorithm instance
-    
-    Raises:
-        ValueError: If algorithm is not found
-    """
+    """Get an algorithm by name from the registry."""
     name_lower = name.lower()
     if name_lower not in ALGORITHM_REGISTRY:
         available = list(ALGORITHM_REGISTRY.keys())
@@ -284,53 +130,76 @@ def get_algorithm(name: str) -> AnomalyAlgorithm:
     return ALGORITHM_REGISTRY[name_lower]
 
 
-def is_algorithm_registered(name: str) -> bool:
-    """Check if an algorithm is registered.
-    
-    Args:
-        name: Algorithm identifier (case-insensitive)
-    
-    Returns:
-        True if algorithm exists in registry
-    """
+def is_algorithm_supported(name: str) -> bool:
+    """Check if an algorithm is registered."""
     return name.lower() in ALGORITHM_REGISTRY
 
 
 def list_algorithms() -> List[str]:
-    """List all registered algorithm names.
-    
-    Returns:
-        List of algorithm names
-    """
+    """List all registered algorithm names."""
     return list(ALGORITHM_REGISTRY.keys())
 
 
-def register_algorithm(algorithm: AnomalyAlgorithm) -> None:
-    """Register a new algorithm (for testing or plugins).
+def get_algorithm_info(name: str = None) -> Dict[str, Any]:
+    """Get metadata for algorithms (from __algorithm_meta__)."""
+    if name:
+        name_lower = name.lower()
+        if name_lower not in ALGORITHM_REGISTRY:
+            return None
+        algo = ALGORITHM_REGISTRY[name_lower]
+        meta = getattr(algo, '__algorithm_meta__', {})
+        return {"name": name_lower, **meta}
     
-    Args:
-        algorithm: AnomalyAlgorithm instance
+    result = {}
+    for algo_name, algo in ALGORITHM_REGISTRY.items():
+        meta = getattr(algo, '__algorithm_meta__', {})
+        result[algo_name] = {"name": algo_name, **meta}
+    return result
+
+
+# === SHARED VOLUME EXPORT ====================================================
+
+
+REGISTRY_PATH = Path(os.environ.get("ALGORITHM_REGISTRY_PATH", "/app/registry/algorithms.json"))
+
+
+def _export_registry_if_available():
+    """Export registry to shared volume if path exists."""
+    try:
+        # Only export if the registry directory exists (i.e., in Docker with volume)
+        if REGISTRY_PATH.parent.exists():
+            export_registry()
+    except Exception as e:
+        # Don't fail registration if export fails
+        logger.debug(f"Could not export registry: {e}")
+
+
+def export_registry():
+    """Export algorithm registry to JSON file for KB-MCP to read.
+    
+    This is called automatically after each algorithm registers.
+    KB-MCP reads this file to know which algorithms are available.
     """
-    if not isinstance(algorithm, AnomalyAlgorithm):
-        raise TypeError(f"Algorithm must implement AnomalyAlgorithm protocol, got {type(algorithm)}")
+    data = get_algorithm_info()
     
-    name = algorithm.name.lower()
-    if name in ALGORITHM_REGISTRY:
-        logger.warning(f"Overwriting existing algorithm: {name}")
+    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REGISTRY_PATH.write_text(json.dumps(data, indent=2))
     
-    ALGORITHM_REGISTRY[name] = algorithm
-    logger.info(f"Registered algorithm: {name}")
+    logger.info(f"Exported {len(data)} algorithms to {REGISTRY_PATH}")
 
 
-# === VERIFICATION ============================================================
-# Ensure ZScoreAlgorithm implements the protocol
-def _verify_protocol_implementation():
-    """Verify that ZScoreAlgorithm implements AnomalyAlgorithm protocol."""
-    algo = ZScoreAlgorithm()
-    assert isinstance(algo, AnomalyAlgorithm), "ZScoreAlgorithm must implement AnomalyAlgorithm protocol"
-    assert hasattr(algo, 'name')
-    assert hasattr(algo, 'train')
-    assert hasattr(algo, 'detect')
-    assert hasattr(algo, 'detect_batch')
-
-_verify_protocol_implementation()
+def import_registry() -> Dict[str, Any]:
+    """Import algorithm registry from JSON file.
+    
+    Used by KB-MCP to read available algorithms.
+    Returns empty dict if file doesn't exist yet.
+    """
+    if not REGISTRY_PATH.exists():
+        logger.warning(f"Registry file not found: {REGISTRY_PATH}")
+        return {}
+    
+    try:
+        return json.loads(REGISTRY_PATH.read_text())
+    except Exception as e:
+        logger.error(f"Failed to read registry: {e}")
+        return {}
