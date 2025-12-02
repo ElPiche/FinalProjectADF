@@ -82,9 +82,8 @@ async def modify_kb_config(
         async with asyncio.timeout(MAX_TOOL_EXECUTION_TIME):
             db_instance = client[db.db_kb_name]
             collection = db_instance[db.db_kb_collection_name]
-            # Bucket profiles are stored in anomaly_detection database (via get_db())
-            anomaly_detection_db = client["anomaly_detection"]
-            bucket_profiles_collection = anomaly_detection_db.get_collection("bucket_profiles")
+            # Bucket profiles are stored in knowledge_base database
+            bucket_profiles_collection = db_instance.get_collection("bucket_profiles")
 
             step_start = time.time()
             await reporter.step(1, "Step 1/4: Loading configuration")

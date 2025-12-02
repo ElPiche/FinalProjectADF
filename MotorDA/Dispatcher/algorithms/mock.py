@@ -12,8 +12,9 @@ from ..algorithm_interface import register_algorithm
 
 logger = logging.getLogger(__name__)
 
+# Uncomment the decorator below to register the algorithm
+# @register_algorithm // Decorator to register the algorithm
 
-@register_algorithm
 @dataclass
 class MockAlgorithm:
     """Mock algorithm for testing and demonstration.

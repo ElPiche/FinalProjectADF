@@ -436,6 +436,8 @@ services:
         condition: service_healthy
       elasticsearch-dataset:
         condition: service_healthy
+      dispatcher:
+        condition: service_started  # Wait for dispatcher to export algorithms
     environment:
       - MONGODB_URI=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
       - MONGODB_DB=knowledge_base
@@ -450,6 +452,9 @@ services:
       - BURST_SIZE_MIN=3
       - BURST_SIZE_MAX=20
       - BUCKET_PROBABILITY=0.3
+      - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
+    volumes:
+      - algorithm_registry:/app/registry:ro  # Read-only access to algorithm registry
     networks:
       - adf-network
 

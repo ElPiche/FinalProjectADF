@@ -226,7 +226,8 @@ class Algorithm:
 def run_training(
     config: dict,
     observed_values: list[dict],
-    bucket_profile: Optional[dict] = None
+    bucket_profile: Optional[dict] = None,
+    timestamp_field: str = "@timestamp"
 ) -> dict:
     """
     Run training for any algorithm using the registry.
@@ -238,6 +239,7 @@ def run_training(
         config: KB configuration dict
         observed_values: List of observation dicts
         bucket_profile: Optional bucket profile for time-aware bucketing
+        timestamp_field: Field name containing timestamps in observations
         
     Returns:
         Training result dict
@@ -267,6 +269,10 @@ def run_training(
     logger.info(f"[TRAINING] Starting training for config {config_id}")
     logger.info(f"[TRAINING] Algorithm: {alg_name}, Observations: {len(observed_values)}")
     logger.info(f"[TRAINING] Parameters: {alg_params}")
+    logger.info(f"[TRAINING] Bucket profile passed: {bucket_profile is not None}")
+    logger.info(f"[TRAINING] Timestamp field: {timestamp_field}")
+    if bucket_profile:
+        logger.info(f"[TRAINING] Bucket profile _id: {bucket_profile.get('_id')}")
     
     # Use TrainingOrchestrator for bucket-aware training
     orchestrator = TrainingOrchestrator(
@@ -275,10 +281,7 @@ def run_training(
         bucket_profile=bucket_profile
     )
     
-    # Extract timestamp field from query_mode
-    query_mode = config.get("query_mode", {})
-    timestamp_field = query_mode.get("timestamp_field", "@timestamp")
-    
+    # Use the timestamp_field passed from caller (from KB config query_mode)
     result = orchestrator.train(
         observed_values=observed_values,
         timestamp_field=timestamp_field
@@ -534,6 +537,35 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
         if isinstance(ts, datetime):
             ts = ts.isoformat()
         
+        # Extract top-level score for Kibana dashboard compatibility
+        # The dashboard expects flat fields like algorithm_details.z_score
+        primary_details = dimension_results.get(primary_metric, {}) if primary_metric else {}
+        flat_z_score = primary_details.get("z_score")
+        flat_iqr_score = primary_details.get("iqr_score")
+        flat_lower_bound = primary_details.get("lower_bound")
+        flat_upper_bound = primary_details.get("upper_bound")
+        flat_mean = primary_details.get("mean")
+        flat_std = primary_details.get("std")
+        flat_threshold = primary_details.get("threshold")
+        
+        # Build algorithm_details with both nested (per-dimension) and flat (for Kibana) fields
+        algorithm_details_with_flat = serialize_for_json(dimension_results)
+        # Add flat fields for Kibana dashboard visualization
+        if flat_z_score is not None:
+            algorithm_details_with_flat["z_score"] = flat_z_score
+        if flat_iqr_score is not None:
+            algorithm_details_with_flat["iqr_score"] = flat_iqr_score
+        if flat_lower_bound is not None:
+            algorithm_details_with_flat["lower_bound"] = flat_lower_bound
+        if flat_upper_bound is not None:
+            algorithm_details_with_flat["upper_bound"] = flat_upper_bound
+        if flat_mean is not None:
+            algorithm_details_with_flat["mean"] = flat_mean
+        if flat_std is not None:
+            algorithm_details_with_flat["std"] = flat_std
+        if flat_threshold is not None:
+            algorithm_details_with_flat["threshold"] = flat_threshold
+        
         # Build DocumentDto matching Java DTO
         doc = {
             "algorithm": algorithm,
@@ -546,7 +578,7 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
             "kbName": config_name,
             "bucket_key": detection_details.get("bucket_key"),
             "bucket_profile_id": kb_config.get("bucket_profile_id"),
-            "algorithm_details": serialize_for_json(dimension_results)  # Serialized for JSON
+            "algorithm_details": algorithm_details_with_flat  # Now includes flat fields for Kibana
         }
         
         # Post to insights API: /api/insights/dashboard/{kbId}/anomalies
@@ -671,13 +703,36 @@ def watch_training_changes():
                         logger.warning(f"[WATCHER] No training data for config {config_id}")
                         continue
                     
-                    # Get bucket profile if configured
+                    # Get bucket profile and query_mode from KB config (same MongoDB, O(1) lookup by _id)
                     bucket_profile = None
-                    # Note: bucket_profile_id would be in kb_configs, not training_config
-                    # For now we skip bucket profiles in training_config
+                    timestamp_field = "@timestamp"  # Default
+                    try:
+                        kb_config = get_kb_collection().find_one({"_id": ObjectId(config_id)})
+                        if kb_config:
+                            # Get timestamp_field from query_mode
+                            query_mode = kb_config.get("query_mode", {})
+                            timestamp_field = query_mode.get("timestamp_field", "@timestamp")
+                            logger.info(f"[WATCHER] KB config timestamp_field: {timestamp_field}")
+                            
+                            # Get bucket profile from knowledge_base DB (same as KB configs)
+                            bucket_profile_id = kb_config.get("bucket_profile_id")
+                            logger.info(f"[WATCHER] KB config bucket_profile_id: {bucket_profile_id}")
+                            if bucket_profile_id:
+                                bucket_profile = get_kb_database()[BUCKET_PROFILES_COLLECTION].find_one(
+                                    {"$or": [{"profile_id": bucket_profile_id}, {"_id": bucket_profile_id}]}
+                                )
+                                logger.info(f"[WATCHER] Bucket profile lookup result: {bucket_profile is not None}")
+                                if bucket_profile:
+                                    logger.info(f"[WATCHER] Using bucket profile: {bucket_profile_id}")
+                        else:
+                            logger.warning(f"[WATCHER] KB config not found for {config_id}")
+                    except Exception as e:
+                        logger.warning(f"[WATCHER] Failed to load bucket profile: {e}")
+                        import traceback
+                        traceback.print_exc()
                     
                     # Run training using the training_config as our config
-                    result = run_training(document, observed_values, bucket_profile)
+                    result = run_training(document, observed_values, bucket_profile, timestamp_field)
                     
                     # Save result
                     result_id = save_training_result(config_id, result)
@@ -740,16 +795,58 @@ def load_detection_observations(kb_id: str) -> list:
     return list(observations_by_ts.values())
 
 
-def watch_detection_changes():
+def _detect_single_series(serie_data: dict) -> Optional[dict]:
+    """
+    Process a single series document for detection in a worker process.
+    
+    This function is designed to run in a ProcessPoolExecutor worker.
+    It creates its own database connections since they can't be pickled.
+    
+    Args:
+        serie_data: Dict with config_id and observation data (pickle-safe)
+        
+    Returns:
+        Detection result or None
+    """
+    # Re-import in worker process (ProcessPoolExecutor spawns new processes)
+    import logging
+    from datetime import datetime, timezone
+    
+    worker_logger = logging.getLogger(__name__)
+    
+    try:
+        kb_id = serie_data.get("config_id", "")
+        observation = serie_data.get("observation", {})
+        
+        if not kb_id:
+            return None
+        
+        # Create series for detection
+        serie_to_detect = {
+            "config_id": kb_id,
+            "observed_values": [observation]
+        }
+        
+        result = detect_anomaly(serie_to_detect)
+        return result
+        
+    except Exception as e:
+        worker_logger.error(f"[WORKER] Detection error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def watch_detection_changes(workers):
     """
     Watch for new detection series in MongoDB and trigger detection.
     
-    Watches the 'series' collection for detection-type inserts (mode=1) and runs
-    detection using the algorithm registry. Debounces to collect all dimensions
-    before triggering detection.
-    """
-    import time
+    Watches the 'series' collection for detection-type inserts (mode=1) and submits
+    each document to the ProcessPoolExecutor for parallel detection.
     
+    Args:
+        workers: ProcessPoolExecutor for parallel detection
+    """
     logger.info("[WATCHER] Starting detection change stream watcher")
     
     collection = get_collection(SERIES_COLLECTION)
@@ -762,58 +859,35 @@ def watch_detection_changes():
         }}
     ]
     
-    # Track recently processed kbIds to debounce
-    processed = {}
-    DEBOUNCE_SECONDS = 5  # Wait for all dimensions to arrive
-    
     try:
         with collection.watch(pipeline) as stream:
             for change in stream:
                 try:
-                    document = change.get("fullDocument", {})
-                    metadata = document.get("metadata", {})
+                    serie_doc = change.get("fullDocument")
+                    
+                    if not serie_doc:
+                        continue
+                    
+                    metadata = serie_doc.get("metadata", {})
                     kb_id = metadata.get("kbId", "")
+                    dim = metadata.get("dim", "unknown")
+                    value = serie_doc.get("value")
+                    ts = serie_doc.get("timestamp")
                     
                     if not kb_id:
                         continue
                     
-                    # Debounce: skip if recently processed
-                    now = time.time()
-                    if kb_id in processed:
-                        if now - processed[kb_id] < DEBOUNCE_SECONDS:
-                            continue
-                    
-                    # Wait a moment for all dimensions to arrive
-                    time.sleep(1)
-                    
-                    logger.info(f"[WATCHER] Detection triggered for kb {kb_id}")
-                    processed[kb_id] = now
-                    
-                    # Load all detection observations for this kb
-                    observations = load_detection_observations(kb_id)
-                    
-                    if not observations:
-                        logger.warning(f"[WATCHER] No detection observations for kb {kb_id}")
-                        continue
-                    
-                    logger.info(f"[WATCHER] Loaded {len(observations)} observations for kb {kb_id}")
-                    
-                    # Build series document for detect_anomaly
-                    serie_to_detect = {
+                    # Build pickle-safe data for worker process
+                    observation = {"bucket": ts, dim: value}
+                    serie_data = {
                         "config_id": kb_id,
-                        "observed_values": observations
+                        "observation": observation
                     }
                     
-                    # Run detection
-                    result = detect_anomaly(serie_to_detect)
+                    logger.debug(f"[WATCHER] Submitting detection for kb={kb_id} dim={dim}")
                     
-                    if result:
-                        logger.info(
-                            f"[WATCHER] Detected {result['anomaly_count']} anomalies "
-                            f"for kb {kb_id}"
-                        )
-                    else:
-                        logger.info(f"[WATCHER] No anomalies for kb {kb_id}")
+                    # Submit to process pool for parallel execution
+                    workers.submit(_detect_single_series, serie_data)
                     
                 except Exception as e:
                     logger.error(f"[WATCHER] Error processing detection change: {e}")
@@ -832,36 +906,46 @@ def watch_detection_changes():
 def main():
     """Main entry point for the dispatcher."""
     import threading
+    from concurrent.futures import ProcessPoolExecutor
+    import os
+    
+    # Number of worker processes for detection
+    # ProcessPoolExecutor bypasses GIL for CPU-bound algorithm computations
+    max_workers = int(os.environ.get("DETECTION_WORKERS", 4))
     
     logger.info("=" * 60)
     logger.info("[DISPATCHER] Starting Algorithm-Agnostic DA Dispatcher")
     logger.info(f"[DISPATCHER] Available algorithms: {list_algorithms()}")
+    logger.info(f"[DISPATCHER] Detection workers (ProcessPool): {max_workers}")
     logger.info("=" * 60)
     
-    # Start watchers in separate threads
-    training_thread = threading.Thread(
-        target=watch_training_changes,
-        name="TrainingWatcher",
-        daemon=True
-    )
-    
-    detection_thread = threading.Thread(
-        target=watch_detection_changes,
-        name="DetectionWatcher",
-        daemon=True
-    )
-    
-    training_thread.start()
-    detection_thread.start()
-    
-    logger.info("[DISPATCHER] Watchers started, waiting for changes...")
-    
-    # Keep main thread alive
-    try:
-        training_thread.join()
-        detection_thread.join()
-    except KeyboardInterrupt:
-        logger.info("[DISPATCHER] Shutting down...")
+    # Create process pool for detection (CPU-bound algorithm work)
+    with ProcessPoolExecutor(max_workers=max_workers) as workers:
+        # Start watchers in separate threads
+        training_thread = threading.Thread(
+            target=watch_training_changes,
+            name="TrainingWatcher",
+            daemon=True
+        )
+        
+        detection_thread = threading.Thread(
+            target=watch_detection_changes,
+            args=(workers,),
+            name="DetectionWatcher",
+            daemon=True
+        )
+        
+        training_thread.start()
+        detection_thread.start()
+        
+        logger.info("[DISPATCHER] Watchers started, waiting for changes...")
+        
+        # Keep main thread alive
+        try:
+            training_thread.join()
+            detection_thread.join()
+        except KeyboardInterrupt:
+            logger.info("[DISPATCHER] Shutting down...")
 
 
 if __name__ == "__main__":

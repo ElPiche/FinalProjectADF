@@ -93,10 +93,16 @@ class TrainingOrchestrator:
         if self.bucket_profile:
             try:
                 self.bucket_resolver = BucketResolver.from_dict(self.bucket_profile)
-                logger.info(f"[ORCHESTRATOR] Loaded bucket profile: {self.bucket_profile.get('profile_id')}")
+                profile_id = self.bucket_profile.get('profile_id') or self.bucket_profile.get('_id')
+                logger.info(f"[ORCHESTRATOR] Loaded bucket profile: {profile_id}")
+                logger.info(f"[ORCHESTRATOR] Bucket resolver created: {self.bucket_resolver is not None}")
             except Exception as e:
                 logger.warning(f"[ORCHESTRATOR] Failed to create bucket resolver: {e}")
+                import traceback
+                traceback.print_exc()
                 self.bucket_resolver = None
+        else:
+            logger.info("[ORCHESTRATOR] No bucket profile provided")
     
     def resolve_bucket_key(self, ts: datetime) -> str:
         """Resolve a timestamp to its bucket key.
@@ -129,19 +135,35 @@ class TrainingOrchestrator:
             return {}
         
         groups: Dict[str, List[Dict[str, Any]]] = {}
+        failed_parse_count = 0
         
-        for obs in observed_values:
+        for i, obs in enumerate(observed_values):
+            # Try the specified timestamp field first, then fallback to common fields
             ts_val = obs.get(timestamp_field)
+            if ts_val is None:
+                # Fallback: series collection always stores as "timestamp"
+                ts_val = obs.get("timestamp")
+            if ts_val is None:
+                # Also try @timestamp
+                ts_val = obs.get("@timestamp")
+            
             ts = parse_timestamp(ts_val)
+            
+            if i < 3:  # Debug first few observations
+                logger.info(f"[ORCHESTRATOR] Obs {i}: ts_field='{timestamp_field}', ts_val={ts_val}, parsed_ts={ts}")
             
             if ts is None:
                 bucket_key = "global_default"
+                failed_parse_count += 1
             else:
                 bucket_key = self.resolve_bucket_key(ts)
             
             if bucket_key not in groups:
                 groups[bucket_key] = []
             groups[bucket_key].append(obs)
+        
+        if failed_parse_count > 0:
+            logger.warning(f"[ORCHESTRATOR] {failed_parse_count}/{len(observed_values)} observations failed timestamp parsing")
         
         return groups
     

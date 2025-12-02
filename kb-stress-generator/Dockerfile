@@ -20,5 +20,6 @@ ENV BURST_PROBABILITY="0.1"
 ENV BURST_SIZE_MIN="3"
 ENV BURST_SIZE_MAX="10"
 ENV BUCKET_PROBABILITY="0.3"
+ENV ALGORITHM_REGISTRY_PATH="/app/registry/algorithms.json"
 
 CMD ["python", "-u", "stress_generator.py"]
