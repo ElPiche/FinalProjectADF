@@ -167,6 +167,7 @@ public class InsightsService {
             //throw e;
         }
     }
+
     public void sendMailTest(String to) throws Exception {
 
         var kbName = "Prueba";
