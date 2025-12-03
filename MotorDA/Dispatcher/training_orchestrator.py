@@ -84,7 +84,7 @@ class TrainingOrchestrator:
     
     Supports both single-dimensional and multi-dimensional algorithms:
     - Single-dimensional: Loops over parameters, calls train() per dimension
-    - Multi-dimensional: Calls train_multi_dimension() with all parameters
+    - Multi-dimensional: Calls train_multi_dimensional() with all parameters
     
     Completely algorithm-agnostic - uses algorithm registry.
     """
@@ -390,7 +390,7 @@ class TrainingOrchestrator:
         """
         if self.is_multi_dimensional:
             # Multi-dimensional: delegate to algorithm's batch method
-            baseline = self._algorithm_instance.train_multi_dimension(
+            baseline = self._algorithm_instance.train_multi_dimensional(
                 observations=observations,
                 parameters=self.parameters,
                 percentile=percentile
@@ -430,7 +430,7 @@ class DetectionOrchestrator:
     
     Supports both single-dimensional and multi-dimensional algorithms:
     - Single-dimensional: Loops over parameters, calls detect() per dimension
-    - Multi-dimensional: Calls detect_multi_dimension() with all parameters
+    - Multi-dimensional: Calls detect_multi_dimensional() with all parameters
     
     Completely algorithm-agnostic - uses algorithm registry.
     """
@@ -578,7 +578,7 @@ class DetectionOrchestrator:
         # Route based on algorithm mode
         if self.is_multi_dimensional:
             # Multi-dimensional: delegate to algorithm's batch method
-            result = self._algorithm_instance.detect_multi_dimension(
+            result = self._algorithm_instance.detect_multi_dimensional(
                 observation=observation,
                 baselines=baselines,
                 parameters=self.parameters

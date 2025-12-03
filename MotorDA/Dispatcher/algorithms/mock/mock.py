@@ -543,13 +543,3 @@ class MockAlgorithm:
             "dimension_contributions": dimension_contributions,
             "anomalous_dimensions": anomalous_dims,
         }
-    
-    # Alias for API compatibility (orchestrator may call either name)
-    def train_multi_dimension(self, *args, **kwargs):
-        """Alias for train_multi_dimensional (API compatibility)."""
-        return self.train_multi_dimensional(*args, **kwargs)
-    
-    def detect_multi_dimension(self, *args, **kwargs):
-        """Alias for detect_multi_dimensional (API compatibility)."""
-        return self.detect_multi_dimensional(*args, **kwargs)
-

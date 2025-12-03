@@ -134,59 +134,6 @@ class IQRAlgorithm:
             "data_points": len(values),
         }
     
-    def train_multi_dimension(
-        self,
-        observed_values: List[Dict[str, Any]],
-        parameters: List[Dict[str, Any]],
-        multiplier: float = 1.5,
-        **_  # Accept but ignore additional kwargs (e.g., percentile from orchestrator)
-    ) -> Dict[str, Any]:
-        """Train IQR baseline for multiple dimensions.
-        
-        Args:
-            observed_values: List of observation dicts with dimension values
-            parameters: Algorithm parameters with 'dimension' keys
-            multiplier: IQR multiplier for bounds
-            **_: Additional kwargs (ignored for API compatibility)
-        
-        Returns:
-            Dict with per-dimension baselines
-        """
-        result = {}
-        
-        for param in parameters:
-            dimension = param.get("dimension")
-            if not dimension:
-                continue
-            
-            # Get multiplier from metadata if provided
-            dim_multiplier = multiplier
-            for meta in param.get("metadata", []):
-                if meta.get("key") == "multiplier":
-                    try:
-                        dim_multiplier = float(meta.get("value", multiplier))
-                    except (ValueError, TypeError):
-                        pass
-            
-            # Extract values for this dimension
-            values = []
-            for obs in observed_values:
-                val = obs.get(dimension)
-                if val is not None:
-                    try:
-                        values.append(float(val))
-                    except (ValueError, TypeError):
-                        pass
-            
-            if len(values) >= 4:  # Need at least 4 for quartiles
-                baseline = self.train(values, dim_multiplier)
-                result[dimension] = baseline
-                logger.info(f"[IQR] Trained dimension '{dimension}' with {len(values)} values")
-            else:
-                logger.warning(f"[IQR] Insufficient values for dimension '{dimension}': {len(values)} (need 4+)")
-        
-        return result
-    
     def detect(self, value: float, baseline: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
         """Detect if value is outside IQR bounds.
         
@@ -219,56 +166,6 @@ class IQRAlgorithm:
             "distance_from_bounds": distance,
             "q1": baseline.get("q1"),
             "q3": baseline.get("q3"),
-        }
-    
-    def detect_multi_dimension(
-        self,
-        observation: Dict[str, Any],
-        baselines: Dict[str, Dict[str, Any]],
-        parameters: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """Detect anomalies across multiple dimensions.
-        
-        Args:
-            observation: Observation dict with dimension values
-            baselines: Per-dimension baselines from train_multi_dimension
-            parameters: Algorithm parameters with 'dimension' keys
-        
-        Returns:
-            Dict with is_anomaly, dimension_results, etc.
-        """
-        dimension_results = {}
-        is_any_anomaly = False
-        
-        for param in parameters:
-            dimension = param.get("dimension")
-            if not dimension:
-                continue
-            
-            baseline = baselines.get(dimension)
-            if not baseline:
-                logger.warning(f"[IQR] No baseline for dimension '{dimension}'")
-                continue
-            
-            value = observation.get(dimension)
-            if value is None:
-                continue
-            
-            try:
-                value = float(value)
-            except (ValueError, TypeError):
-                continue
-            
-            result = self.detect(value, baseline)
-            dimension_results[dimension] = result
-            
-            if result.get("is_anomaly", False):
-                is_any_anomaly = True
-        
-        return {
-            "is_anomaly": is_any_anomaly,
-            "dimensions": dimension_results,
-            "observation": observation
         }
     
     def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
