@@ -549,13 +549,21 @@ class DetectionOrchestrator:
         
         Args:
             observation: Observation dict with dimensions and timestamp
-            timestamp_field: Timestamp field name
+            timestamp_field: Timestamp field name from query_mode
         
         Returns:
             Detection result dict with is_anomaly, dimension_results
         """
-        # Get timestamp and resolve bucket
+        # Get timestamp - try configured field first, then common fallbacks
+        # This handles the case where query uses "bucket" but series stores as "timestamp"
         ts_val = observation.get(timestamp_field)
+        if ts_val is None:
+            # Fallback to common timestamp field names
+            for fallback_field in ["timestamp", "@timestamp", "bucket", "time"]:
+                ts_val = observation.get(fallback_field)
+                if ts_val is not None:
+                    break
+        
         ts = parse_timestamp(ts_val)
         
         if ts is None:
