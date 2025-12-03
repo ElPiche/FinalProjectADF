@@ -13,8 +13,8 @@ Usage:
     from MotorDA.Dispatcher import algorithms  # Triggers registration
     
     algo = get_algorithm("zscore")
-    baseline = algo.train([10, 20, 30])
-    result = algo.detect(100, baseline)
+    baseline = algo.train([10, 20, 30], parameter={"dimension": "cpu"})
+    result = algo.detect(100, baseline, parameter={"dimension": "cpu"})
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Protocol, Dict, Any, List, Type, runtime_checkable
+from typing import Protocol, Dict, Any, List, Type, runtime_checkable, Optional, Union
 from dataclasses import dataclass
 
 import logging
@@ -41,50 +41,70 @@ ALGORITHM_REGISTRY: Dict[str, "AnomalyAlgorithm"] = {}
 
 
 def register_algorithm(cls: Type) -> Type:
-    """Decorator to auto-register an algorithm.
+    """Decorator to auto-register an algorithm with validation.
     
     Just add @register_algorithm above your class.
     The decorator:
     1. Creates an instance
-    2. Validates it implements the protocol
+    2. Validates required properties based on mode (is_multi_dimensional)
     3. Registers it by name
     4. Exports registry to shared volume (if available)
     
-    Usage:
-        @register_algorithm
-        @dataclass
-        class MyAlgorithm:
-            __algorithm_meta__ = {
-                "description": "My algorithm",
-                "parameters": ["param1"],
-            }
-            
-            @property
-            def name(self) -> str:
-                return "my_algo"
-            
-            def train(self, values, **kwargs): ...
-            def detect(self, value, baseline): ...
-            def detect_batch(self, values, baseline): ...
+    Validation rules:
+    - All algorithms MUST have: name, is_multi_dimensional
+    - If is_multi_dimensional=False: MUST have train(), detect()
+    - If is_multi_dimensional=True: MUST have train_multi_dimensional(), detect_multi_dimensional()
+    - If has resolve_multi_dimensional(): MUST have ALL four core methods
     """
     instance = cls()
     
-    # Verify protocol compliance
-    required = ['name', 'train', 'detect', 'detect_batch']
+    # === REQUIRED: Basic properties ===
+    if not hasattr(instance, 'name'):
+        logger.error(f"Registration failed: {cls.__name__} missing 'name' property")
+        raise TypeError(f"{cls.__name__} must implement 'name' property")
+    
+    if not hasattr(instance, 'is_multi_dimensional'):
+        logger.error(f"Registration failed: {cls.__name__} missing 'is_multi_dimensional' property")
+        raise TypeError(f"{cls.__name__} must implement 'is_multi_dimensional' property")
+    
+    is_multi_dim = instance.is_multi_dimensional
+    
+    # === FAIL-FAST: Validate required methods based on mode ===
+    if is_multi_dim:
+        required = ['train_multi_dimensional', 'detect_multi_dimensional']
+    else:
+        required = ['train', 'detect']
+    
     missing = [m for m in required if not hasattr(instance, m)]
     if missing:
-        raise TypeError(
-            f"Class {cls.__name__} must implement AnomalyAlgorithm protocol. "
-            f"Missing: {missing}"
-        )
+        mode_str = "multi-dimensional" if is_multi_dim else "single-dimensional"
+        logger.error(f"Registration failed: {cls.__name__} is {mode_str} but missing: {missing}")
+        raise TypeError(f"{cls.__name__} is {mode_str} but missing required methods: {missing}")
     
+    # === If has resolver, must implement ALL methods ===
+    if hasattr(instance, 'resolve_multi_dimensional'):
+        all_methods = ['train', 'detect', 'train_multi_dimensional', 'detect_multi_dimensional']
+        missing = [m for m in all_methods if not hasattr(instance, m)]
+        if missing:
+            logger.error(f"Registration failed: {cls.__name__} has resolver but missing: {missing}")
+            raise TypeError(f"{cls.__name__} has resolve_multi_dimensional() but missing: {missing}")
+    
+    # Register
     name = instance.name.lower()
     
     if name in ALGORITHM_REGISTRY:
         logger.warning(f"Overwriting existing algorithm: {name}")
     
     ALGORITHM_REGISTRY[name] = instance
-    logger.info(f"Registered algorithm: {name}")
+    
+    # Log registration with properties
+    supports_bucketing = getattr(instance, 'supports_bucketing', True)
+    min_samples = getattr(instance, 'min_training_samples', 3)
+    logger.info(
+        f"Registered algorithm: {name} "
+        f"(multi_dimensional={is_multi_dim}, supports_bucketing={supports_bucketing}, "
+        f"min_training_samples={min_samples})"
+    )
     
     # Export registry after each registration
     _export_registry_if_available()
@@ -98,23 +118,137 @@ class AnomalyAlgorithm(Protocol):
     
     All algorithms MUST implement this protocol.
     This is a PURE statistical interface - no bucket logic.
+    
+    Required Properties:
+    - name: str - Algorithm identifier
+    - is_multi_dimensional: bool - True if processes all dimensions together
+    
+    Optional Properties (with defaults):
+    - supports_bucketing: bool = True - Whether to train per time-bucket
+    - min_training_samples: int = 3 - Minimum data for training
+    
+    Required Methods (based on is_multi_dimensional):
+    - If False: train(values, parameter), detect(value, baseline, parameter)
+    - If True: train_multi_dimensional(observations, parameters), detect_multi_dimensional(observation, model, parameters)
     """
     
     @property
     def name(self) -> str:
-        """Algorithm identifier (e.g., 'zscore', 'iqr')."""
+        """Algorithm identifier (e.g., 'zscore', 'iqr', 'kmeans')."""
         ...
     
-    def train(self, values: List[float], **kwargs) -> Dict[str, Any]:
-        """Train model from values, return serializable baseline."""
+    @property
+    def is_multi_dimensional(self) -> bool:
+        """True if algorithm processes all dimensions together as vectors.
+        
+        False (single-dimensional): Each dimension has its own baseline.
+            - train() called per dimension with values list
+            - detect() called per dimension with single value
+        
+        True (multi-dimensional): Single model for all dimensions.
+            - train_multi_dimensional() called once with all observations
+            - detect_multi_dimensional() called with complete observation vector
+        """
         ...
     
-    def detect(self, value: float, baseline: Dict[str, Any]) -> Dict[str, Any]:
-        """Detect if a single value is anomalous. Must return 'is_anomaly' key."""
+    # === OPTIONAL PROPERTIES (defaults applied if not implemented) ===
+    
+    @property
+    def supports_bucketing(self) -> bool:
+        """Whether to train separate model per time-context bucket.
+        
+        True (default): Orchestrator trains per bucket (ZScore, IQR)
+        False: Orchestrator trains single global model (KMeans, DBSCAN)
+        
+        Either way, detections are TAGGED with bucket context for analysis.
+        
+        This is the ALGORITHM DEFAULT. Users can override via parameter metadata:
+        {"key": "supports_bucketing", "value": false}
+        """
+        return True
+    
+    @property
+    def min_training_samples(self) -> int:
+        """Minimum observations required for meaningful training.
+        
+        This is the ALGORITHM DEFAULT. Users can override via parameter metadata:
+        {"key": "min_training_samples", "value": 10}
+        
+        Resolution order (same pattern as percentile, n_clusters, etc.):
+        1. Check parameter.metadata for "min_training_samples" → use if found
+        2. Else use this property value
+        
+        Used by orchestrator to decide: train this bucket or fall back to global.
+        """
+        return 3
+    
+    # === SINGLE-DIMENSIONAL METHODS (required if is_multi_dimensional=False) ===
+    
+    def train(self, values: List[float], parameter: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
+        """Train model from single-dimension values, return serializable baseline.
+        
+        Args:
+            values: List of numeric values for ONE dimension
+            parameter: Full parameter dict (contains metadata for this dimension)
+                Algorithm extracts what it needs (percentile, multiplier, etc.)
+        
+        Returns:
+            Baseline dict (algorithm-specific structure)
+        """
+        ...
+    
+    def detect(self, value: float, baseline: Dict[str, Any], parameter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Detect if a single value is anomalous.
+        
+        Args:
+            value: The value to check
+            baseline: Trained baseline dict
+            parameter: Full parameter dict (contains metadata)
+        
+        Returns:
+            Must include 'is_anomaly': bool
+        """
         ...
     
     def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Detect anomalies for multiple values."""
+        """Detect anomalies for multiple values (single-dimensional batch)."""
+        ...
+    
+    # === MULTI-DIMENSIONAL METHODS (required if is_multi_dimensional=True) ===
+    
+    def train_multi_dimensional(
+        self,
+        observations: List[Dict[str, Any]],
+        parameters: List[Dict[str, Any]],
+        **kwargs
+    ) -> Dict[str, Any]:
+        """Train model from observations containing multiple dimensions.
+        
+        Args:
+            observations: List of observation dicts (each has all dimensions)
+            parameters: List of parameter dicts (one per dimension, with metadata)
+        
+        Returns:
+            Model dict (algorithm-specific structure)
+        """
+        ...
+    
+    def detect_multi_dimensional(
+        self,
+        observation: Dict[str, Any],
+        model: Dict[str, Any],
+        parameters: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Detect if an observation is anomalous.
+        
+        Args:
+            observation: Single observation dict with all dimension values
+            model: Trained model from train_multi_dimensional
+            parameters: List of parameter dicts (one per dimension)
+        
+        Returns:
+            Must include 'is_anomaly': bool
+        """
         ...
 
 
@@ -141,20 +275,64 @@ def list_algorithms() -> List[str]:
 
 
 def get_algorithm_info(name: str = None) -> Dict[str, Any]:
-    """Get metadata for algorithms (from __algorithm_meta__)."""
+    """Get metadata for algorithms (from __algorithm_meta__ and properties)."""
     if name:
         name_lower = name.lower()
         if name_lower not in ALGORITHM_REGISTRY:
             return None
         algo = ALGORITHM_REGISTRY[name_lower]
         meta = getattr(algo, '__algorithm_meta__', {})
-        return {"name": name_lower, **meta}
+        return {
+            "name": name_lower,
+            "is_multi_dimensional": algo.is_multi_dimensional,
+            "supports_bucketing": getattr(algo, 'supports_bucketing', True),
+            "min_training_samples": getattr(algo, 'min_training_samples', 3),
+            **meta
+        }
     
     result = {}
     for algo_name, algo in ALGORITHM_REGISTRY.items():
         meta = getattr(algo, '__algorithm_meta__', {})
-        result[algo_name] = {"name": algo_name, **meta}
+        result[algo_name] = {
+            "name": algo_name,
+            "is_multi_dimensional": algo.is_multi_dimensional,
+            "supports_bucketing": getattr(algo, 'supports_bucketing', True),
+            "min_training_samples": getattr(algo, 'min_training_samples', 3),
+            **meta
+        }
     return result
+
+
+def resolve_algorithm_mode(algorithm: Union[str, AnomalyAlgorithm], parameters: Optional[List[Dict[str, Any]]] = None) -> bool:
+    """Resolve whether to use multi-dimensional mode for an algorithm.
+    
+    Some algorithms may support both modes and use resolve_multi_dimensional()
+    to dynamically decide based on parameters.
+    
+    Args:
+        algorithm: The algorithm instance or algorithm name string
+        parameters: Algorithm parameters from config (optional, defaults to empty list)
+    
+    Returns:
+        True if multi-dimensional mode, False if single-dimensional
+    
+    Raises:
+        ValueError: If algorithm name not found in registry
+    """
+    # Handle string algorithm names by looking up the algorithm
+    if isinstance(algorithm, str):
+        algo_instance = get_algorithm(algorithm)
+        if algo_instance is None:
+            raise ValueError(f"Unknown algorithm: {algorithm}")
+        algorithm = algo_instance
+    
+    # Default parameters to empty list
+    if parameters is None:
+        parameters = []
+    
+    if hasattr(algorithm, 'resolve_multi_dimensional'):
+        return algorithm.resolve_multi_dimensional(parameters)
+    return algorithm.is_multi_dimensional
 
 
 # === SHARED VOLUME EXPORT ====================================================

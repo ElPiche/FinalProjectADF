@@ -64,7 +64,8 @@ class StressGeneratorConfig:
     mongodb_collection: str = "kb_configs"  # Must match ETL expectation
     bucket_collection: str = "bucket_profiles"  # For bucket profiles
     es_url: str = "http://elasticsearch-dataset:9200"
-    source_index: str = "ecommerce-logs"  # Target index for KB configs
+    source_index: str = "ecommerce-logs"  # Target index for KB configs (must match log-generator INDEX_NAME)
+    historical_days: int = 365  # Must match log-generator HISTORICAL_DAYS setting
     algorithm_registry_path: str = "/app/registry/algorithms.json"  # Shared volume
     
     mode: str = "continuous"  # continuous, burst, single
@@ -87,6 +88,7 @@ class StressGeneratorConfig:
             bucket_collection=os.getenv("BUCKET_COLLECTION", cls.bucket_collection),
             es_url=os.getenv("ES_URL", cls.es_url),
             source_index=os.getenv("SOURCE_INDEX", cls.source_index),
+            historical_days=int(os.getenv("HISTORICAL_DAYS", str(cls.historical_days))),
             algorithm_registry_path=os.getenv("ALGORITHM_REGISTRY_PATH", cls.algorithm_registry_path),
             mode=os.getenv("MODE", cls.mode),
             min_interval=int(os.getenv("MIN_INTERVAL", str(cls.min_interval))),
@@ -306,11 +308,13 @@ class KBConfigGenerator:
     def __init__(
         self,
         source_index: str = "ecommerce-logs",
+        historical_days: int = 365,
         algorithm_registry: Optional[AlgorithmRegistry] = None,
         seed: Optional[int] = None
     ):
         self.fake = Faker()
         self.source_index = source_index
+        self.historical_days = historical_days  # From log-generator settings
         self.algorithm_registry = algorithm_registry or AlgorithmRegistry()
         
         if seed is not None:
@@ -408,16 +412,56 @@ class KBConfigGenerator:
         ]
     
     def _generate_training_period(self) -> tuple:
-        """Generate a training period based on available data."""
+        """Generate a training period based on available historical data.
+        
+        IMPORTANT: Must respect the log-generator's HISTORICAL_DAYS setting.
+        Historical data spans from (now - HISTORICAL_DAYS) to (now - buffer).
+        
+        Training windows are realistic for anomaly detection:
+        - Short: 1-7 days (for quick tests)
+        - Medium: 1-4 weeks (typical use case)  
+        - Long: 1-6 months (comprehensive baseline)
+        
+        The training window is placed randomly within the available historical range.
+        """
         now = datetime.now(timezone.utc)
         
-        # Training should cover recent data (last few hours to 1 day)
-        # Since log generator creates continuous data
-        training_hours = random.randint(1, 6)  # 1-6 hours of training data
+        # Buffer: avoid the most recent data (gap between historical end and continuous start)
+        buffer_days = 1  # Safe buffer to avoid timing edge cases
         
-        # Training ends a few minutes ago to ensure data exists
-        training_end = now - timedelta(minutes=random.randint(5, 30))
-        training_start = training_end - timedelta(hours=training_hours)
+        # Maximum days back we can go (respecting log-generator's HISTORICAL_DAYS)
+        max_days_back = self.historical_days - buffer_days
+        
+        # Choose training duration type randomly
+        duration_type = random.choice(["short", "medium", "long"])
+        
+        if duration_type == "short":
+            # 1-7 days of training data
+            training_days = random.randint(1, 7)
+        elif duration_type == "medium":
+            # 1-4 weeks (7-28 days)
+            training_days = random.randint(7, 28)
+        else:  # long
+            # 1-6 months (30-180 days), capped by available data
+            training_days = random.randint(30, min(180, max_days_back - 7))
+        
+        # Ensure training_days doesn't exceed available data
+        training_days = min(training_days, max_days_back - 7)
+        
+        # Pick where to end training (must leave room for training duration)
+        # Training ends between (buffer_days + 7) and (max_days_back - training_days) days ago
+        min_end_days_ago = buffer_days + 7  # At least 7 days ago
+        max_end_days_ago = max_days_back - training_days  # Leave room for training window
+        
+        if max_end_days_ago < min_end_days_ago:
+            # Fallback if historical_days is too small
+            max_end_days_ago = min_end_days_ago
+            training_days = min(7, max_days_back - min_end_days_ago)
+        
+        end_days_ago = random.randint(min_end_days_ago, max_end_days_ago)
+        
+        training_end = now - timedelta(days=end_days_ago)
+        training_start = training_end - timedelta(days=training_days)
         
         return (
             training_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -425,10 +469,16 @@ class KBConfigGenerator:
         )
     
     def _generate_detection_start(self, training_to: str) -> str:
-        """Generate detection start time (after training ends)."""
-        training_end = datetime.fromisoformat(training_to.replace("Z", "+00:00"))
-        # Detection starts 1-5 minutes after training ends
-        detection_start = training_end + timedelta(minutes=random.randint(1, 5))
+        """Generate detection start time.
+        
+        Detection should start NOW (or very recently) since we want to detect
+        on the continuous real-time data being generated.
+        
+        The training_to is in the past (yesterday), but detection runs on current data.
+        """
+        now = datetime.now(timezone.utc)
+        # Detection starts NOW or up to 5 minutes ago
+        detection_start = now - timedelta(minutes=random.randint(0, 5))
         return detection_start.strftime("%Y-%m-%dT%H:%M:%SZ")
     
     def _generate_algorithm_metadata(self, algorithm_name: str) -> List[Dict[str, Any]]:
@@ -543,6 +593,7 @@ class StressGenerator:
         
         self.kb_generator = KBConfigGenerator(
             source_index=config.source_index,
+            historical_days=config.historical_days,
             algorithm_registry=self.algorithm_registry,
             seed=config.seed
         )
@@ -687,7 +738,8 @@ class StressGenerator:
         logger.info("=" * 60)
         logger.info("🚀 KB Stress Generator - CONTINUOUS MODE")
         logger.info("=" * 60)
-        logger.info(f"Index: {self.config.source_index}")
+        logger.info(f"Source index: {self.config.source_index}")
+        logger.info(f"Historical days: {self.config.historical_days} (training data range)")
         logger.info(f"Interval: {self.config.min_interval}-{self.config.max_interval}s")
         logger.info(f"Burst probability: {self.config.burst_probability * 100:.0f}%")
         logger.info(f"Burst size: {self.config.burst_size_min}-{self.config.burst_size_max}")

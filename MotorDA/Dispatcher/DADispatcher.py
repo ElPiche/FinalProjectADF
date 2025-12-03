@@ -23,7 +23,11 @@ from pymongo.collection import Collection
 from MotorDA.Dispatcher import algorithms  # noqa: F401
 
 # Algorithm registry - the ONLY way to access algorithms
-from MotorDA.Dispatcher.algorithm_interface import get_algorithm, list_algorithms
+from MotorDA.Dispatcher.algorithm_interface import (
+    get_algorithm, 
+    list_algorithms,
+    resolve_algorithm_mode  # Phase 4: Mode resolution
+)
 
 # Orchestrators for bucket-aware training and detection
 from MotorDA.Dispatcher.training_orchestrator import TrainingOrchestrator, DetectionOrchestrator
@@ -236,6 +240,8 @@ def run_training(
     This is the ONLY training entry point. Uses TrainingOrchestrator for
     bucket-aware training when a bucket profile is provided.
     
+    Resolves algorithm mode (single vs multi-dimensional) and passes to orchestrator.
+    
     Args:
         config: KB configuration dict
         observed_values: List of observation dicts
@@ -267,8 +273,14 @@ def run_training(
     else:
         alg_params = alg_config.get("alg_parameters", [])
     
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Phase 4: Resolve algorithm mode before creating orchestrator
+    # ─────────────────────────────────────────────────────────────────────────────
+    is_multi_dimensional = resolve_algorithm_mode(alg_name, alg_params)
+    
     logger.info(f"[TRAINING] Starting training for config {config_id}")
-    logger.info(f"[TRAINING] Algorithm: {alg_name}, Observations: {len(observed_values)}")
+    logger.info(f"[TRAINING] Algorithm: {alg_name}, Mode: {'multi-dimensional' if is_multi_dimensional else 'single-dimensional'}")
+    logger.info(f"[TRAINING] Observations: {len(observed_values)}")
     logger.info(f"[TRAINING] Parameters: {alg_params}")
     logger.info(f"[TRAINING] Bucket profile passed: {bucket_profile is not None}")
     logger.info(f"[TRAINING] Timestamp field: {timestamp_field}")
@@ -279,7 +291,8 @@ def run_training(
     orchestrator = TrainingOrchestrator(
         algorithm_name=alg_name,
         parameters=alg_params,
-        bucket_profile=bucket_profile
+        bucket_profile=bucket_profile,
+        is_multi_dimensional=is_multi_dimensional  # Phase 4: Pass mode to orchestrator
     )
     
     # Use the timestamp_field passed from caller (from KB config query_mode)
@@ -408,6 +421,12 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
     
     logger.info(f"[DETECTION] Using algorithm: {alg_name}")
     
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Phase 4: Resolve algorithm mode before creating orchestrator
+    # ─────────────────────────────────────────────────────────────────────────────
+    is_multi_dimensional = resolve_algorithm_mode(alg_name, alg_params)
+    logger.info(f"[DETECTION] Algorithm mode: {'multi-dimensional' if is_multi_dimensional else 'single-dimensional'}")
+    
     # Get bucket profile if configured
     bucket_profile = None
     bucket_profile_id = kb_config.get("bucket_profile_id")
@@ -420,12 +439,13 @@ def detect_anomaly(serie_to_detect: dict) -> Optional[dict]:
         else:
             logger.warning(f"[DETECTION] Bucket profile not found: {bucket_profile_id}")
     
-    # Create detection orchestrator
+    # Create detection orchestrator with algorithm mode
     orchestrator = DetectionOrchestrator(
         algorithm_name=alg_name,
         parameters=alg_params,
         bucket_profile=bucket_profile,
-        training_result=training_result
+        training_result=training_result,
+        is_multi_dimensional=is_multi_dimensional  # Phase 4: Pass mode to orchestrator
     )
     
     # Extract timestamp field
@@ -922,48 +942,86 @@ def watch_detection_changes(workers):
 # =============================================================================
 
 def main():
-    """Main entry point for the dispatcher."""
+    """Main entry point for the dispatcher.
+    
+    Uses two architectures:
+    1. Training: Single watcher for training_config changes (legacy, works well)
+    2. Detection: Per-KB Worker architecture via DispatcherManager (Phase 6)
+    
+    The DispatcherManager spawns one KBWorker per active KB config,
+    each with a filtered change stream for isolated detection processing.
+    """
     import threading
-    from concurrent.futures import ProcessPoolExecutor
     import os
     
-    # Number of worker processes for detection
-    # ProcessPoolExecutor bypasses GIL for CPU-bound algorithm computations
-    max_workers = int(os.environ.get("DETECTION_WORKERS", 4))
+    # Import the Per-KB Worker architecture
+    from MotorDA.Dispatcher.kb_worker import DispatcherManager
     
     logger.info("=" * 60)
     logger.info("[DISPATCHER] Starting Algorithm-Agnostic DA Dispatcher")
     logger.info(f"[DISPATCHER] Available algorithms: {list_algorithms()}")
-    logger.info(f"[DISPATCHER] Detection workers (ProcessPool): {max_workers}")
+    logger.info("[DISPATCHER] Using Per-KB Worker Architecture for Detection")
     logger.info("=" * 60)
     
-    # Create process pool for detection (CPU-bound algorithm work)
-    with ProcessPoolExecutor(max_workers=max_workers) as workers:
-        # Start watchers in separate threads
-        training_thread = threading.Thread(
-            target=watch_training_changes,
-            name="TrainingWatcher",
-            daemon=True
-        )
+    # Callback for anomaly detection results
+    def on_anomaly_detected(detection_result: dict):
+        """Handle detected anomalies from KBWorkers."""
+        kb_id = detection_result.get("kb_id", "unknown")
+        kb_name = detection_result.get("kb_name", "unknown")
         
-        detection_thread = threading.Thread(
-            target=watch_detection_changes,
-            args=(workers,),
-            name="DetectionWatcher",
-            daemon=True
-        )
+        logger.info(f"[DISPATCHER] Anomaly from KBWorker: kb={kb_name}")
         
-        training_thread.start()
-        detection_thread.start()
-        
-        logger.info("[DISPATCHER] Watchers started, waiting for changes...")
-        
-        # Keep main thread alive
+        # Get full KB config for posting to insights
         try:
-            training_thread.join()
-            detection_thread.join()
-        except KeyboardInterrupt:
-            logger.info("[DISPATCHER] Shutting down...")
+            kb_config = get_kb_collection().find_one({"_id": ObjectId(kb_id)})
+            if kb_config:
+                # Build detection result in expected format
+                full_result = {
+                    "config_id": kb_id,
+                    "config_name": kb_name,
+                    "algorithm": detection_result.get("algorithm", "unknown"),
+                    "detected_at": datetime.now(timezone.utc).isoformat(),
+                    "anomaly_count": 1,
+                    "anomalies": [{
+                        "observation": detection_result.get("observation", {}),
+                        "detection_result": detection_result
+                    }],
+                    "source_index": kb_config.get("source_index", "unknown")
+                }
+                
+                # Post to insights API
+                post_anomaly_to_insights(full_result, kb_config)
+        except Exception as e:
+            logger.error(f"[DISPATCHER] Error posting anomaly: {e}")
+    
+    # Create DispatcherManager for Per-KB Worker architecture
+    dispatcher_manager = DispatcherManager(
+        mongo_uri=MONGO_URI,
+        anomaly_db_name=MONGO_DB,
+        kb_db_name=KB_DB,
+        on_anomaly_callback=on_anomaly_detected
+    )
+    
+    # Start training watcher (legacy, single thread)
+    training_thread = threading.Thread(
+        target=watch_training_changes,
+        name="TrainingWatcher",
+        daemon=True
+    )
+    training_thread.start()
+    
+    # Start DispatcherManager (spawns KBWorkers for detection)
+    dispatcher_manager.start()
+    
+    logger.info("[DISPATCHER] Training watcher and DispatcherManager started")
+    logger.info("[DISPATCHER] Waiting for changes...")
+    
+    # Keep main thread alive
+    try:
+        training_thread.join()
+    except KeyboardInterrupt:
+        logger.info("[DISPATCHER] Shutting down...")
+        dispatcher_manager.stop()
 
 
 if __name__ == "__main__":

@@ -21,6 +21,11 @@ class ZScoreAlgorithm:
     Detects anomalies based on how many standard deviations a value
     is from the mean (z-score). Values beyond the threshold percentile
     are flagged as anomalies.
+    
+    Algorithm Properties:
+        is_multi_dimensional: False - trains/detects one dimension at a time
+        supports_bucketing: True - separate model per time-context bucket
+        min_training_samples: 3 - minimum points for valid statistics
     """
     
     __algorithm_meta__ = {
@@ -29,21 +34,62 @@ class ZScoreAlgorithm:
         "parameters": ["percentile", "min_points"],
     }
     
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Algorithm Interface Properties (Phase 2)
+    # ─────────────────────────────────────────────────────────────────────────────
+    
     @property
     def name(self) -> str:
         return "zscore"
     
-    def train(self, values: List[float], percentile: float = 99.5, min_points: int = 3, **_) -> Dict[str, Any]:
+    @property
+    def is_multi_dimensional(self) -> bool:
+        """Z-Score processes dimensions independently (single-dimensional)."""
+        return False
+    
+    @property
+    def supports_bucketing(self) -> bool:
+        """Z-Score supports separate models per time-context bucket."""
+        return True
+    
+    @property
+    def min_training_samples(self) -> int:
+        """Minimum samples needed for meaningful statistics (mean, std)."""
+        return 3
+    
+    def train(self, values: List[float], parameter: Dict[str, Any] = None, **_) -> Dict[str, Any]:
         """Train Z-Score baseline from raw float values.
         
         Args:
             values: List of numeric values
-            percentile: Percentile for threshold (default 99.5)
-            min_points: Minimum points for valid stats (default 3)
+            parameter: Algorithm parameter dict with optional metadata overrides:
+                - percentile: via metadata[key="percentile"].value (default: 99.5)
+                - min_points: via metadata[key="min_points"].value (default: 3)
         
         Returns:
             Baseline dict with mean, std, threshold
         """
+        # ─────────────────────────────────────────────────────────────────────────
+        # Resolve parameters: metadata overrides > defaults (User-Overridable Pattern)
+        # ─────────────────────────────────────────────────────────────────────────
+        percentile = 99.5  # Algorithm default
+        min_points = self.min_training_samples  # Use property as default
+        
+        if parameter:
+            for meta in parameter.get("metadata", []):
+                key = meta.get("key")
+                val = meta.get("value")
+                if key == "percentile" and val is not None:
+                    try:
+                        percentile = float(val)
+                    except (ValueError, TypeError):
+                        pass
+                elif key == "min_points" and val is not None:
+                    try:
+                        min_points = int(val)
+                    except (ValueError, TypeError):
+                        pass
+        
         from . import zscore_algorithm
         baseline = zscore_algorithm.train(values, percentile, min_points)
         return baseline.to_dict()
@@ -92,12 +138,13 @@ class ZScoreAlgorithm:
         
         return result
     
-    def detect(self, value: float, baseline: Dict[str, Any]) -> Dict[str, Any]:
+    def detect(self, value: float, baseline: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
         """Detect if a single value is anomalous based on trained baseline.
         
         Args:
             value: The value to check
             baseline: Trained baseline dict
+            parameter: Algorithm parameter dict (unused for detection, threshold from baseline)
         
         Returns:
             Dict with is_anomaly, z_score, etc.

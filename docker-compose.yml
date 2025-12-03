@@ -444,7 +444,9 @@ services:
       - MONGODB_COLLECTION=kb_configs
       - BUCKET_COLLECTION=bucket_profiles
       - ES_URL=http://elasticsearch-dataset:9200
-      - SOURCE_INDEX=ecommerce-logs
+      # IMPORTANT: These must match log-generator settings!
+      - SOURCE_INDEX=ecommerce-logs  # Must match log-generator INDEX_NAME
+      - HISTORICAL_DAYS=365          # Must match log-generator HISTORICAL_DAYS
       - MODE=continuous
       - MIN_INTERVAL=1
       - MAX_INTERVAL=3

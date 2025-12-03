@@ -30,6 +30,11 @@ class IQRAlgorithm:
     
     Values outside these bounds are flagged as anomalies.
     Default multiplier is 1.5 (standard) or 3.0 (extreme outliers only).
+    
+    Algorithm Properties:
+        is_multi_dimensional: False - trains/detects one dimension at a time
+        supports_bucketing: True - separate model per time-context bucket
+        min_training_samples: 4 - minimum points for quartile calculation
     """
     
     __algorithm_meta__ = {
@@ -38,9 +43,28 @@ class IQRAlgorithm:
         "parameters": ["multiplier"],
     }
     
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Algorithm Interface Properties (Phase 2)
+    # ─────────────────────────────────────────────────────────────────────────────
+    
     @property
     def name(self) -> str:
         return "iqr"
+    
+    @property
+    def is_multi_dimensional(self) -> bool:
+        """IQR processes dimensions independently (single-dimensional)."""
+        return False
+    
+    @property
+    def supports_bucketing(self) -> bool:
+        """IQR supports separate models per time-context bucket."""
+        return True
+    
+    @property
+    def min_training_samples(self) -> int:
+        """Minimum samples needed for quartile calculation (Q1, Q3)."""
+        return 4
     
     def _percentile(self, values: List[float], p: float) -> float:
         """Calculate percentile of sorted values."""
@@ -52,17 +76,33 @@ class IQRAlgorithm:
         c = f + 1 if f + 1 < len(sorted_vals) else f
         return sorted_vals[f] + (k - f) * (sorted_vals[c] - sorted_vals[f])
     
-    def train(self, values: List[float], multiplier: float = 1.5, **_) -> Dict[str, Any]:
+    def train(self, values: List[float], parameter: Dict[str, Any] = None, **_) -> Dict[str, Any]:
         """Train IQR baseline from values.
         
         Args:
             values: List of numeric values
-            multiplier: IQR multiplier for bounds (default 1.5)
+            parameter: Algorithm parameter dict with optional metadata overrides:
+                - multiplier: via metadata[key="multiplier"].value (default: 1.5)
         
         Returns:
             Baseline dict with q1, q3, iqr, bounds
         """
-        if len(values) < 4:
+        # ─────────────────────────────────────────────────────────────────────────
+        # Resolve parameters: metadata overrides > defaults (User-Overridable Pattern)
+        # ─────────────────────────────────────────────────────────────────────────
+        multiplier = 1.5  # Algorithm default
+        
+        if parameter:
+            for meta in parameter.get("metadata", []):
+                key = meta.get("key")
+                val = meta.get("value")
+                if key == "multiplier" and val is not None:
+                    try:
+                        multiplier = float(val)
+                    except (ValueError, TypeError):
+                        pass
+        
+        if len(values) < self.min_training_samples:
             # Not enough data for quartiles
             mean = sum(values) / len(values) if values else 0.0
             return {
@@ -147,12 +187,13 @@ class IQRAlgorithm:
         
         return result
     
-    def detect(self, value: float, baseline: Dict[str, Any]) -> Dict[str, Any]:
+    def detect(self, value: float, baseline: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
         """Detect if value is outside IQR bounds.
         
         Args:
             value: The value to check
             baseline: Trained baseline dict
+            parameter: Algorithm parameter dict (unused for detection, bounds from baseline)
         
         Returns:
             Dict with is_anomaly, bounds, etc.
