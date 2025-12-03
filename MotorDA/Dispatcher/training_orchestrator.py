@@ -391,7 +391,7 @@ class TrainingOrchestrator:
         if self.is_multi_dimensional:
             # Multi-dimensional: delegate to algorithm's batch method
             baseline = self._algorithm_instance.train_multi_dimension(
-                observed_values=observations,
+                observations=observations,
                 parameters=self.parameters,
                 percentile=percentile
             )

@@ -545,24 +545,46 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
         detection_details = anomaly.get("detection_result", {})
         
         # Get dimension results for algorithm_details
-        # The algorithm returns 'dimensions' key, not 'dimension_results'
-        dimension_results = detection_details.get("dimensions", {}) or detection_details.get("dimension_results", {})
+        # Single-dim algorithms return 'dimensions' or 'dimension_results'
+        # Multi-dim algorithms return 'dimension_contributions'
+        dimension_results = (
+            detection_details.get("dimensions", {}) or 
+            detection_details.get("dimension_results", {}) or
+            detection_details.get("dimension_contributions", {})
+        )
+        
+        # For multi-dim, check anomalous_dimensions list
+        anomalous_dims = detection_details.get("anomalous_dimensions", [])
         
         # Find the first anomalous dimension to use as primary metric
         primary_metric = None
         primary_value = None
-        for dim_name, dim_result in dimension_results.items():
-            if dim_result.get("is_anomaly", False):
-                primary_metric = dim_name
-                primary_value = dim_result.get("value")
-                break
         
+        # Try from anomalous_dimensions list first (multi-dim)
+        if anomalous_dims and dimension_results:
+            primary_metric = anomalous_dims[0]
+            dim_data = dimension_results.get(primary_metric, {})
+            primary_value = dim_data.get("value")
+        
+        # Fallback: look for is_anomaly flag in dimension_results
         if not primary_metric:
-            # Fallback to first dimension
+            for dim_name, dim_result in dimension_results.items():
+                if dim_result.get("is_anomaly", False):
+                    primary_metric = dim_name
+                    primary_value = dim_result.get("value")
+                    break
+        
+        # Fallback: use first dimension
+        if not primary_metric:
             for dim_name, dim_result in dimension_results.items():
                 primary_metric = dim_name
                 primary_value = dim_result.get("value")
                 break
+        
+        # Multi-dim fallback: use distance as value if no dimension found
+        if not primary_metric and detection_details.get("distance") is not None:
+            primary_metric = "multi_dimensional"
+            primary_value = detection_details.get("distance")
         
         # Get timestamp - could be 'bucket' or 'timestamp' depending on query_mode
         ts = observation.get("bucket") or observation.get("timestamp") or detection_details.get("timestamp") or detected_at

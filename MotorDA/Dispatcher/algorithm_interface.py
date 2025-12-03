@@ -100,10 +100,11 @@ def register_algorithm(cls: Type) -> Type:
     # Log registration with properties
     supports_bucketing = getattr(instance, 'supports_bucketing', True)
     min_samples = getattr(instance, 'min_training_samples', 3)
+    supports_both_modes = hasattr(instance, 'resolve_multi_dimensional')
     logger.info(
         f"Registered algorithm: {name} "
-        f"(multi_dimensional={is_multi_dim}, supports_bucketing={supports_bucketing}, "
-        f"min_training_samples={min_samples})"
+        f"(multi_dimensional={is_multi_dim}, supports_both_modes={supports_both_modes}, "
+        f"supports_bucketing={supports_bucketing}, min_training_samples={min_samples})"
     )
     
     # Export registry after each registration
@@ -285,6 +286,7 @@ def get_algorithm_info(name: str = None) -> Dict[str, Any]:
         return {
             "name": name_lower,
             "is_multi_dimensional": algo.is_multi_dimensional,
+            "supports_both_modes": hasattr(algo, 'resolve_multi_dimensional'),
             "supports_bucketing": getattr(algo, 'supports_bucketing', True),
             "min_training_samples": getattr(algo, 'min_training_samples', 3),
             **meta
@@ -296,6 +298,7 @@ def get_algorithm_info(name: str = None) -> Dict[str, Any]:
         result[algo_name] = {
             "name": algo_name,
             "is_multi_dimensional": algo.is_multi_dimensional,
+            "supports_both_modes": hasattr(algo, 'resolve_multi_dimensional'),
             "supports_bucketing": getattr(algo, 'supports_bucketing', True),
             "min_training_samples": getattr(algo, 'min_training_samples', 3),
             **meta
