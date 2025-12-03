@@ -584,6 +584,13 @@ class AnomalyAlgorithm(Protocol):
     def min_training_samples(self) -> int:
         """Minimum observations required for meaningful training.
         
+        This is the ALGORITHM DEFAULT. Users can override via parameter metadata:
+        {"key": "min_training_samples", "value": 10}
+        
+        Resolution order (same pattern as percentile, n_clusters, etc.):
+        1. Check parameter.metadata for "min_training_samples" → use if found
+        2. Else use this property value
+        
         Used by orchestrator to decide: train this bucket or fall back to global.
         """
         return 3  # Default for simple algorithms
@@ -614,6 +621,23 @@ def min_training_samples(self) -> int:
 ### 8.4 Orchestrator Bucketing Logic
 
 ```python
+def _resolve_min_training_samples(self, algorithm) -> int:
+    """Resolve min_training_samples with user override support.
+    
+    Priority:
+    1. User override in parameter metadata
+    2. Algorithm default property
+    """
+    # Check for user override in any parameter's metadata
+    for param in self.parameters:
+        meta_list = param.get("metadata") or param.get("algorithm_metadata", [])
+        for meta in meta_list:
+            if meta.get("key") == "min_training_samples":
+                return int(meta.get("value"))
+    
+    # Fall back to algorithm default
+    return getattr(algorithm, 'min_training_samples', 3)
+
 def train(self, observations: List[Dict], timestamp_field: str) -> Dict:
     algorithm = get_algorithm(self.algorithm_name)
     
@@ -625,7 +649,7 @@ def train(self, observations: List[Dict], timestamp_field: str) -> Dict:
     
     # Check if algorithm supports bucketing
     supports_bucketing = getattr(algorithm, 'supports_bucketing', True)
-    min_samples = getattr(algorithm, 'min_training_samples', 3)
+    min_samples = self._resolve_min_training_samples(algorithm)
     
     if supports_bucketing and self.bucket_resolver:
         # Train per bucket (ZScore, IQR)

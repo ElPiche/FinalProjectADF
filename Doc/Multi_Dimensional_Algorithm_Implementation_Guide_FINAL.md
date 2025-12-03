@@ -47,6 +47,16 @@ Optional properties (with defaults):
 └── min_training_samples: int = 3      → Minimum data for training (50 for KMeans)
 ```
 
+**Note:** Algorithm parameters are USER-OVERRIDABLE via parameter metadata.
+This pattern applies to ALL algorithm-specific settings (`min_training_samples`, `percentile`, `n_clusters`, etc.):
+
+```
+Resolution order (same for all parameters):
+├── 1. Check parameter.metadata for key (e.g., "min_training_samples", "percentile")
+│      └── IF found → use user's value
+└── 2. ELSE → use algorithm's default
+```
+
 ### 2.4 Registration Validation (Fail-Fast)
 
 ```
@@ -93,6 +103,13 @@ ZScore.train(values, parameter):
 
 → Always check: `param.get("metadata") or param.get("algorithm_metadata", [])`
 
+**User-Overridable Parameters:**
+| Parameter | Algorithm Default | User Override Key |
+|-----------|-------------------|-------------------|
+| `min_training_samples` | ZScore: 3, KMeans: 50 | `"min_training_samples"` |
+| `percentile` | 99.5 | `"percentile"` |
+| `n_clusters` | 5 | `"n_clusters"` |
+
 ---
 
 ## 4. Control Flow
@@ -119,6 +136,10 @@ TRAINING ORCHESTRATOR:
 ┌─────────────────────────────────────────────────────────────┐
 │  INPUT: observations, is_multi_dimensional, parameters      │
 ├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  0. Resolve min_training_samples:                           │
+│     ├── Check parameters metadata for override              │
+│     └── Else use algorithm.min_training_samples             │
 │                                                             │
 │  1. Train GLOBAL model (all data)                           │
 │                                                             │
