@@ -1247,20 +1247,21 @@ async def generate_historical_data_async(es_manager: ElasticsearchManager, days:
                     except Exception as e:
                         logger.warning(f"Stream error: {e}")
             
-            # Progress report
+            # Progress report (based on DAYS completed, not docs - guaranteed to reach 100%)
             now = time.time()
             if now - last_report_time >= report_interval:
                 elapsed = now - start_time
-                rate = total_docs / elapsed if elapsed > 0 else 0
-                pct = (total_docs / estimated_total) * 100
-                eta = (estimated_total - total_docs) / rate if rate > 0 else 0
+                docs_per_sec = total_docs / elapsed if elapsed > 0 else 0
+                days_per_sec = days_completed / elapsed if elapsed > 0 else 0
+                pct = (days_completed / days) * 100  # % based on days, not docs
+                remaining_days = days - days_completed
+                eta = remaining_days / days_per_sec if days_per_sec > 0 else 0
                 pending = len(pending_streams)
                 
                 logger.info(
-                    f"Progress: {pct:.1f}% | "
-                    f"{total_docs:,} docs | "
-                    f"{rate:,.0f} docs/sec | "
-                    f"ETA: {eta/60:.1f} min | "
+                    f"Progress: {pct:.1f}% | Day {days_completed}/{days} | "
+                    f"{total_docs:,} docs | {docs_per_sec:,.0f} docs/sec | "
+                    f"{days_per_sec:.2f} days/sec | ETA: {eta/60:.1f} min | "
                     f"pending: {pending}"
                 )
                 last_report_time = now

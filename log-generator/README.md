@@ -36,10 +36,8 @@ The main generator (`ecommerce_log_generator.py`) simulates a complete online st
 | File | Description |
 |------|-------------|
 | `ecommerce_log_generator.py` | **Main** - Smart e-commerce simulation (writes to `ecommerce-logs`) |
-| `unified_log_generator.py` | Legacy generic web logs (writes to `app-logs`) |
-| `continuous_log_generator.py` | Real-time log generation only |
-| `generate_historical_data.py` | Standalone historical data generator |
-| `add_recent_data.py` | Add recent data to existing index |
+| `requirements.txt` | Python dependencies |
+| `Dockerfile` | Container build configuration |
 
 ---
 
@@ -61,13 +59,6 @@ docker run -e ES_HOST=http://elasticsearch:9200 ecommerce-log-gen
 ```bash
 pip install -r requirements.txt
 python ecommerce_log_generator.py
-```
-
-### Run Legacy Generator
-
-```bash
-# Override CMD to use old generator
-docker run ecommerce-log-gen python -u unified_log_generator.py
 ```
 
 ---

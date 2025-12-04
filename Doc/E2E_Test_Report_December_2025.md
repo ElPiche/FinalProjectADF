@@ -3,7 +3,7 @@
 > **Status**: ✅ **ALL TESTS PASSING**  
 > **Date**: December 2, 2025  
 > **Branch**: `feature/fix-train-orchestrator`  
-> **Last Updated**: December 4, 2025 - Terminology Standardization Session
+> **Last Updated**: December 4, 2025 - MongoDB Unique Index Fix
 
 ## Executive Summary
 
@@ -23,6 +23,60 @@ The modular algorithm architecture has been fully validated with end-to-end test
 - ✅ **modify_kb_config stress test: 20 operations (16 pass, 4 properly rejected)**
 - ✅ **Terminology standardization: `config_id` → `kb_id`, `baseline` → `model`**
 - ✅ **Test file audit: 26 files clean, 1 deleted (legacy API)**
+- ✅ **MongoDB unique index auto-creation fix for Extractor (prevents duplicate kbId errors)**
+
+---
+
+## Session Summary: December 4, 2025 (Part 2) - MongoDB Unique Index Fix
+
+### Bug Report Investigation
+
+A friend reported the following error in their Extractor logs:
+
+```
+IncorrectResultSizeDataAccessException: Query { "kbId" : "..." } returned non unique result
+```
+
+### Root Cause Analysis
+
+1. **Entity Annotations**: Both `TrainConfig.java` and `SchedulerConfig.java` have `@Indexed(unique = true)` on the `kbId` field
+2. **Missing Configuration**: Spring Data MongoDB requires `spring.data.mongodb.auto-index-creation=true` to automatically create indexes from annotations
+3. **Result**: Without this property, the unique constraint annotations were ignored, allowing duplicate documents
+
+### Fix Applied
+
+**File Modified**: `extractor/src/main/resources/application.properties`
+
+```properties
+# Enable automatic creation of indexes from @Indexed annotations
+spring.data.mongodb.auto-index-creation=true
+```
+
+### Manual Index Creation (For Existing Deployments)
+
+For environments that already have data without the unique index:
+
+```javascript
+use anomaly_detection;
+db.training_config.createIndex({ kb_id: 1 }, { unique: true, name: "unique_kb_id" });
+db.scheduler_configs.createIndex({ kb_id: 1 }, { unique: true, name: "unique_kb_id" });
+```
+
+### Verification
+
+| Check | Result |
+|-------|--------|
+| `spring.data.mongodb.auto-index-creation=true` in properties | ✅ Added |
+| `@Indexed(unique = true)` on `TrainConfig.kbId` | ✅ Present (line 29) |
+| `@Indexed(unique = true)` on `SchedulerConfig.kbId` | ✅ Present (line 25) |
+| Manual index created on `training_config.kb_id` | ✅ Created |
+| Extractor container rebuilt and restarted | ✅ Completed |
+
+### Impact
+
+- **New Deployments**: Indexes will be auto-created on first startup
+- **Existing Deployments**: Manual index creation needed if duplicates exist
+- **Race Condition Prevention**: The unique index will prevent duplicate kbId documents even under concurrent writes
 
 ---
 

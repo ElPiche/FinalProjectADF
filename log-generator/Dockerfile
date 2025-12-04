@@ -7,9 +7,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy applications
+# Copy application
 COPY ecommerce_log_generator.py .
-COPY unified_log_generator.py .
 
 # Default environment variables for E-Commerce Generator
 ENV ES_HOST=http://elasticsearch-dataset:9200
