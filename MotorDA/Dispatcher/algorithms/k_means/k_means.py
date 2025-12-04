@@ -117,8 +117,17 @@ class KMeans:
         # global threshold
         global_threshold = float(np.percentile(distances, percentile))
 
+
+        # build named centroids directly as the official centroids structure
+        feature_order = [p["dimension"] for p in parameters]
+
+        centroids_named = [
+            {feature_order[i]: float(c[i]) for i in range(len(feature_order))}
+            for c in centroids
+        ]
+
         result: Dict[str, Any] = {
-            "centroids": centroids.tolist(), # might be interesting to save the dimension name inside this list
+            "centroids": centroids_named,
             "n_clusters": n_clusters,
             "percentile": percentile,
             "threshold": global_threshold,
@@ -146,11 +155,11 @@ class KMeans:
     def detect_multi_dimensional(
         self,
         observation: Dict[str, Any],
-        model: Dict[str, Any],
+        models: Dict[str, Any],
         parameters: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Detect anomaly for a single observation dict using the trained model.
+        Detect anomaly for a single observation dict using the trained models.
 
         Returns:
             {
@@ -162,12 +171,18 @@ class KMeans:
               "feature_vector": [...],
             }
         """
-        # Validate model and parameters
-        if "centroids" not in model:
+        # Validate models and parameters
+        if "centroids" not in models:
             raise ValueError("Model missing 'centroids'")
 
-        centroids = np.array(model["centroids"], dtype=float)  # (k, d)
-        feature_order = model.get("feature_order")
+        # convert list[dict] -> numeric matrix in feature_order
+        feature_order = models["feature_order"]
+        centroids = np.array([
+            [float(c[f]) for f in feature_order]
+            for c in models["centroids"]
+        ], dtype=float)
+
+        feature_order = models.get("feature_order")
         if not feature_order:
             # fallback: use parameters order
             feature_order = [p["dimension"] for p in parameters]
@@ -183,9 +198,10 @@ class KMeans:
         assigned = int(np.argmin(dists))
         distance = float(dists[assigned])
 
-        # choose threshold: cluster-specific if available, else model["threshold"]
-        chosen_threshold = float(model.get("threshold", 0.0))
-        cluster_thresholds = model.get("cluster_thresholds")
+        # choose threshold: cluster-specific if available, else models["threshold"]
+        chosen_threshold = float(models.get("threshold", 0.0))
+        cluster_thresholds = models.get("cluster_thresholds")
+        
         if cluster_thresholds:
             # safe-guard lengths
             if assigned < len(cluster_thresholds):
