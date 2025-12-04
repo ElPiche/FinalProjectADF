@@ -724,13 +724,14 @@ def watch_training_changes():
     
     collection = get_collection(TRAINING_CONFIG_COLLECTION)
     
-    # Watch for inserts and updates where is_trained becomes false
-    #TODO: check for replace operationType
+    # Watch for inserts, updates, AND replaces where is_trained becomes false
+    # NOTE: Spring Data MongoDB's save() with existing _id triggers a REPLACE, not UPDATE
     pipeline = [
         {"$match": {
             "$or": [
                 {"operationType": "insert"},
-                {"operationType": "update"}
+                {"operationType": "update"},
+                {"operationType": "replace"}
             ]
         }}
     ]
