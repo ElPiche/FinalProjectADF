@@ -1,5 +1,3 @@
-#TODO: rename file to orchestrator.py
-
 """Training Orchestrator - Algorithm-Agnostic Training and Detection.
 
 This module provides bucket-aware training and detection orchestration.

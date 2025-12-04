@@ -13,7 +13,6 @@ from unittest.mock import Mock, MagicMock, patch
 from MotorDA.Dispatcher.training_orchestrator import (
     TrainingOrchestrator,
     DetectionOrchestrator,
-    run_zscore_training_bucketed,
 )
 from MotorDA.Dispatcher.bucket_resolver import (
     BucketResolver, 
@@ -220,11 +219,11 @@ class TestTrainingOrchestratorTraining:
 
 
 class TestDetectionOrchestrator:
-    """Test detection with bucket-aware baseline lookup."""
+    """Test detection with bucket-aware model lookup."""
     
     def test_detect_single_value(self):
         """Detect a single value."""
-        baselines = {
+        models = {
             "request_count": {
                 "kb_id": "test",
                 "dimension": "request_count",
@@ -244,7 +243,7 @@ class TestDetectionOrchestrator:
         
         orchestrator = DetectionOrchestrator(
             bucket_resolver=None,
-            baselines=baselines,
+            models=models,
         )
         
         # Normal value
@@ -260,7 +259,7 @@ class TestDetectionOrchestrator:
     
     def test_detect_anomaly(self):
         """Detect an anomalous value."""
-        baselines = {
+        models = {
             "request_count": {
                 "buckets": {
                     "global_default": {
@@ -277,7 +276,7 @@ class TestDetectionOrchestrator:
         
         orchestrator = DetectionOrchestrator(
             bucket_resolver=None,
-            baselines=baselines,
+            models=models,
         )
         
         # Anomalous value (z-score = 5.0 > threshold 2.0)
@@ -294,7 +293,7 @@ class TestDetectionOrchestrator:
         """Detect with missing dimension returns error."""
         orchestrator = DetectionOrchestrator(
             bucket_resolver=None,
-            baselines={},
+            models={},
         )
         
         result = orchestrator.detect(
@@ -311,7 +310,7 @@ class TestDetectionOrchestrator:
         profile = create_workday_weekend_profile()
         resolver = BucketResolver(profile)
         
-        baselines = {
+        models = {
             "request_count": {
                 "buckets": {
                     "workday": {
@@ -322,7 +321,7 @@ class TestDetectionOrchestrator:
                         "percentile": 99.5,
                     },
                     "weekend": {
-                        "mean": 50.0,  # Different baseline for weekend
+                        "mean": 50.0,  # Different model for weekend
                         "std": 5.0,
                         "threshold": 2.0,
                         "data_points": 50,
@@ -335,10 +334,10 @@ class TestDetectionOrchestrator:
         
         orchestrator = DetectionOrchestrator(
             bucket_resolver=resolver,
-            baselines=baselines,
+            models=models,
         )
         
-        # Monday - uses workday baseline
+        # Monday - uses workday model
         result = orchestrator.detect(
             dimension="request_count",
             timestamp=datetime(2025, 11, 24, 10, 0, tzinfo=tz.utc),  # Monday
@@ -347,7 +346,7 @@ class TestDetectionOrchestrator:
         assert result["bucket_key"] == "workday"
         assert result["z_score"] == pytest.approx(0.0)
         
-        # Saturday - uses weekend baseline  
+        # Saturday - uses weekend model  
         result = orchestrator.detect(
             dimension="request_count",
             timestamp=datetime(2025, 11, 29, 10, 0, tzinfo=tz.utc),  # Saturday
@@ -358,7 +357,7 @@ class TestDetectionOrchestrator:
     
     def test_detect_missing_bucket_uses_fallback(self):
         """Detection with missing bucket uses global fallback."""
-        baselines = {
+        models = {
             "request_count": {
                 "buckets": {
                     "workday": {
@@ -385,10 +384,10 @@ class TestDetectionOrchestrator:
         
         orchestrator = DetectionOrchestrator(
             bucket_resolver=resolver,
-            baselines=baselines,
+            models=models,
         )
         
-        # Saturday - weekend bucket not in baselines, uses global_fallback
+        # Saturday - weekend bucket not in models, uses global_fallback
         result = orchestrator.detect(
             dimension="request_count",
             timestamp=datetime(2025, 11, 29, 10, 0, tzinfo=tz.utc),  # Saturday
@@ -400,7 +399,7 @@ class TestDetectionOrchestrator:
     
     def test_detect_batch(self):
         """Batch detection."""
-        baselines = {
+        models = {
             "request_count": {
                 "buckets": {
                     "global_default": {
@@ -417,7 +416,7 @@ class TestDetectionOrchestrator:
         
         orchestrator = DetectionOrchestrator(
             bucket_resolver=None,
-            baselines=baselines,
+            models=models,
         )
         
         df = pd.DataFrame({
@@ -452,7 +451,7 @@ class TestEndToEndOrchestration:
         })
         
         # Train
-        baseline_result = train_orch.train_dimension(
+        model_result = train_orch.train_dimension(
             kb_id="test_kb",
             dimension="request_count",
             df_train=df_train,
@@ -461,7 +460,7 @@ class TestEndToEndOrchestration:
         # Setup detection
         detect_orch = DetectionOrchestrator(
             bucket_resolver=None,
-            baselines={"request_count": baseline_result},
+            models={"request_count": model_result},
         )
         
         # Normal detection
@@ -509,20 +508,20 @@ class TestEndToEndOrchestration:
         })
         
         # Train
-        baseline_result = train_orch.train_dimension(
+        model_result = train_orch.train_dimension(
             kb_id="test_kb",
             dimension="request_count",
             df_train=df_train,
         )
         
-        # Verify different baselines
-        assert baseline_result["buckets"]["workday"]["mean"] > 900
-        assert baseline_result["buckets"]["weekend"]["mean"] < 600
+        # Verify different models
+        assert model_result["buckets"]["workday"]["mean"] > 900
+        assert model_result["buckets"]["weekend"]["mean"] < 600
         
         # Detection orchestrator
         detect_orch = DetectionOrchestrator(
             bucket_resolver=resolver,
-            baselines={"request_count": baseline_result},
+            models={"request_count": model_result},
         )
         
         # Monday - 1000 is normal

@@ -20,27 +20,27 @@ class TestMockTrain:
     def test_train_basic(self, mock_algo):
         """Train on simple values."""
         values = [10, 20, 30, 40, 50]
-        baseline = mock_algo.train(values)
+        model = mock_algo.train(values)
         
-        assert baseline["mean"] == 30.0
-        assert "threshold" in baseline
-        assert baseline["data_points"] == 5
+        assert model["mean"] == 30.0
+        assert "threshold" in model
+        assert model["data_points"] == 5
     
     def test_train_empty(self, mock_algo):
         """Empty values should use defaults."""
-        baseline = mock_algo.train([])
+        model = mock_algo.train([])
         
-        assert baseline["mean"] == 0.0
-        assert baseline["threshold"] == 10.0
+        assert model["mean"] == 0.0
+        assert model["threshold"] == 10.0
     
     def test_train_custom_percentile(self, mock_algo):
         """Custom percentile affects threshold."""
         values = [10, 20, 30]
         
-        baseline_low = mock_algo.train(values, percentile=50.0)
-        baseline_high = mock_algo.train(values, percentile=99.0)
+        model_low = mock_algo.train(values, percentile=50.0)
+        model_high = mock_algo.train(values, percentile=99.0)
         
-        assert baseline_high["threshold"] > baseline_low["threshold"]
+        assert model_high["threshold"] > model_low["threshold"]
 
 
 class TestMockDetect:
@@ -48,9 +48,9 @@ class TestMockDetect:
     
     def test_detect_normal_value(self, mock_algo):
         """Value close to mean should not be anomaly."""
-        baseline = {"mean": 100.0, "threshold": 20.0}
+        model = {"mean": 100.0, "threshold": 20.0}
         
-        result = mock_algo.detect(105.0, baseline)
+        result = mock_algo.detect(105.0, model)
         
         assert result["is_anomaly"] is False
         assert result["value"] == 105.0
@@ -58,23 +58,23 @@ class TestMockDetect:
     
     def test_detect_anomaly(self, mock_algo):
         """Value far from mean should be anomaly."""
-        baseline = {"mean": 100.0, "threshold": 20.0}
+        model = {"mean": 100.0, "threshold": 20.0}
         
-        result = mock_algo.detect(150.0, baseline)
+        result = mock_algo.detect(150.0, model)
         
         assert result["is_anomaly"] is True
         assert result["deviation"] == 50.0
     
     def test_detect_boundary(self, mock_algo):
         """Value at threshold boundary."""
-        baseline = {"mean": 100.0, "threshold": 20.0}
+        model = {"mean": 100.0, "threshold": 20.0}
         
         # Exactly at threshold
-        result = mock_algo.detect(120.0, baseline)
+        result = mock_algo.detect(120.0, model)
         assert result["is_anomaly"] is False  # deviation equals threshold, not greater
         
         # Just over threshold
-        result = mock_algo.detect(121.0, baseline)
+        result = mock_algo.detect(121.0, model)
         assert result["is_anomaly"] is True
 
 
@@ -83,10 +83,10 @@ class TestMockDetectBatch:
     
     def test_detect_batch_mixed(self, mock_algo):
         """Batch with normal and anomalous values."""
-        baseline = {"mean": 100.0, "threshold": 20.0}
+        model = {"mean": 100.0, "threshold": 20.0}
         
         values = [100.0, 110.0, 150.0, 50.0]  # normal, normal, anomaly, anomaly
-        results = mock_algo.detect_batch(values, baseline)
+        results = mock_algo.detect_batch(values, model)
         
         assert len(results) == 4
         assert results[0]["is_anomaly"] is False

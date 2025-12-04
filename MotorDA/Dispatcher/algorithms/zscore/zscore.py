@@ -106,7 +106,7 @@ class ZScoreAlgorithm:
             Dict with is_anomaly, z_score, etc.
         """
         from . import zscore_algorithm
-        model_obj = zscore_algorithm.ZScoreBaseline.from_dict(model)
+        model_obj = zscore_algorithm.ZScoreModel.from_dict(model)
         result = zscore_algorithm.detect(value, model_obj)
         return result.to_dict()
     

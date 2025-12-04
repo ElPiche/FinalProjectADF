@@ -42,23 +42,23 @@ class TestZScoreAlgorithm:
     
     def test_detect_normal_value(self):
         algo = ZScoreAlgorithm()
-        baseline = algo.train([10, 20, 30, 40, 50])
-        result = algo.detect(30.0, baseline)
+        model = algo.train([10, 20, 30, 40, 50])
+        result = algo.detect(30.0, model)
         
         assert result["is_anomaly"] is False
         assert "z_score" in result
     
     def test_detect_anomaly(self):
         algo = ZScoreAlgorithm()
-        baseline = algo.train([10, 20, 30, 40, 50])
-        result = algo.detect(1000.0, baseline)
+        model = algo.train([10, 20, 30, 40, 50])
+        result = algo.detect(1000.0, model)
         
         assert result["is_anomaly"] is True
     
     def test_detect_batch(self):
         algo = ZScoreAlgorithm()
-        baseline = algo.train([10, 20, 30, 40, 50])
-        results = algo.detect_batch([30.0, 1000.0, 25.0], baseline)
+        model = algo.train([10, 20, 30, 40, 50])
+        results = algo.detect_batch([30.0, 1000.0, 25.0], model)
         
         assert len(results) == 3
         assert results[0]["is_anomaly"] is False
@@ -120,11 +120,11 @@ class TestRegisterAlgorithm:
             def train(self, values: List[float], percentile: float = 99.5, **kwargs) -> Dict[str, Any]:
                 return {"mean": sum(values) / len(values)}
             
-            def detect(self, value: float, baseline: Dict[str, Any]) -> Dict[str, Any]:
-                return {"is_anomaly": value > baseline["mean"] * 2}
+            def detect(self, value: float, model: Dict[str, Any]) -> Dict[str, Any]:
+                return {"is_anomaly": value > model["mean"] * 2}
             
-            def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
-                return [self.detect(v, baseline) for v in values]
+            def detect_batch(self, values: List[float], model: Dict[str, Any]) -> List[Dict[str, Any]]:
+                return [self.detect(v, model) for v in values]
         
         # Register mock algorithm
         mock = MockAlgorithm()
@@ -174,8 +174,8 @@ class TestProtocolCompliance:
     
     def test_detect_returns_dict_with_is_anomaly(self):
         algo = ZScoreAlgorithm()
-        baseline = algo.train([1, 2, 3, 4, 5])
-        result = algo.detect(3.0, baseline)
+        model = algo.train([1, 2, 3, 4, 5])
+        result = algo.detect(3.0, model)
         
         assert "is_anomaly" in result
         assert isinstance(result["is_anomaly"], bool)
@@ -190,14 +190,14 @@ class TestEndToEnd:
         
         # Train
         training_data = [100, 105, 98, 102, 101, 99, 103, 97, 104, 100]
-        baseline = algo.train(training_data, percentile=99.5)
+        model = algo.train(training_data, percentile=99.5)
         
         # Detect normal value
-        normal_result = algo.detect(101.0, baseline)
+        normal_result = algo.detect(101.0, model)
         assert normal_result["is_anomaly"] is False
         
         # Detect anomaly
-        anomaly_result = algo.detect(500.0, baseline)
+        anomaly_result = algo.detect(500.0, model)
         assert anomaly_result["is_anomaly"] is True
     
     def test_realistic_traffic_pattern(self):
@@ -209,16 +209,16 @@ class TestEndToEnd:
         
         # Normal traffic pattern (mean ~1000, std ~50)
         normal_traffic = [1000 + random.gauss(0, 50) for _ in range(100)]
-        baseline = algo.train(normal_traffic)
+        model = algo.train(normal_traffic)
         
         # Normal value should not be anomaly
-        normal_result = algo.detect(1025.0, baseline)
+        normal_result = algo.detect(1025.0, model)
         assert normal_result["is_anomaly"] is False
         
         # Spike should be anomaly
-        spike_result = algo.detect(2000.0, baseline)
+        spike_result = algo.detect(2000.0, model)
         assert spike_result["is_anomaly"] is True
         
         # Crash should be anomaly
-        crash_result = algo.detect(100.0, baseline)
+        crash_result = algo.detect(100.0, model)
         assert crash_result["is_anomaly"] is True

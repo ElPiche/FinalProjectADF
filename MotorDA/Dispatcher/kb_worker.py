@@ -466,18 +466,18 @@ class DispatcherManager:
         """Get the trained_models collection."""
         return self._get_mongo_client()[self.anomaly_db_name]["trained_models"]
     
-    def _get_training_result(self, config_id: str) -> Optional[Dict[str, Any]]:
+    def _get_training_result(self, kb_id: str) -> Optional[Dict[str, Any]]:
         """Get trained model for a KB config.
         
         Args:
-            config_id: KB configuration ID
+            kb_id: KB configuration ID
         
         Returns:
             Training result dict or None
         """
         collection = self._get_trained_models_collection()
         try:
-            result = collection.find_one({"config_id": ObjectId(config_id)})
+            result = collection.find_one({"kb_id": ObjectId(kb_id)})
             return result
         except Exception:
             return None
@@ -499,11 +499,11 @@ class DispatcherManager:
             return False
         
         # Check training is complete (has trained model)
-        config_id = str(kb_config.get("_id", ""))
-        if not config_id:
+        kb_id = str(kb_config.get("_id", ""))
+        if not kb_id:
             return False
         
-        training_result = self._get_training_result(config_id)
+        training_result = self._get_training_result(kb_id)
         return training_result is not None
     
     def _spawn_worker(self, kb_config: Dict[str, Any]):
@@ -515,32 +515,32 @@ class DispatcherManager:
         Args:
             kb_config: KB configuration document
         """
-        config_id = str(kb_config["_id"])
+        kb_id = str(kb_config["_id"])
         
-        training_result = self._get_training_result(config_id)
+        training_result = self._get_training_result(kb_id)
         if not training_result:
-            logger.warning(f"[MANAGER] No training result for KB {config_id}, skipping")
+            logger.warning(f"[MANAGER] No training result for KB {kb_id}, skipping")
             return
         
         with self._workers_lock:
-            existing_worker = self._workers.get(config_id)
+            existing_worker = self._workers.get(kb_id)
             if existing_worker:
                 # Check if training result has changed (compare updated_at timestamp)
                 old_updated_at = existing_worker.training_result.get("updated_at")
                 new_updated_at = training_result.get("updated_at")
                 
-                logger.debug(f"[MANAGER] Worker {config_id[:8]} exists, checking for update: old={old_updated_at}, new={new_updated_at}")
+                logger.debug(f"[MANAGER] Worker {kb_id[:8]} exists, checking for update: old={old_updated_at}, new={new_updated_at}")
                 
                 if old_updated_at == new_updated_at:
                     return  # No change, keep existing worker
                 
                 # Training result changed - restart worker
-                logger.info(f"[MANAGER] Training result changed for KB {config_id}, restarting worker")
+                logger.info(f"[MANAGER] Training result changed for KB {kb_id}, restarting worker")
                 existing_worker.stop()
-                del self._workers[config_id]
+                del self._workers[kb_id]
             
             worker = KBWorker(
-                kb_id=config_id,
+                kb_id=kb_id,
                 kb_config=kb_config,
                 training_result=training_result,
                 mongo_client=self._get_mongo_client(),
@@ -551,21 +551,21 @@ class DispatcherManager:
                 worker.set_anomaly_callback(self.on_anomaly_callback)
             
             worker.start()
-            self._workers[config_id] = worker
+            self._workers[kb_id] = worker
             
-            logger.info(f"[MANAGER] Spawned worker for KB {config_id} ({kb_config.get('name', 'unknown')})")
+            logger.info(f"[MANAGER] Spawned worker for KB {kb_id} ({kb_config.get('name', 'unknown')})")
     
-    def _stop_worker(self, config_id: str):
+    def _stop_worker(self, kb_id: str):
         """Stop a worker.
         
         Args:
-            config_id: KB configuration ID
+            kb_id: KB configuration ID
         """
         with self._workers_lock:
-            worker = self._workers.pop(config_id, None)
+            worker = self._workers.pop(kb_id, None)
             if worker:
                 worker.stop()
-                logger.info(f"[MANAGER] Stopped worker for KB {config_id}")
+                logger.info(f"[MANAGER] Stopped worker for KB {kb_id}")
     
     def _sync_workers(self):
         """Synchronize workers with current KB configs.
@@ -578,22 +578,22 @@ class DispatcherManager:
         # Get all active detection configs
         active_configs = {}
         for kb_config in kb_collection.find():
-            config_id = str(kb_config["_id"])
+            kb_id = str(kb_config["_id"])
             if self._should_have_worker(kb_config):
-                active_configs[config_id] = kb_config
+                active_configs[kb_id] = kb_config
         
         # Stop workers that should no longer be running
         with self._workers_lock:
             workers_to_stop = [
-                config_id for config_id in self._workers
-                if config_id not in active_configs
+                kb_id for kb_id in self._workers
+                if kb_id not in active_configs
             ]
         
-        for config_id in workers_to_stop:
-            self._stop_worker(config_id)
+        for kb_id in workers_to_stop:
+            self._stop_worker(kb_id)
         
         # Start workers that should be running
-        for config_id, kb_config in active_configs.items():
+        for kb_id, kb_config in active_configs.items():
             self._spawn_worker(kb_config)
     
     def _watch_kb_configs(self):
@@ -713,8 +713,8 @@ class DispatcherManager:
         
         # Stop all workers
         with self._workers_lock:
-            for config_id in list(self._workers.keys()):
-                worker = self._workers.pop(config_id)
+            for kb_id in list(self._workers.keys()):
+                worker = self._workers.pop(kb_id)
                 worker.stop()
         
         # Close MongoDB connection
@@ -728,15 +728,15 @@ class DispatcherManager:
         """Get information about active workers.
         
         Returns:
-            Dict mapping config_id to worker info
+            Dict mapping kb_id to worker info
         """
         with self._workers_lock:
             return {
-                config_id: {
+                kb_id: {
                     "kb_id": worker.kb_id,
                     "kb_name": worker.kb_config.get("name", "unknown"),
                     "is_multi_dimensional": worker.is_multi_dimensional,
                     "expected_dimensions": list(worker._buffer.expected_dimensions) if worker._buffer else []
                 }
-                for config_id, worker in self._workers.items()
+                for kb_id, worker in self._workers.items()
             }

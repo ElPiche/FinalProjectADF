@@ -13,7 +13,7 @@ from MotorDA.Dispatcher.algorithms.zscore.zscore_algorithm import (
     train_from_dict,
     detect_from_dict,
     create_global_fallback,
-    ZScoreBaseline,
+    ZScoreModel,
     AnomalyResult,
 )
 
@@ -24,13 +24,13 @@ class TestZScoreTrain:
     def test_train_basic(self):
         """Train on simple values."""
         values = [10.0, 12.0, 11.0, 10.5, 11.5]
-        baseline = train(values)
+        model = train(values)
         
-        assert baseline.mean == pytest.approx(11.0, rel=0.01)
-        assert baseline.std > 0
-        assert baseline.threshold > 0
-        assert baseline.data_points == 5
-        assert baseline.percentile == 99.5
+        assert model.mean == pytest.approx(11.0, rel=0.01)
+        assert model.std > 0
+        assert model.threshold > 0
+        assert model.data_points == 5
+        assert model.percentile == 99.5
     
     def test_train_empty_raises(self):
         """Empty values should raise ValueError."""
@@ -39,25 +39,25 @@ class TestZScoreTrain:
     
     def test_train_single_value(self):
         """Single value should use fallback std."""
-        baseline = train([42.0])
+        model = train([42.0])
         
-        assert baseline.mean == 42.0
-        assert baseline.std == pytest.approx(1e-6)  # Fallback
-        assert baseline.data_points == 1
+        assert model.mean == 42.0
+        assert model.std == pytest.approx(1e-6)  # Fallback
+        assert model.data_points == 1
     
     def test_train_identical_values(self):
         """Identical values should use fallback std."""
-        baseline = train([5.0, 5.0, 5.0, 5.0])
+        model = train([5.0, 5.0, 5.0, 5.0])
         
-        assert baseline.mean == 5.0
-        assert baseline.std == pytest.approx(1e-6)  # Fallback
-        assert baseline.data_points == 4
+        assert model.mean == 5.0
+        assert model.std == pytest.approx(1e-6)  # Fallback
+        assert model.data_points == 4
     
     def test_train_custom_percentile(self):
         """Custom percentile should be stored."""
-        baseline = train([1, 2, 3, 4, 5], percentile=95.0)
+        model = train([1, 2, 3, 4, 5], percentile=95.0)
         
-        assert baseline.percentile == 95.0
+        assert model.percentile == 95.0
     
     def test_train_threshold_calculation(self):
         """Threshold should be based on percentile of z-scores."""
@@ -65,11 +65,11 @@ class TestZScoreTrain:
         np.random.seed(42)
         values = list(np.random.normal(100, 10, 1000))
         
-        baseline = train(values, percentile=99.0)
+        model = train(values, percentile=99.0)
         
         # For normal distribution, 99th percentile z-score ~ 2.33
-        assert baseline.threshold > 2.0
-        assert baseline.threshold < 3.5
+        assert model.threshold > 2.0
+        assert model.threshold < 3.5
 
 
 class TestZScoreDetect:
@@ -77,7 +77,7 @@ class TestZScoreDetect:
     
     def test_detect_normal_value(self):
         """Normal value should not be flagged as anomaly."""
-        baseline = ZScoreBaseline(
+        model = ZScoreModel(
             mean=100.0,
             std=10.0,
             threshold=3.0,
@@ -85,7 +85,7 @@ class TestZScoreDetect:
             percentile=99.5,
         )
         
-        result = detect(105.0, baseline)
+        result = detect(105.0, model)
         
         assert result.value == 105.0
         assert result.z_score == pytest.approx(0.5)
@@ -93,7 +93,7 @@ class TestZScoreDetect:
     
     def test_detect_anomaly_high(self):
         """High value should be flagged as anomaly."""
-        baseline = ZScoreBaseline(
+        model = ZScoreModel(
             mean=100.0,
             std=10.0,
             threshold=2.0,
@@ -101,14 +101,14 @@ class TestZScoreDetect:
             percentile=99.5,
         )
         
-        result = detect(150.0, baseline)  # z-score = 5.0
+        result = detect(150.0, model)  # z-score = 5.0
         
         assert result.z_score == pytest.approx(5.0)
         assert result.is_anomaly is True
     
     def test_detect_anomaly_low(self):
         """Low value should be flagged as anomaly."""
-        baseline = ZScoreBaseline(
+        model = ZScoreModel(
             mean=100.0,
             std=10.0,
             threshold=2.0,
@@ -116,14 +116,14 @@ class TestZScoreDetect:
             percentile=99.5,
         )
         
-        result = detect(50.0, baseline)  # z-score = -5.0
+        result = detect(50.0, model)  # z-score = -5.0
         
         assert result.z_score == pytest.approx(-5.0)
         assert result.is_anomaly is True
     
     def test_detect_boundary(self):
         """Value at threshold boundary."""
-        baseline = ZScoreBaseline(
+        model = ZScoreModel(
             mean=100.0,
             std=10.0,
             threshold=2.0,
@@ -132,11 +132,11 @@ class TestZScoreDetect:
         )
         
         # Exactly at threshold
-        result = detect(120.0, baseline)  # z-score = 2.0
+        result = detect(120.0, model)  # z-score = 2.0
         assert result.is_anomaly is False  # Not strictly greater
         
         # Just above threshold
-        result = detect(120.1, baseline)
+        result = detect(120.1, model)
         assert result.is_anomaly is True
 
 
@@ -145,7 +145,7 @@ class TestZScoreDetectBatch:
     
     def test_detect_batch_empty(self):
         """Empty batch should return empty list."""
-        baseline = ZScoreBaseline(
+        model = ZScoreModel(
             mean=100.0,
             std=10.0,
             threshold=2.0,
@@ -153,12 +153,12 @@ class TestZScoreDetectBatch:
             percentile=99.5,
         )
         
-        results = detect_batch([], baseline)
+        results = detect_batch([], model)
         assert results == []
     
     def test_detect_batch_mixed(self):
         """Batch with normal and anomalous values."""
-        baseline = ZScoreBaseline(
+        model = ZScoreModel(
             mean=100.0,
             std=10.0,
             threshold=2.0,
@@ -167,7 +167,7 @@ class TestZScoreDetectBatch:
         )
         
         values = [100.0, 105.0, 150.0, 50.0]  # normal, normal, anomaly, anomaly
-        results = detect_batch(values, baseline)
+        results = detect_batch(values, model)
         
         assert len(results) == 4
         assert results[0].is_anomaly is False
@@ -179,9 +179,9 @@ class TestZScoreDetectBatch:
 class TestZScoreSerialization:
     """Test dict serialization for MongoDB."""
     
-    def test_baseline_to_dict(self):
-        """Baseline should serialize to dict."""
-        baseline = ZScoreBaseline(
+    def test_model_to_dict(self):
+        """Model should serialize to dict."""
+        model = ZScoreModel(
             mean=100.0,
             std=10.0,
             threshold=2.5,
@@ -189,7 +189,7 @@ class TestZScoreSerialization:
             percentile=99.0,
         )
         
-        d = baseline.to_dict()
+        d = model.to_dict()
         
         assert d["mean"] == 100.0
         assert d["std"] == 10.0
@@ -197,8 +197,8 @@ class TestZScoreSerialization:
         assert d["data_points"] == 50
         assert d["percentile"] == 99.0
     
-    def test_baseline_from_dict(self):
-        """Baseline should deserialize from dict."""
+    def test_model_from_dict(self):
+        """Model should deserialize from dict."""
         d = {
             "mean": 100.0,
             "std": 10.0,
@@ -207,11 +207,11 @@ class TestZScoreSerialization:
             "percentile": 99.0,
         }
         
-        baseline = ZScoreBaseline.from_dict(d)
+        model = ZScoreModel.from_dict(d)
         
-        assert baseline.mean == 100.0
-        assert baseline.std == 10.0
-        assert baseline.threshold == 2.5
+        assert model.mean == 100.0
+        assert model.std == 10.0
+        assert model.threshold == 2.5
     
     def test_result_to_dict(self):
         """AnomalyResult should serialize to dict."""
@@ -240,8 +240,8 @@ class TestZScoreSerialization:
         assert "threshold" in d
     
     def test_detect_from_dict(self):
-        """detect_from_dict should work with dict baseline."""
-        baseline_dict = {
+        """detect_from_dict should work with dict model."""
+        model_dict = {
             "mean": 100.0,
             "std": 10.0,
             "threshold": 2.0,
@@ -249,7 +249,7 @@ class TestZScoreSerialization:
             "percentile": 99.5,
         }
         
-        result = detect_from_dict(150.0, baseline_dict)
+        result = detect_from_dict(150.0, model_dict)
         
         assert result["value"] == 150.0
         assert result["is_anomaly"] is True
@@ -287,14 +287,14 @@ class TestEndToEnd:
         training_values = list(np.random.normal(100, 15, 500))
         
         # Train
-        baseline = train(training_values, percentile=99.0)
+        model = train(training_values, percentile=99.0)
         
         # Normal detection
-        result = detect(110.0, baseline)
+        result = detect(110.0, model)
         assert result.is_anomaly is False
         
         # Anomaly detection (3x std)
-        result = detect(160.0, baseline)
+        result = detect(160.0, model)
         assert result.is_anomaly is True
     
     def test_realistic_traffic_pattern(self):
@@ -304,14 +304,14 @@ class TestEndToEnd:
         np.random.seed(123)
         training_values = list(np.random.normal(1000, 100, 168))  # 24*7 hours
         
-        baseline = train(training_values, percentile=99.5)
+        model = train(training_values, percentile=99.5)
         
         # Normal traffic
-        assert detect(950, baseline).is_anomaly is False
-        assert detect(1100, baseline).is_anomaly is False
+        assert detect(950, model).is_anomaly is False
+        assert detect(1100, model).is_anomaly is False
         
         # Traffic spike (DDoS?)
-        assert detect(1500, baseline).is_anomaly is True
+        assert detect(1500, model).is_anomaly is True
         
         # Traffic drop (outage?)
-        assert detect(500, baseline).is_anomaly is True
+        assert detect(500, model).is_anomaly is True

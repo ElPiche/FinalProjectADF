@@ -68,14 +68,14 @@ class MyAlgorithm:
         return "my_algo"
     
     def train(self, values: List[float], **kwargs) -> Dict[str, Any]:
-        """Train baseline from values.
+        """Train model from values.
         
         Args:
             values: List of numeric training values
             **kwargs: Algorithm-specific parameters
         
         Returns:
-            Serializable baseline dict (stored in MongoDB)
+            Serializable model dict (stored in MongoDB)
         """
         # Your training logic here
         return {
@@ -83,12 +83,12 @@ class MyAlgorithm:
             "data_points": len(values),
         }
     
-    def detect(self, value: float, baseline: Dict[str, Any]) -> Dict[str, Any]:
+    def detect(self, value: float, model: Dict[str, Any]) -> Dict[str, Any]:
         """Detect if a single value is anomalous.
         
         Args:
             value: Value to check
-            baseline: Trained baseline from train()
+            model: Trained model from train()
         
         Returns:
             Dict with at least 'is_anomaly' key
@@ -99,9 +99,9 @@ class MyAlgorithm:
             "value": value,
         }
     
-    def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def detect_batch(self, values: List[float], model: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Detect anomalies for multiple values."""
-        return [self.detect(v, baseline) for v in values]
+        return [self.detect(v, model) for v in values]
     
     # OPTIONAL: Multi-dimension support (recommended)
     def train_multi_dimension(
@@ -117,7 +117,7 @@ class MyAlgorithm:
             parameters: List with 'dimension' keys
         
         Returns:
-            Dict mapping dimension names to baselines
+            Dict mapping dimension names to models
         """
         result = {}
         for param in parameters:
@@ -133,7 +133,7 @@ class MyAlgorithm:
     def detect_multi_dimension(
         self,
         observation: Dict[str, Any],
-        baselines: Dict[str, Dict[str, Any]],
+        models: Dict[str, Dict[str, Any]],
         parameters: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Detect anomalies across multiple dimensions."""
@@ -142,11 +142,11 @@ class MyAlgorithm:
         
         for param in parameters:
             dimension = param.get("dimension")
-            baseline = baselines.get(dimension)
+            model = models.get(dimension)
             value = observation.get(dimension)
             
-            if dimension and baseline and value is not None:
-                result = self.detect(float(value), baseline)
+            if dimension and model and value is not None:
+                result = self.detect(float(value), model)
                 dimension_results[dimension] = result
                 if result.get("is_anomaly"):
                     is_anomaly = True
@@ -172,15 +172,15 @@ def algo():
 
 class TestTrain:
     def test_train_basic(self, algo):
-        baseline = algo.train([1, 2, 3, 4, 5])
-        assert "mean" in baseline
-        assert baseline["data_points"] == 5
+        model = algo.train([1, 2, 3, 4, 5])
+        assert "mean" in model
+        assert model["data_points"] == 5
 
 
 class TestDetect:
     def test_detect_normal(self, algo):
-        baseline = algo.train([1, 2, 3, 4, 5])
-        result = algo.detect(3.0, baseline)
+        model = algo.train([1, 2, 3, 4, 5])
+        result = algo.detect(3.0, model)
         assert "is_anomaly" in result
 ```
 
@@ -212,9 +212,9 @@ All algorithms must implement the `AnomalyAlgorithm` protocol:
 | Method | Required | Description |
 |--------|----------|-------------|
 | `name` | ✅ | Property returning algorithm identifier |
-| `train(values, **kwargs)` | ✅ | Train baseline from values |
-| `detect(value, baseline)` | ✅ | Detect single value |
-| `detect_batch(values, baseline)` | ✅ | Detect multiple values |
+| `train(values, **kwargs)` | ✅ | Train model from values |
+| `detect(value, model)` | ✅ | Detect single value |
+| `detect_batch(values, model)` | ✅ | Detect multiple values |
 | `train_multi_dimension(...)` | Optional | Multi-dimension training |
 | `detect_multi_dimension(...)` | Optional | Multi-dimension detection |
 

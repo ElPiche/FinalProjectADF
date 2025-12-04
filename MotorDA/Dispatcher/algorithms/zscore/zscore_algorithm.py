@@ -4,8 +4,8 @@ This module implements a STANDALONE Z-Score algorithm with NO bucket logic.
 Bucketing is the Dispatcher's responsibility - this algorithm only does statistics.
 
 Interface:
-    - train(values, percentile) -> baseline dict
-    - detect(value, baseline) -> anomaly result
+    - train(values, percentile) -> model dict
+    - detect(value, model) -> anomaly result
 """
 
 from __future__ import annotations
@@ -16,8 +16,8 @@ from dataclasses import dataclass
 
 
 @dataclass
-class ZScoreBaseline:
-    """Statistical baseline for Z-Score detection."""
+class ZScoreModel:
+    """Statistical model for Z-Score detection."""
     mean: float
     std: float
     threshold: float
@@ -34,7 +34,7 @@ class ZScoreBaseline:
         }
     
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ZScoreBaseline":
+    def from_dict(cls, d: Dict[str, Any]) -> "ZScoreModel":
         return cls(
             mean=d["mean"],
             std=d["std"],
@@ -69,8 +69,8 @@ def train(
     values: List[float],
     percentile: float = 99.5,
     min_points: int = 3,
-) -> ZScoreBaseline:
-    """Train a Z-Score baseline from a list of values.
+) -> ZScoreModel:
+    """Train a Z-Score model from a list of values.
     
     This is a PURE statistical function. No timestamps, no buckets.
     
@@ -80,7 +80,7 @@ def train(
         min_points: Minimum points required for valid statistics (default 3)
     
     Returns:
-        ZScoreBaseline with mean, std, threshold
+        ZScoreModel with mean, std, threshold
     
     Raises:
         ValueError: If values is empty
@@ -102,7 +102,7 @@ def train(
     z_scores = np.abs((arr - mean) / std)
     threshold = float(np.percentile(z_scores, percentile)) if n_points >= min_points else 3.0
     
-    return ZScoreBaseline(
+    return ZScoreModel(
         mean=mean,
         std=std,
         threshold=threshold,
@@ -113,46 +113,46 @@ def train(
 
 def detect(
     value: float,
-    baseline: ZScoreBaseline,
+    model: ZScoreModel,
 ) -> AnomalyResult:
-    """Detect if a single value is anomalous based on trained baseline.
+    """Detect if a single value is anomalous based on trained model.
     
     This is a PURE statistical function. No timestamps, no buckets.
     
     Args:
         value: The value to check
-        baseline: Trained ZScoreBaseline
+        model: Trained ZScoreModel
     
     Returns:
         AnomalyResult with z_score and is_anomaly flag
     """
-    z_score = (value - baseline.mean) / baseline.std
-    is_anomaly = abs(z_score) > baseline.threshold
+    z_score = (value - model.mean) / model.std
+    is_anomaly = abs(z_score) > model.threshold
     
     return AnomalyResult(
         value=value,
         z_score=z_score,
         is_anomaly=is_anomaly,
-        mean=baseline.mean,
-        std=baseline.std,
-        threshold=baseline.threshold,
+        mean=model.mean,
+        std=model.std,
+        threshold=model.threshold,
     )
 
 
 def detect_batch(
     values: List[float],
-    baseline: ZScoreBaseline,
+    model: ZScoreModel,
 ) -> List[AnomalyResult]:
     """Detect anomalies for a batch of values.
     
     Args:
         values: List of values to check
-        baseline: Trained ZScoreBaseline
+        model: Trained ZScoreModel
     
     Returns:
         List of AnomalyResult objects
     """
-    return [detect(v, baseline) for v in values]
+    return [detect(v, model) for v in values]
 
 
 # === CONVENIENCE FUNCTIONS ===================================================
@@ -163,17 +163,17 @@ def train_from_dict(
     min_points: int = 3,
 ) -> Dict[str, Any]:
     """Train and return result as dict (for MongoDB storage)."""
-    baseline = train(values, percentile, min_points)
-    return baseline.to_dict()
+    model = train(values, percentile, min_points)
+    return model.to_dict()
 
 
 def detect_from_dict(
     value: float,
-    baseline_dict: Dict[str, Any],
+    model_dict: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Detect using dict baseline (from MongoDB)."""
-    baseline = ZScoreBaseline.from_dict(baseline_dict)
-    result = detect(value, baseline)
+    """Detect using dict model (from MongoDB)."""
+    model = ZScoreModel.from_dict(model_dict)
+    result = detect(value, model)
     return result.to_dict()
 
 
@@ -182,8 +182,8 @@ def detect_from_dict(
 def create_global_fallback(
     all_values: List[float],
     percentile: float = 99.5,
-) -> ZScoreBaseline:
-    """Create a global fallback baseline from all training data.
+) -> ZScoreModel:
+    """Create a global fallback model from all training data.
     
     Use this when a specific bucket has insufficient data.
     
@@ -192,11 +192,11 @@ def create_global_fallback(
         percentile: Threshold percentile
     
     Returns:
-        ZScoreBaseline to use as fallback
+        ZScoreModel to use as fallback
     """
     if not all_values:
         # Return a permissive fallback
-        return ZScoreBaseline(
+        return ZScoreModel(
             mean=0.0,
             std=1.0,
             threshold=3.0,
