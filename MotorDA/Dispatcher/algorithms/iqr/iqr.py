@@ -77,7 +77,7 @@ class IQRAlgorithm:
         return sorted_vals[f] + (k - f) * (sorted_vals[c] - sorted_vals[f])
     
     def train(self, values: List[float], parameter: Dict[str, Any] = None, **_) -> Dict[str, Any]:
-        """Train IQR baseline from values.
+        """Train IQR model from values.
         
         Args:
             values: List of numeric values
@@ -85,7 +85,7 @@ class IQRAlgorithm:
                 - multiplier: via metadata[key="multiplier"].value (default: 1.5)
         
         Returns:
-            Baseline dict with q1, q3, iqr, bounds
+            Model dict with q1, q3, iqr, bounds
         """
         # ─────────────────────────────────────────────────────────────────────────
         # Resolve parameters: metadata overrides > defaults (User-Overridable Pattern)
@@ -134,19 +134,19 @@ class IQRAlgorithm:
             "data_points": len(values),
         }
     
-    def detect(self, value: float, baseline: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
+    def detect(self, value: float, model: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
         """Detect if value is outside IQR bounds.
         
         Args:
             value: The value to check
-            baseline: Trained baseline dict
-            parameter: Algorithm parameter dict (unused for detection, bounds from baseline)
+            model: Trained model dict
+            parameter: Algorithm parameter dict (unused for detection, bounds from model)
         
         Returns:
             Dict with is_anomaly, bounds, etc.
         """
-        lower = baseline.get("lower_bound", float("-inf"))
-        upper = baseline.get("upper_bound", float("inf"))
+        lower = model.get("lower_bound", float("-inf"))
+        upper = model.get("upper_bound", float("inf"))
         
         is_anomaly = value < lower or value > upper
         
@@ -164,18 +164,18 @@ class IQRAlgorithm:
             "lower_bound": lower,
             "upper_bound": upper,
             "distance_from_bounds": distance,
-            "q1": baseline.get("q1"),
-            "q3": baseline.get("q3"),
+            "q1": model.get("q1"),
+            "q3": model.get("q3"),
         }
     
-    def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def detect_batch(self, values: List[float], model: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Detect anomalies for multiple values.
         
         Args:
             values: List of values to check
-            baseline: Trained baseline dict
+            model: Trained model dict
         
         Returns:
             List of detection result dicts
         """
-        return [self.detect(v, baseline) for v in values]
+        return [self.detect(v, model) for v in values]

@@ -119,7 +119,7 @@ class TestMockMultiDimension:
     
     def test_detect_multi_dimension(self, mock_algo):
         """Detect anomalies across multiple dimensions."""
-        baselines = {
+        models = {
             "requests": {"mean": 100.0, "threshold": 20.0},
             "latency": {"mean": 50.0, "threshold": 10.0},
         }
@@ -131,7 +131,7 @@ class TestMockMultiDimension:
         # Normal observation
         result = mock_algo.detect_multi_dimension(
             {"requests": 100, "latency": 50},
-            baselines,
+            models,
             parameters
         )
         assert result["is_anomaly"] is False
@@ -139,7 +139,7 @@ class TestMockMultiDimension:
         # Anomalous latency
         result = mock_algo.detect_multi_dimension(
             {"requests": 100, "latency": 100},
-            baselines,
+            models,
             parameters
         )
         assert result["is_anomaly"] is True
@@ -152,10 +152,10 @@ class TestEndToEnd:
         """Full train-then-detect workflow."""
         training_values = [100, 105, 98, 110, 95, 102, 108, 97, 103, 99]
         
-        baseline = mock_algo.train(training_values)
+        model = mock_algo.train(training_values)
         
         # Normal values
-        assert mock_algo.detect(100, baseline)["is_anomaly"] is False
+        assert mock_algo.detect(100, model)["is_anomaly"] is False
         
         # Extreme values
-        assert mock_algo.detect(200, baseline)["is_anomaly"] is True
+        assert mock_algo.detect(200, model)["is_anomaly"] is True

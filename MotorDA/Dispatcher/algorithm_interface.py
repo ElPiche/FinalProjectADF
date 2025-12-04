@@ -13,8 +13,8 @@ Usage:
     from MotorDA.Dispatcher import algorithms  # Triggers registration
     
     algo = get_algorithm("zscore")
-    baseline = algo.train([10, 20, 30], parameter={"dimension": "cpu"})
-    result = algo.detect(100, baseline, parameter={"dimension": "cpu"})
+    model = algo.train([10, 20, 30], parameter={"dimension": "cpu"})
+    result = algo.detect(100, model, parameter={"dimension": "cpu"})
 """
 
 from __future__ import annotations
@@ -129,7 +129,7 @@ class AnomalyAlgorithm(Protocol):
     - min_training_samples: int = 3 - Minimum data for training
     
     Required Methods (based on is_multi_dimensional):
-    - If False: train(values, parameter), detect(value, baseline, parameter)
+    - If False: train(values, parameter), detect(value, model, parameter)
     - If True: train_multi_dimensional(observations, parameters), detect_multi_dimensional(observation, model, parameters)
     """
     
@@ -142,7 +142,7 @@ class AnomalyAlgorithm(Protocol):
     def is_multi_dimensional(self) -> bool:
         """True if algorithm processes all dimensions together as vectors.
         
-        False (single-dimensional): Each dimension has its own baseline.
+        False (single-dimensional): Each dimension has its own model.
             - train() called per dimension with values list
             - detect() called per dimension with single value
         
@@ -186,7 +186,7 @@ class AnomalyAlgorithm(Protocol):
     # === SINGLE-DIMENSIONAL METHODS (required if is_multi_dimensional=False) ===
     
     def train(self, values: List[float], parameter: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
-        """Train model from single-dimension values, return serializable baseline.
+        """Train model from single-dimension values, return serializable model.
         
         Args:
             values: List of numeric values for ONE dimension
@@ -194,16 +194,16 @@ class AnomalyAlgorithm(Protocol):
                 Algorithm extracts what it needs (percentile, multiplier, etc.)
         
         Returns:
-            Baseline dict (algorithm-specific structure)
+            Model dict (algorithm-specific structure, e.g., mean/std for zscore)
         """
         ...
     
-    def detect(self, value: float, baseline: Dict[str, Any], parameter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def detect(self, value: float, model: Dict[str, Any], parameter: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Detect if a single value is anomalous.
         
         Args:
             value: The value to check
-            baseline: Trained baseline dict
+            model: Trained model dict from train()
             parameter: Full parameter dict (contains metadata)
         
         Returns:
@@ -211,7 +211,7 @@ class AnomalyAlgorithm(Protocol):
         """
         ...
     
-    def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def detect_batch(self, values: List[float], model: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Detect anomalies for multiple values (single-dimensional batch)."""
         ...
     

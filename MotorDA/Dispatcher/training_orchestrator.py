@@ -6,8 +6,8 @@ This module provides bucket-aware training and detection orchestration.
 It is completely algorithm-agnostic and uses the algorithm registry for all operations.
 
 Design:
-- TrainingOrchestrator: Groups data by bucket, trains baselines per bucket
-- DetectionOrchestrator: Resolves bucket for each observation, uses correct baseline
+- TrainingOrchestrator: Groups data by bucket, trains models per bucket
+- DetectionOrchestrator: Resolves bucket for each observation, uses correct model
 
 NO LEGACY CODE - All algorithm dispatch goes through algorithm_interface.
 """
@@ -169,7 +169,7 @@ class TrainingOrchestrator:
             bucket_context: Bucket key for logging context
         
         Returns:
-            Baseline dict or None if insufficient data
+            Model dict or None if insufficient data
         """
         dimension = parameter.get("dimension")
         if not dimension:
@@ -195,16 +195,16 @@ class TrainingOrchestrator:
             return None
         
         # Train using single-dimensional interface
-        baseline = self._algorithm_instance.train(values, parameter=parameter)
-        baseline["bucket_context"] = bucket_context  # Always tag
-        baseline["n_observations"] = len(values)
+        model = self._algorithm_instance.train(values, parameter=parameter)
+        model["bucket_context"] = bucket_context  # Always tag
+        model["n_observations"] = len(values)
         
         logger.info(
             f"[ORCHESTRATOR] Trained dimension '{dimension}' in bucket '{bucket_context}' "
             f"with {len(values)} values"
         )
         
-        return baseline
+        return model
     
 
     #TODO: change observed_value to dimnesions
@@ -267,12 +267,12 @@ class TrainingOrchestrator:
         timestamp_field: str = "@timestamp",
         percentile: float = 99.5
     ) -> Dict[str, Any]:
-        """Train baselines for all buckets.
+        """Train models for all buckets.
         
         This is the main training entry point. It:
         1. Checks algorithm's supports_bucketing property
         2. Groups observations by bucket key (if bucketing supported)
-        3. Trains baselines using appropriate method based on is_multi_dimensional
+        3. Trains models using appropriate method based on is_multi_dimensional
         4. Creates global fallback from all data
         5. Returns bucket-keyed training result with bucket_context tags
         
@@ -288,10 +288,10 @@ class TrainingOrchestrator:
                 "is_multi_dimensional": false,
                 "bucket_profile_id": "...",
                 "buckets": {
-                    "workday_14": {dimension: baseline_dict, ...},
+                    "workday_14": {dimension: model_dict, ...},
                     ...
                 },
-                "global_fallback": {dimension: baseline_dict, ...}
+                "global_fallback": {dimension: model_dict, ...}
             }
         """
         algorithm = self._algorithm_instance
@@ -323,13 +323,13 @@ class TrainingOrchestrator:
         logger.info(f"[ORCHESTRATOR] Global fallback trained with dimensions: {list(global_fallback.keys())}")
         
         # ─────────────────────────────────────────────────────────────────────────
-        # Train per-bucket baselines
+        # Train per-bucket models
         # ─────────────────────────────────────────────────────────────────────────
         buckets = {}
         for bucket_key, bucket_obs in groups.items():
             logger.info(f"[ORCHESTRATOR] Training bucket '{bucket_key}' with {len(bucket_obs)} observations")
             
-            bucket_baseline = self._train_bucket(
+            bucket_model = self._train_bucket(
                 bucket_obs,
                 bucket_context=bucket_key,
                 percentile=percentile
@@ -337,20 +337,20 @@ class TrainingOrchestrator:
             
             # Determine if bucket has sufficient data
             has_sufficient = any(
-                b is not None for b in bucket_baseline.values()
-            ) if bucket_baseline else False
+                b is not None for b in bucket_model.values()
+            ) if bucket_model else False
             
             if not has_sufficient:
                 logger.warning(f"[ORCHESTRATOR] Bucket '{bucket_key}' has insufficient data, using global fallback")
                 buckets[bucket_key] = {
-                    "baselines": global_fallback,
+                    "models": global_fallback,
                     "n_observations": len(bucket_obs),
                     "sufficient_data": False,
                     "bucket_context": bucket_key
                 }
             else:
                 buckets[bucket_key] = {
-                    "baselines": bucket_baseline,
+                    "models": bucket_model,
                     "n_observations": len(bucket_obs),
                     "sufficient_data": True,
                     "bucket_context": bucket_key
@@ -386,20 +386,20 @@ class TrainingOrchestrator:
             percentile: Percentile for threshold calculation
         
         Returns:
-            Dict mapping dimension -> baseline_dict
+            Dict mapping dimension -> model_dict
         """
         if self.is_multi_dimensional:
             # Multi-dimensional: delegate to algorithm's batch method
-            baseline = self._algorithm_instance.train_multi_dimensional(
+            model = self._algorithm_instance.train_multi_dimensional(
                 observations=observations,
                 parameters=self.parameters,
                 percentile=percentile
             )
-            # Tag all baselines with bucket_context
-            for dim, dim_baseline in baseline.items():
-                if isinstance(dim_baseline, dict):
-                    dim_baseline["bucket_context"] = bucket_context
-            return baseline
+            # Tag all models with bucket_context
+            for dim, dim_model in model.items():
+                if isinstance(dim_model, dict):
+                    dim_model["bucket_context"] = bucket_context
+            return model
         else:
             # Single-dimensional: loop over parameters
             result = {}
@@ -408,24 +408,24 @@ class TrainingOrchestrator:
                 if not dimension:
                     continue
                 
-                baseline = self._train_single_dimensional(
+                dim_model = self._train_single_dimensional(
                     observations,
                     parameter=param,
                     bucket_context=bucket_context
                 )
-                if baseline is not None:
-                    result[dimension] = baseline
+                if dim_model is not None:
+                    result[dimension] = dim_model
             
             return result
 
 
 @dataclass
 class DetectionOrchestrator:
-    """Orchestrates detection with bucket-aware baseline lookup.
+    """Orchestrates detection with bucket-aware model lookup.
     
     This orchestrator:
     1. Resolves observation timestamp to bucket key
-    2. Gets the correct baseline for that bucket
+    2. Gets the correct model for that bucket
     3. Delegates detection to the algorithm
     
     Supports both single-dimensional and multi-dimensional algorithms:
@@ -461,8 +461,8 @@ class DetectionOrchestrator:
             return "global_default"
         return self.bucket_resolver.resolve(ts)
     
-    def get_baseline_for_bucket(self, bucket_key: str) -> Dict[str, Dict[str, Any]]:
-        """Get the baseline dict for a specific bucket.
+    def get_model_for_bucket(self, bucket_key: str) -> Dict[str, Any]:
+        """Get the model dict for a specific bucket.
         
         Falls back to global_fallback if bucket not found.
         
@@ -470,14 +470,14 @@ class DetectionOrchestrator:
             bucket_key: The bucket key
             
         Returns:
-            Dict of dimension -> baseline_dict
+            Dict of dimension -> model_dict
         """
         buckets = self.training_result.get("buckets", {})
         global_fallback = self.training_result.get("global_fallback", {})
         
         if bucket_key in buckets:
             bucket_data = buckets[bucket_key]
-            return bucket_data.get("baselines", bucket_data)
+            return bucket_data.get("models", bucket_data)
         
         # Fallback to global
         logger.info(f"[DETECTION] Bucket '{bucket_key}' not found, using global fallback")
@@ -486,7 +486,7 @@ class DetectionOrchestrator:
     def _detect_single_dimensional(
         self,
         observation: Dict[str, Any],
-        baselines: Dict[str, Dict[str, Any]],
+        models: Dict[str, Dict[str, Any]],
         bucket_key: str
     ) -> Dict[str, Any]:
         """Detect anomalies using single-dimensional algorithm.
@@ -495,7 +495,7 @@ class DetectionOrchestrator:
         
         Args:
             observation: Observation dict with dimension values
-            baselines: Per-dimension baselines from training
+            models: Per-dimension models from training
             bucket_key: Bucket context for logging
         
         Returns:
@@ -509,9 +509,9 @@ class DetectionOrchestrator:
             if not dimension:
                 continue
             
-            baseline = baselines.get(dimension)
-            if not baseline:
-                logger.warning(f"[DETECTION] No baseline for dimension '{dimension}'")
+            model = models.get(dimension)
+            if not model:
+                logger.warning(f"[DETECTION] No model for dimension '{dimension}'")
                 continue
             
             value = observation.get(dimension)
@@ -524,7 +524,7 @@ class DetectionOrchestrator:
                 continue
             
             # Call single-dimensional detect with parameter
-            result = self._algorithm_instance.detect(value, baseline, parameter=param)
+            result = self._algorithm_instance.detect(value, model, parameter=param)
             result["bucket_context"] = bucket_key
             dimension_results[dimension] = result
             
@@ -572,22 +572,22 @@ class DetectionOrchestrator:
         else:
             bucket_key = self.resolve_bucket_key(ts)
         
-        # Get baseline for this bucket
-        baselines = self.get_baseline_for_bucket(bucket_key)
+        # Get model for this bucket
+        models = self.get_model_for_bucket(bucket_key)
         
         # Route based on algorithm mode
         if self.is_multi_dimensional:
             # Multi-dimensional: delegate to algorithm's batch method
             result = self._algorithm_instance.detect_multi_dimensional(
                 observation=observation,
-                baselines=baselines,
+                models=models,
                 parameters=self.parameters
             )
         else:
             # Single-dimensional: loop over parameters
             result = self._detect_single_dimensional(
                 observation,
-                baselines,
+                models,
                 bucket_key
             )
         

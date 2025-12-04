@@ -58,7 +58,7 @@ class ZScoreAlgorithm:
         return 3
     
     def train(self, values: List[float], parameter: Dict[str, Any] = None, **_) -> Dict[str, Any]:
-        """Train Z-Score baseline from raw float values.
+        """Train Z-Score model from raw float values.
         
         Args:
             values: List of numeric values
@@ -67,7 +67,7 @@ class ZScoreAlgorithm:
                 - min_points: via metadata[key="min_points"].value (default: 3)
         
         Returns:
-            Baseline dict with mean, std, threshold
+            Model dict with mean, std, threshold
         """
         # ─────────────────────────────────────────────────────────────────────────
         # Resolve parameters: metadata overrides > defaults (User-Overridable Pattern)
@@ -91,33 +91,33 @@ class ZScoreAlgorithm:
                         pass
         
         from . import zscore_algorithm
-        baseline = zscore_algorithm.train(values, percentile, min_points)
-        return baseline.to_dict()
+        model = zscore_algorithm.train(values, percentile, min_points)
+        return model.to_dict()
     
-    def detect(self, value: float, baseline: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Detect if a single value is anomalous based on trained baseline.
+    def detect(self, value: float, model: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Detect if a single value is anomalous based on trained model.
         
         Args:
             value: The value to check
-            baseline: Trained baseline dict
-            parameter: Algorithm parameter dict (unused for detection, threshold from baseline)
+            model: Trained model dict
+            parameter: Algorithm parameter dict (unused for detection, threshold from model)
         
         Returns:
             Dict with is_anomaly, z_score, etc.
         """
         from . import zscore_algorithm
-        baseline_obj = zscore_algorithm.ZScoreBaseline.from_dict(baseline)
-        result = zscore_algorithm.detect(value, baseline_obj)
+        model_obj = zscore_algorithm.ZScoreBaseline.from_dict(model)
+        result = zscore_algorithm.detect(value, model_obj)
         return result.to_dict()
     
-    def detect_batch(self, values: List[float], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def detect_batch(self, values: List[float], model: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Detect anomalies for multiple values.
         
         Args:
             values: List of values to check
-            baseline: Trained baseline dict
+            model: Trained model dict
         
         Returns:
             List of detection result dicts
         """
-        return [self.detect(v, baseline) for v in values]
+        return [self.detect(v, model) for v in values]

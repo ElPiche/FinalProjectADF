@@ -351,8 +351,8 @@ class TestTrainingResultFormat:
         assert isinstance(result["global_fallback"], dict)
         assert isinstance(result["n_total_observations"], int)
     
-    def test_baselines_have_bucket_context(self, sample_training_data, sample_parameters):
-        """All baselines should have bucket_context tag."""
+    def test_models_have_bucket_context(self, sample_training_data, sample_parameters):
+        """All models should have bucket_context tag."""
         
         orchestrator = TrainingOrchestrator(
             algorithm_name="zscore",
@@ -366,15 +366,15 @@ class TestTrainingResultFormat:
             timestamp_field="timestamp"
         )
         
-        # Check global fallback baselines
-        for dim, baseline in result["global_fallback"].items():
-            assert "bucket_context" in baseline
+        # Check global fallback models
+        for dim, model in result["global_fallback"].items():
+            assert "bucket_context" in model
         
-        # Check bucket baselines
+        # Check bucket models
         for bucket_key, bucket_data in result["buckets"].items():
-            baselines = bucket_data.get("baselines", {})
-            for dim, baseline in baselines.items():
-                assert "bucket_context" in baseline
+            models = bucket_data.get("models", {})
+            for dim, model in models.items():
+                assert "bucket_context" in model
 
 
 # =============================================================================

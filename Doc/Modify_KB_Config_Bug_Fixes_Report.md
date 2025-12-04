@@ -269,7 +269,38 @@ Detection series (mode=1): 42   ← Preserved
 6. KBWorker starts detection with updated:
    - Algorithm (zscore/iqr/mock)
    - Dimensions
-   - Baselines from trained_models
+   - Models from trained_models
+```
+
+---
+
+## Terminology Standardization (Additional Fix)
+
+### Issue
+Inconsistent terminology across the codebase:
+- MongoDB collection was `trained_models` (plural, using "model")
+- Code used "baseline" terminology internally
+- k_means algorithm used "model", while zscore/iqr/mock used "baseline"
+
+### Resolution
+Standardized all terminology to use "model" instead of "baseline":
+
+#### Files Updated
+| File | Changes |
+|------|---------|
+| `MotorDA/Dispatcher/algorithm_interface.py` | Protocol methods renamed: `detect(value, model)`, `detect_batch(values, model)` |
+| `MotorDA/Dispatcher/training_orchestrator.py` | Changed bucket key from `"baselines"` → `"models"` |
+| `MotorDA/Dispatcher/algorithms/zscore/zscore.py` | Updated detect() and detect_batch() signatures |
+| `MotorDA/Dispatcher/algorithms/iqr/iqr.py` | Updated detect() and detect_batch() signatures |
+| `MotorDA/Dispatcher/algorithms/mock/mock.py` | Updated all method signatures and docstrings |
+| `MotorDA/Dispatcher/DADispatcher.py` | Renamed `existing_baseline` → `existing_model` |
+| `MotorDA/tests/test_multi_dimensional.py` | Updated test assertions |
+| `MotorDA/tests/test_integration_multi_dim.py` | Updated test method names and assertions |
+
+#### Verification
+```json
+// Standardized structure:
+{"buckets": {"global_default": {"models": {...}}}}
 ```
 
 ---
@@ -278,8 +309,11 @@ Detection series (mode=1): 42   ← Preserved
 
 | File | Changes |
 |------|---------|
-| `MotorDA/Dispatcher/DADispatcher.py` | Added "replace" to change stream pipeline; Added `cleanup_training_series()` function; Integrated cleanup into training flow |
+| `MotorDA/Dispatcher/DADispatcher.py` | Added "replace" to change stream pipeline; Added `cleanup_training_series()` function; Integrated cleanup into training flow; Renamed baseline→model |
 | `MotorDA/Dispatcher/kb_worker.py` | Modified `_spawn_worker()` to compare `updated_at` and restart workers; Added logging for trained_models watcher |
+| `MotorDA/Dispatcher/algorithm_interface.py` | Standardized protocol methods to use "model" terminology |
+| `MotorDA/Dispatcher/training_orchestrator.py` | Changed bucket structure to use "models" key with backward compatibility |
+| `MotorDA/Dispatcher/algorithms/*.py` | Updated all algorithm implementations to use "model" |
 
 ---
 
@@ -303,5 +337,6 @@ All three bugs have been fixed and verified through extensive testing. The `modi
 1. ✅ Triggers re-training when configuration changes
 2. ✅ Restarts detection workers with updated configuration  
 3. ✅ Cleans up stale training data to prevent accumulation
+4. ✅ Uses consistent "model" terminology across the codebase
 
 The anomaly detection pipeline is now fully responsive to configuration modifications via the MCP interface.

@@ -117,7 +117,7 @@ class TestRegistrationValidation:
             def train(self, values: List[float], parameter: Dict = None, **_) -> Dict:
                 return {"mean": sum(values) / len(values) if values else 0}
             
-            def detect(self, value: float, baseline: Dict, parameter: Dict = None) -> Dict:
+            def detect(self, value: float, model: Dict, parameter: Dict = None) -> Dict:
                 return {"is_anomaly": False}
         
         # Should register without error
@@ -142,7 +142,7 @@ class TestRegistrationValidation:
             def is_multi_dimensional(self) -> bool:
                 return False
             
-            def detect(self, value: float, baseline: Dict, parameter: Dict = None) -> Dict:
+            def detect(self, value: float, model: Dict, parameter: Dict = None) -> Dict:
                 return {"is_anomaly": False}
         
         with pytest.raises(TypeError, match="train"):
@@ -168,7 +168,7 @@ class TestRegistrationValidation:
             def train_multi_dimension(self, observed_values, parameters, **_) -> Dict:
                 return {}
             
-            def detect_multi_dimension(self, observation, baselines, parameters) -> Dict:
+            def detect_multi_dimension(self, observation, models, parameters) -> Dict:
                 return {"is_anomaly": False}
         
         # Should register without error
@@ -239,15 +239,15 @@ class TestSingleDimensionalTraining:
             timestamp_field="timestamp"
         )
         
-        # Result should have baselines for both dimensions
+        # Result should have models for both dimensions
         assert "global_fallback" in result
         assert "cpu" in result["global_fallback"]
         assert "memory" in result["global_fallback"]
         
-        # Each baseline should have mean and std
-        cpu_baseline = result["global_fallback"]["cpu"]
-        assert "mean" in cpu_baseline
-        assert "std" in cpu_baseline
+        # Each model should have mean and std
+        cpu_model = result["global_fallback"]["cpu"]
+        assert "mean" in cpu_model
+        assert "std" in cpu_model
     
     def test_single_dimensional_uses_train_method(self, sample_observations):
         """Single-dimensional training should call algorithm.train() per dimension."""
@@ -268,11 +268,11 @@ class TestSingleDimensionalTraining:
         
         # Should have trained cpu dimension
         assert "cpu" in result["global_fallback"]
-        baseline = result["global_fallback"]["cpu"]
+        model = result["global_fallback"]["cpu"]
         
-        # Baseline should have bucket_context tag
-        assert "bucket_context" in baseline
-        assert baseline["bucket_context"] == "global_fallback"
+        # Model should have bucket_context tag
+        assert "bucket_context" in model
+        assert model["bucket_context"] == "global_fallback"
 
 
 # =============================================================================
@@ -280,10 +280,10 @@ class TestSingleDimensionalTraining:
 # =============================================================================
 
 class TestBucketContextTagging:
-    """Test that all baselines are tagged with bucket_context."""
+    """Test that all models are tagged with bucket_context."""
     
     def test_global_fallback_tagged(self, sample_observations, sample_parameters):
-        """Global fallback baselines should be tagged."""
+        """Global fallback models should be tagged."""
         
         orchestrator = TrainingOrchestrator(
             algorithm_name="zscore",
@@ -298,12 +298,12 @@ class TestBucketContextTagging:
         )
         
         # Check global fallback tagging
-        for dim, baseline in result["global_fallback"].items():
-            assert "bucket_context" in baseline
-            assert baseline["bucket_context"] == "global_fallback"
+        for dim, model in result["global_fallback"].items():
+            assert "bucket_context" in model
+            assert model["bucket_context"] == "global_fallback"
     
-    def test_bucket_baselines_tagged(self, sample_observations, sample_parameters):
-        """Per-bucket baselines should be tagged with bucket key."""
+    def test_bucket_models_tagged(self, sample_observations, sample_parameters):
+        """Per-bucket models should be tagged with bucket key."""
         
         bucket_profile = {
             "profile_id": "test_profile",
@@ -340,11 +340,11 @@ class TestBucketContextTagging:
         # Should have buckets
         assert "buckets" in result
         
-        # Each bucket's baselines should be tagged
+        # Each bucket's models should be tagged
         for bucket_key, bucket_data in result["buckets"].items():
-            baselines = bucket_data.get("baselines", {})
-            for dim, baseline in baselines.items():
-                assert "bucket_context" in baseline
+            models = bucket_data.get("models", {})
+            for dim, model in models.items():
+                assert "bucket_context" in model
 
 
 # =============================================================================

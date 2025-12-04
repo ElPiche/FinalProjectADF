@@ -177,7 +177,7 @@ class Algorithm:
         self,
         observed_values: list[dict],
         bucket_key: Optional[str] = None,
-        existing_baseline: Optional[dict] = None
+        existing_model: Optional[dict] = None
     ) -> dict:
         """
         Execute the algorithm for training.
@@ -185,7 +185,7 @@ class Algorithm:
         Args:
             observed_values: List of observation dicts with dimensions
             bucket_key: Optional bucket key for bucket-aware training
-            existing_baseline: Optional existing baseline for incremental training
+            existing_model: Optional existing model for incremental training
             
         Returns:
             Training result dict
@@ -195,7 +195,7 @@ class Algorithm:
             observed_values=observed_values,
             parameters=self.parameters,
             bucket_key=bucket_key,
-            existing_baseline=existing_baseline
+            existing_model=existing_model
         )
     
     def detect(

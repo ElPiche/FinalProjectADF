@@ -15,14 +15,14 @@ ALGORITHM MODES EXPLAINED
 SINGLE-DIMENSIONAL MODE (is_multi_dimensional=False):
     - Each dimension is trained INDEPENDENTLY
     - Train method receives: List[float] (values for ONE dimension)
-    - Detect method receives: float (single value), baseline (for that dimension)
+    - Detect method receives: float (single value), model (for that dimension)
     - Example: Z-Score, IQR
     - Flow:
         for each dimension:
-            baseline[dim] = algo.train(values_for_dim, parameter)
+            model[dim] = algo.train(values_for_dim, parameter)
         for each observation:
             for each dimension:
-                result = algo.detect(obs[dim], baseline[dim], parameter)
+                result = algo.detect(obs[dim], model[dim], parameter)
 
 MULTI-DIMENSIONAL MODE (is_multi_dimensional=True):
     - All dimensions are trained TOGETHER as vectors
@@ -145,7 +145,7 @@ class MockAlgorithm:
     def supports_bucketing(self) -> bool:
         """Whether to train separate models per time-context bucket.
         
-        True = separate baselines for "workday_09", "weekend_14", etc.
+        True = separate models for "workday_09", "weekend_14", etc.
         False = single global model (e.g., for KMeans clustering)
         
         Mock supports bucketing because it's simple enough to benefit from it.
@@ -269,10 +269,10 @@ class MockAlgorithm:
         parameter: Optional[Dict[str, Any]] = None,
         **_  # Accept extra kwargs for compatibility
     ) -> Dict[str, Any]:
-        """Train a single-dimensional baseline from a list of values.
+        """Train a single-dimensional model from a list of values.
         
         This is called ONCE per dimension, per bucket:
-            baseline["request_count"]["workday_09"] = train(values, param)
+            model["request_count"]["workday_09"] = train(values, param)
         
         Statistical method:
             mean = average of all values
@@ -285,7 +285,7 @@ class MockAlgorithm:
             **_: Additional kwargs (ignored, for API compatibility)
         
         Returns:
-            Baseline dict containing:
+            Model dict containing:
             - mean: float - Center of the data
             - threshold: float - Deviation limit for anomaly
             - data_points: int - Number of training samples used
@@ -317,7 +317,7 @@ class MockAlgorithm:
     def detect(
         self,
         value: float,
-        baseline: Dict[str, Any],
+        model: Dict[str, Any],
         parameter: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Detect if a single value is anomalous.
@@ -328,8 +328,8 @@ class MockAlgorithm:
         
         Args:
             value: The numeric value to check
-            baseline: Trained baseline dict from train()
-            parameter: Algorithm parameter (unused here, threshold from baseline)
+            model: Trained model dict from train()
+            parameter: Algorithm parameter (unused here, threshold from model)
         
         Returns:
             Detection result dict:
@@ -339,8 +339,8 @@ class MockAlgorithm:
             - threshold: float - Maximum allowed deviation
             - mean: float - Expected value from training
         """
-        mean = baseline.get("mean", 0.0)
-        threshold = baseline.get("threshold", 10.0)
+        mean = model.get("mean", 0.0)
+        threshold = model.get("threshold", 10.0)
         
         deviation = abs(value - mean)
         is_anomaly = deviation > threshold
@@ -356,7 +356,7 @@ class MockAlgorithm:
     def detect_batch(
         self,
         values: List[float],
-        baseline: Dict[str, Any]
+        model: Dict[str, Any]
     ) -> List[Dict[str, Any]]:
         """Detect anomalies for a batch of single-dimensional values.
         
@@ -365,12 +365,12 @@ class MockAlgorithm:
         
         Args:
             values: List of values to check
-            baseline: Trained baseline dict
+            model: Trained model dict
         
         Returns:
             List of detection results (one per value)
         """
-        return [self.detect(v, baseline) for v in values]
+        return [self.detect(v, model) for v in values]
     
     # ═══════════════════════════════════════════════════════════════════════════
     # MULTI-DIMENSIONAL METHODS
@@ -464,7 +464,7 @@ class MockAlgorithm:
     def detect_multi_dimensional(
         self,
         observation: Dict[str, Any],
-        baselines: Dict[str, Any],
+        models: Dict[str, Any],
         parameters: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """Detect if a multi-dimensional observation is anomalous.
@@ -479,7 +479,7 @@ class MockAlgorithm:
         
         Args:
             observation: Single observation dict with all dimension values
-            baselines: Model dict from train_multi_dimensional()
+            models: Model dict from train_multi_dimensional()
                 Note: In multi-dim mode, this is the full model (not per-dimension)
             parameters: List of parameter dicts (for dimension names)
         
@@ -490,20 +490,20 @@ class MockAlgorithm:
             - threshold: float
             - dimension_contributions: Dict - How much each dim contributed
         """
-        # Handle case where baselines might be per-dimension or unified model
-        if "centroid" in baselines:
+        # Handle case where models might be per-dimension or unified model
+        if "centroid" in models:
             # Unified multi-dim model
-            centroid = baselines.get("centroid", {})
-            threshold = baselines.get("threshold", 10.0)
+            centroid = models.get("centroid", {})
+            threshold = models.get("threshold", 10.0)
         else:
-            # Baselines are per-dimension, compute centroid from them
+            # Models are per-dimension, compute centroid from them
             centroid = {}
             threshold = 10.0
             for param in parameters:
                 dim = param.get("dimension")
-                if dim and dim in baselines:
-                    centroid[dim] = baselines[dim].get("mean", 0.0)
-                    threshold = max(threshold, baselines[dim].get("threshold", 10.0))
+                if dim and dim in models:
+                    centroid[dim] = models[dim].get("mean", 0.0)
+                    threshold = max(threshold, models[dim].get("threshold", 10.0))
             threshold *= math.sqrt(len(centroid)) if centroid else 1.0
         
         # Compute Euclidean distance from centroid
