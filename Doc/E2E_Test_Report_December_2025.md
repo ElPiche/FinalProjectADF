@@ -3,7 +3,7 @@
 > **Status**: ✅ **ALL TESTS PASSING**  
 > **Date**: December 2, 2025  
 > **Branch**: `feature/fix-train-orchestrator`  
-> **Last Updated**: December 2, 2025 - Bucket-Aware Testing Session
+> **Last Updated**: December 4, 2025 - Terminology Standardization Session
 
 ## Executive Summary
 
@@ -21,6 +21,73 @@ The modular algorithm architecture has been fully validated with end-to-end test
 - ✅ Email notifications with rate limiting
 - ✅ Elasticsearch storage with full algorithm details
 - ✅ **modify_kb_config stress test: 20 operations (16 pass, 4 properly rejected)**
+- ✅ **Terminology standardization: `config_id` → `kb_id`, `baseline` → `model`**
+- ✅ **Test file audit: 26 files clean, 1 deleted (legacy API)**
+
+---
+
+## Session Summary: December 4, 2025 - Terminology Standardization
+
+### Overview
+
+Comprehensive terminology standardization across the entire codebase to ensure consistency:
+- `config_id` → `kb_id` (identifier for KB configurations)
+- `baseline` → `model` (trained algorithm state)
+- `ZScoreBaseline` → `ZScoreModel` (class rename)
+
+### Files Modified
+
+#### MotorDA (Dispatcher)
+
+| File | Changes | Type |
+|------|---------|------|
+| `DADispatcher.py` | 63+ occurrences | `config_id` → `kb_id` |
+| `kb_worker.py` | 20+ occurrences | `config_id` → `kb_id` |
+| `zscore_algorithm.py` | Class rename | `ZScoreBaseline` → `ZScoreModel` |
+
+#### KB-MCP
+
+| File | Changes | Type |
+|------|---------|------|
+| `mcp_tools.py` | Parameter + docstrings | `config_id` → `kb_id` |
+| `mcp_tools_pkg/modify_kb_config.py` | 25+ occurrences (param, logs, errors) | `config_id` → `kb_id` |
+| `mcp_tools_pkg/list_kb_configurations.py` | Local variable | `config_id` → `kb_id` |
+| `mcp_tools_pkg/describe_mcp_server.py` | Documentation | `config_id` → `kb_id` |
+| `test_modify_kb_config.py` | Test variables | `config_id` → `kb_id` |
+| `tests/test_dynamic_descriptions.py` | Test call | `config_id` → `kb_id` |
+| `tests/test_create_modify_validation.py` | 3 test functions | `config_id` → `kb_id` |
+
+### Test File Audit Results
+
+| Component | Files Audited | Status | Notes |
+|-----------|---------------|--------|-------|
+| MotorDA/Dispatcher/tests | 7 files | ✅ Clean | 1 deleted (wrong API) |
+| MotorDA/tests | 7 files | ✅ Clean | Algorithm tests valid |
+| KB-MCP/tests | 12 files | ✅ Clean | All use correct APIs |
+
+### Deleted Files
+
+| File | Reason |
+|------|--------|
+| `MotorDA/Dispatcher/tests/test_training_orchestrator.py` | Used non-existent API (`bucket_resolver`, `models` params that don't exist in `train()`) |
+
+### Components Verified (No Changes Needed)
+
+| Component | Reason |
+|-----------|--------|
+| `kb-stress-generator/` | No `config_id`/`kb_id` references (doesn't interact with KB IDs) |
+| `log-generator/` | No `config_id`/`kb_id` references (log generation only) |
+| `MCP/KB-MCP/deprecated/` | Intentionally unchanged (legacy code) |
+| Java Extractor | Already uses `kbId` (Java naming convention) |
+
+### Terminology Reference
+
+| Old Term | New Term | Context |
+|----------|----------|---------|
+| `config_id` | `kb_id` | MongoDB document identifier |
+| `baseline` | `model` | Trained algorithm state (stats, bounds) |
+| `ZScoreBaseline` | `ZScoreModel` | Python class for z-score trained state |
+| `baselines` | `models` | Collection of trained states per bucket |
 
 ---
 
@@ -446,23 +513,27 @@ docker exec elasticsearch-anomalies curl -s "http://localhost:9200/ecommerce-log
 
 ## Conclusion
 
-The modular algorithm architecture is **production ready** with full bucket-aware anomaly detection. All tests pass and the system correctly:
+The modular algorithm architecture is **production ready** with full bucket-aware anomaly detection and **standardized terminology**. All tests pass and the system correctly:
 
 1. ✅ Registers algorithms via decorators (ZScore, IQR, Mock)
 2. ✅ Shares algorithm metadata across containers via Docker volume
 3. ✅ Creates complex bucket profiles with 127+ buckets
-4. ✅ Trains per-bucket baselines with global fallback
+4. ✅ Trains per-bucket models with global fallback
 5. ✅ Detects anomalies with bucket-aware context
 6. ✅ Posts rich algorithm details to Elasticsearch (with flat fields for Kibana)
 7. ✅ Sends email notifications with rate limiting
 8. ✅ Creates Kibana data views automatically
 9. ✅ Handles modify_kb_config operations robustly (20/20 tests)
 10. ✅ Gracefully handles null/missing bucket profile fields
+11. ✅ **Consistent terminology: `kb_id` (identifiers), `model` (trained state)**
+12. ✅ **Clean test suite: 26 files audited, 1 legacy test removed**
 
 **Production Checklist**:
 - [x] Bucket profiles in `knowledge_base.bucket_profiles` (consistent DB)
 - [x] KB configs reference bucket_profile_id correctly
-- [x] Training creates per-bucket baselines
+- [x] Training creates per-bucket models (not "baselines")
 - [x] Detection resolves bucket from timestamp
 - [x] Kibana dashboard shows z_score/iqr fields correctly
 - [x] modify_kb_config validates all inputs
+- [x] All code uses `kb_id` (Python) / `kbId` (Java) consistently
+- [x] All code uses `model` terminology for trained algorithm state

@@ -118,7 +118,7 @@ ETL triggers on every save. Set is_active=false to pause."""
 def _modify_kb_config_docstring():
     return f"""Update existing anomaly detection configuration.
 
-**Required:** config_id (MongoDB ObjectId from list_kb_configurations)
+**Required:** kb_id (MongoDB ObjectId from list_kb_configurations)
 
 **Optional (only specify fields to change):**
 - description, elasticsearch_sql_query, query_mode
@@ -127,7 +127,7 @@ def _modify_kb_config_docstring():
 - algorithm, bucket_profile_id, anomaly_config, source_index
 
 **Note:** ETL re-triggers on any change. Use is_active flags to pause.
-Use list_kb_configurations first to get config_id and current state."""
+Use list_kb_configurations first to get kb_id and current state."""
 
 
 def _list_kb_configurations_docstring():
@@ -136,7 +136,7 @@ def _list_kb_configurations_docstring():
 Returns per config: name, ID, description, query summary, training/detection ranges,
 frequency (CRON), algorithm dimensions.
 
-Use to find config_id for modify_kb_config."""
+Use to find kb_id for modify_kb_config."""
 
 
 def _describe_mcp_server_docstring():
@@ -224,7 +224,7 @@ async def create_da_config(
 
 
 async def modify_kb_config(
-    config_id: str,
+    kb_id: str,
     description: Optional[str] = None,
     elasticsearch_sql_query: Optional[str] = None,
     query_mode: Optional[QueryMode] = None,
@@ -244,7 +244,7 @@ async def modify_kb_config(
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "modify_kb_config"):
         return await pkg.modify_kb_config(
-            config_id,
+            kb_id,
             description,
             elasticsearch_sql_query,
             query_mode,

@@ -40,7 +40,7 @@ def log_message(message: str, level: str = "info", component: str = "mcp_tools",
 
 
 async def modify_kb_config(
-    config_id: str,
+    kb_id: str,
     description: Optional[str] = None,
     elasticsearch_sql_query: Optional[str] = None,
     query_mode: Optional[QueryMode] = None,
@@ -71,7 +71,7 @@ async def modify_kb_config(
         "modify_kb_config",
         "entry",
         request_id=request_id,
-        extra_data={"config_id": config_id},
+        extra_data={"kb_id": kb_id},
     )
 
     client = await asyncio.to_thread(connect_mongodb)
@@ -93,17 +93,17 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             try:
-                object_id = ObjectId(config_id)
+                object_id = ObjectId(kb_id)
             except Exception as exc:
-                raise ToolError(f"Invalid configuration ID format: '{config_id}' - {exc}")
+                raise ToolError(f"Invalid KB ID format: '{kb_id}' - {exc}")
 
             config_doc = await asyncio.to_thread(collection.find_one, {"_id": object_id})
             if not config_doc:
-                raise ToolError(f"Configuration with ID '{config_id}' not found")
+                raise ToolError(f"Configuration with KB ID '{kb_id}' not found")
 
             try:
                 existing_config = KBConfig.model_validate({k: v for k, v in config_doc.items() if k != "_id"})
@@ -116,7 +116,7 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             step_start = time.time()
@@ -127,7 +127,7 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             updates_applied = False
@@ -298,7 +298,7 @@ async def modify_kb_config(
                     "modify_kb_config",
                     "validation",
                     request_id=request_id,
-                    extra_data={"config_id": config_id},
+                    extra_data={"kb_id": kb_id},
                 )
                 raise ToolError("No valid updates provided")
 
@@ -355,7 +355,7 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             step_start = time.time()
@@ -366,7 +366,7 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             algorithm_payload = new_config.algorithm.model_dump(by_alias=True)
@@ -439,7 +439,7 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             payload = new_config.model_dump(by_alias=True, exclude_none=True)
@@ -452,7 +452,7 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             result = await asyncio.to_thread(
@@ -468,7 +468,7 @@ async def modify_kb_config(
                     "modify_kb_config",
                     "update",
                     request_id=request_id,
-                    extra_data={"config_id": config_id},
+                    extra_data={"kb_id": kb_id},
                 )
                 raise ToolError("No changes were made to the configuration")
 
@@ -478,20 +478,20 @@ async def modify_kb_config(
                 "modify_kb_config",
                 "step",
                 request_id=request_id,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
 
             duration_ms = (time.time() - start_time) * 1000
             log_message(
-                f"Configuration '{config_id}' updated successfully",
+                f"Configuration '{kb_id}' updated successfully",
                 "info",
                 "modify_kb_config",
                 "completion",
                 request_id=request_id,
                 duration_ms=duration_ms,
-                extra_data={"config_id": config_id},
+                extra_data={"kb_id": kb_id},
             )
-            success_msg = f"SUCCESS: Configuration '{config_id}' updated successfully."
+            success_msg = f"SUCCESS: Configuration '{kb_id}' updated successfully."
             if warnings:
                 success_msg += "\n" + "\n".join(warnings)
 
@@ -508,7 +508,7 @@ async def modify_kb_config(
             "failure",
             request_id=request_id,
             duration_ms=duration_ms,
-            extra_data={"config_id": config_id},
+            extra_data={"kb_id": kb_id},
         )
         raise ToolError(f"modify_kb_config exceeded the timeout limit ({MAX_TOOL_EXECUTION_TIME}s).") from exc
     except ToolError:
@@ -521,20 +521,20 @@ async def modify_kb_config(
             "failure",
             request_id=request_id,
             duration_ms=duration_ms,
-            extra_data={"config_id": config_id},
+            extra_data={"kb_id": kb_id},
         )
         raise
     except Exception as exc:
         await reporter.error(f"❌ modify_kb_config hit an unexpected error: {exc}")
         duration_ms = (time.time() - start_time) * 1000
         log_message(
-            f"Unexpected error modifying configuration {config_id}: {exc}",
+            f"Unexpected error modifying configuration {kb_id}: {exc}",
             "error",
             "modify_kb_config",
             "error",
             request_id=request_id,
             duration_ms=duration_ms,
-            extra_data={"config_id": config_id, "error_type": type(exc).__name__},
+            extra_data={"kb_id": kb_id, "error_type": type(exc).__name__},
         )
         raise ToolError(f"Failed to modify configuration: {exc}") from exc
     finally:

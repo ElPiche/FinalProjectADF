@@ -12,15 +12,15 @@ db.mongo_connection_string = "mongodb://admin:1q2w3E*@localhost:27017/?authSourc
 # Create test algorithm config using ZScoreConfig model
 zscore_config = ZScoreConfig(alg_parameters=[{"dimension": "bytes"}])
 
-# Test config ID (from previously created config)
-test_config_id = "69080ca0fa82d20eb549daec"
+# Test KB ID (from previously created config)
+test_kb_id = "69080ca0fa82d20eb549daec"
 
 # Run the test
 stderr_print("Testing modify_kb_config with algorithm update...")
 
 try:
     result = modify_kb_config(
-        config_id=test_config_id,
+        kb_id=test_kb_id,
         description="Updated test configuration via modify_kb_config",
         algorithms=[zscore_config]
     )
@@ -28,4 +28,4 @@ try:
     stderr_print(result)
 except Exception as e:
     stderr_print(f'ERROR: modify_kb_config test failed: {e}')
-    stderr_print('Note: This test requires a valid config_id from a previously created configuration')
+    stderr_print('Note: This test requires a valid kb_id from a previously created configuration')
