@@ -339,6 +339,34 @@ def save_training_result(config_id: str, result: dict) -> str:
         return str(inserted.inserted_id)
 
 
+def cleanup_training_series(kb_id: str) -> int:
+    """
+    Delete training series data after successful training.
+    
+    Training series (mode=0) are temporary - once the model is trained,
+    the raw series data is no longer needed. This prevents stale data
+    accumulation when training ranges change.
+    
+    Args:
+        kb_id: KB configuration ID
+        
+    Returns:
+        Number of documents deleted
+    """
+    collection = get_collection(SERIES_COLLECTION)
+    
+    result = collection.delete_many({
+        "metadata.kbId": kb_id,
+        "metadata.mode": 0  # Training mode only
+    })
+    
+    deleted_count = result.deleted_count
+    if deleted_count > 0:
+        logger.info(f"[CLEANUP] Deleted {deleted_count} training series for KB {kb_id}")
+    
+    return deleted_count
+
+
 # =============================================================================
 # Detection Functions
 # =============================================================================
@@ -798,6 +826,9 @@ def watch_training_changes():
                     # Save result
                     result_id = save_training_result(config_id, result)
                     logger.info(f"[WATCHER] Saved training result: {result_id}")
+                    
+                    # Cleanup training series - no longer needed after successful training
+                    cleanup_training_series(config_id)
                     
                     # Mark as trained
                     collection.update_one(

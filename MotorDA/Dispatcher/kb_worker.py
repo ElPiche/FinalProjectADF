@@ -509,19 +509,35 @@ class DispatcherManager:
     def _spawn_worker(self, kb_config: Dict[str, Any]):
         """Spawn a new worker for a KB config.
         
+        If a worker already exists but the training result has changed,
+        the old worker is stopped and a new one is spawned with the updated config.
+        
         Args:
             kb_config: KB configuration document
         """
         config_id = str(kb_config["_id"])
         
+        training_result = self._get_training_result(config_id)
+        if not training_result:
+            logger.warning(f"[MANAGER] No training result for KB {config_id}, skipping")
+            return
+        
         with self._workers_lock:
-            if config_id in self._workers:
-                return  # Already running
-            
-            training_result = self._get_training_result(config_id)
-            if not training_result:
-                logger.warning(f"[MANAGER] No training result for KB {config_id}, skipping")
-                return
+            existing_worker = self._workers.get(config_id)
+            if existing_worker:
+                # Check if training result has changed (compare updated_at timestamp)
+                old_updated_at = existing_worker.training_result.get("updated_at")
+                new_updated_at = training_result.get("updated_at")
+                
+                logger.debug(f"[MANAGER] Worker {config_id[:8]} exists, checking for update: old={old_updated_at}, new={new_updated_at}")
+                
+                if old_updated_at == new_updated_at:
+                    return  # No change, keep existing worker
+                
+                # Training result changed - restart worker
+                logger.info(f"[MANAGER] Training result changed for KB {config_id}, restarting worker")
+                existing_worker.stop()
+                del self._workers[config_id]
             
             worker = KBWorker(
                 kb_id=config_id,
@@ -627,6 +643,8 @@ class DispatcherManager:
         """
         trained_collection = self._get_trained_models_collection()
         
+        logger.info(f"[MANAGER] Trained models watcher: watching {self.anomaly_db_name}.trained_models")
+        
         pipeline = [
             {
                 "$match": {
@@ -639,12 +657,14 @@ class DispatcherManager:
         
         try:
             with trained_collection.watch(pipeline, full_document="updateLookup") as stream:
+                logger.info("[MANAGER] Trained models change stream opened successfully")
                 for change in stream:
                     if not self._running:
                         break
                     
                     try:
                         # Sync workers when training completes
+                        logger.info(f"[MANAGER] Trained models change detected: {change.get('operationType')}")
                         self._sync_workers()
                     
                     except Exception as e:
