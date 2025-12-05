@@ -339,7 +339,7 @@ services:
       - INDEX_NAME=ecommerce-logs # Index name to store logs
       - HISTORICAL_DAYS=365 # Number of historical days to generate
       - HISTORICAL_BATCH_SIZE=10000 # Number of logs to generate per batch for historical data
-      - BASE_REQUESTS_PER_HOUR=500 # Adjust base load here
+      - BASE_REQUESTS_PER_HOUR=2000 # Adjust base load here
       - PEAK_MULTIPLIER=4.0 # Peak hours get 4x traffic
       - HISTORICAL_ANOMALY_RATE=0.015 # 1.5% anomalies in historical data
       - CONTINUOUS_INTERVAL=1.0 # Interval in seconds for continuous log generation
@@ -353,6 +353,22 @@ services:
       - NUM_WORKERS=4 # Number of parallel worker threads
       - BULK_THREAD_COUNT=16 # Number of parallel bulk streams
       - CHUNK_SIZE=5000 # Docs per bulk chunk (smaller = more parallelism)
+      # =================================================================
+      # GENERATION MODE: "random" or "event"
+      # =================================================================
+      # "random" - Original mode: independent anomalies, high throughput
+      # "event"  - Event-based: realistic system events with correlated metrics
+      #            Events like db_outage, ddos_attack, deployment affect 
+      #            multiple metrics together (errors + latency + bytes)
+      - GENERATION_MODE=event
+      # Event mode settings (only used when GENERATION_MODE=event)
+      # NOTE: EVENT_MODE_BASE_RPS is auto-calculated from BASE_REQUESTS_PER_HOUR!
+      #       500/hour / 3600 = ~0.139 RPS (matches historical average rate)
+      #       Set EVENT_MODE_BASE_RPS only if you need to override this.
+      # - EVENT_MODE_BASE_RPS=0.139 # Uncomment to override auto-calculation
+      - EVENT_PROBABILITY=0.0001 # Probability of new event per second (0.01% = ~1 event per 2-3 hours)
+      - EVENT_MIN_DURATION=45 # Minimum event duration in seconds
+      - EVENT_MAX_DURATION=120 # Maximum event duration in seconds
     networks:
       - adf-network
     # Explicitly disable Dockerfile healthcheck during long data generation

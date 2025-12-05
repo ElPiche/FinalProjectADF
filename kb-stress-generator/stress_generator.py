@@ -386,14 +386,21 @@ class KBConfigGenerator:
             "0 */5 * * * *",    # Every 5 minutes
         ]
         
-        # Detection windows in seconds (matches frequency options)
+        # Detection windows in seconds
+        # IMPORTANT: With ~0.5 RPS data, we need longer windows to get enough samples:
+        # - 60s = ~30 logs (minimum reasonable)
+        # - 300s = ~150 logs (good)
+        # - 600s = ~300 logs (better)
+        # - 3600s = ~1800 logs (best for stable metrics)
+        # Small windows (5s, 10s, 30s) don't work with low RPS data!
         self.detection_windows = [
-            5,     # 5 seconds (for 1-5s frequencies)
-            10,    # 10 seconds
-            30,    # 30 seconds
-            60,    # 1 minute
+            60,    # 1 minute - minimum reasonable with 0.5 RPS
+            120,   # 2 minutes
             300,   # 5 minutes
             600,   # 10 minutes
+            900,   # 15 minutes  
+            1800,  # 30 minutes
+            3600,  # 1 hour
         ]
         
         # Config name templates
@@ -498,10 +505,12 @@ class KBConfigGenerator:
                     "value": str(random.choice([3, 5, 10]))
                 })
             elif param == "multiplier":
-                # IQR multiplier: 1.5 (standard), 3.0 (extreme outliers only)
+                # IQR multiplier: Higher values = less sensitive to outliers
+                # 1.5 is standard but too tight for high-variance e-commerce data
+                # Use 2.5-4.0 range for realistic detection
                 metadata.append({
                     "key": "multiplier",
-                    "value": str(random.choice([1.5, 2.0, 3.0]))
+                    "value": str(random.choice([2.5, 3.0, 3.5, 4.0]))
                 })
         
         return metadata if metadata else None
