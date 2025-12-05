@@ -287,7 +287,7 @@ class KBWorker:
             
             # Log detection attempt
             logger.info(
-                f"[KBWORKER-{self.kb_id[:8]}] Running detection: "
+                f"[KBWORKER-{self.kb_id[:8]}] Running detection ({self._algorithm_name}): "
                 f"timestamp={observation.get('timestamp')}"
             )
             
@@ -298,7 +298,7 @@ class KBWorker:
             
             if result.get("is_anomaly", False):
                 logger.info(
-                    f"[KBWORKER-{self.kb_id[:8]}] Anomaly detected: "
+                    f"[KBWORKER-{self.kb_id[:8]}] Anomaly detected ({self._algorithm_name}): "
                     f"timestamp={observation.get('timestamp')}"
                 )
                 
@@ -601,6 +601,16 @@ class DispatcherManager:
         # Start workers that should be running
         for kb_id, kb_config in active_configs.items():
             self._spawn_worker(kb_config)
+        
+        # Log current worker count after sync
+        with self._workers_lock:
+            worker_count = len(self._workers)
+            worker_info = [
+                f"{w.kb_config.get('name', 'unknown')} ({w._algorithm_name})"
+                for w in self._workers.values()
+            ]
+        
+        logger.info(f"[MANAGER] Sync complete: {worker_count} active workers: {worker_info}")
     
     def _watch_kb_configs(self):
         """Watch kb_configs collection for changes.
