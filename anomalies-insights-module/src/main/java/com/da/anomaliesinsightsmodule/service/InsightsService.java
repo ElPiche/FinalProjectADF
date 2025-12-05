@@ -69,13 +69,26 @@ public class InsightsService {
             kbIdMapping.setSavedSearchId(ssId);
             kbIdMapping.setDashboardId(dashId);
 
+            //Crear mapeo
+            elasticsearchService.createKbMapping(kbIdMapping);
+
+            logger.info("Creating mapping:  kbid: " + kbIdMapping.getKbId() + " Source index: " + sourceIndex + " Anomaly index: " + anomalyIndex);
+
+            return;
         }
 
-        //Crear mapeo
+        Optional<IndexKbIdMapping> mappingOpt = elasticsearchService.getKbMappingBySourceIndex(kbIdMapping.getSourceIndex());
+
+        IndexKbIdMapping mapping = mappingOpt
+                .orElseThrow(() -> new NoSuchElementException("kb mapping not found: " + kbIdMapping.getSourceIndex()));
+
+        kbIdMapping.setDataViewId(mapping.getDataViewId());
+        kbIdMapping.setSavedSearchId(mapping.getSavedSearchId());
+        kbIdMapping.setDashboardId(mapping.getDashboardId());
+
         elasticsearchService.createKbMapping(kbIdMapping);
 
         logger.info("Creating mapping:  kbid: " + kbIdMapping.getKbId() + " Source index: " + sourceIndex + " Anomaly index: " + anomalyIndex);
-
     }
 
     public IndexResponse uploadDocument(String kbId, DocumentDto doc) throws Exception {
@@ -87,6 +100,8 @@ public class InsightsService {
                 .orElseThrow(() -> new NoSuchElementException("kb mapping not found: " + kbId));
 
         IndexResponse response;
+
+        logger.info("Mapping DashboardId: " + mapping.getDashboardId());
 
         //Subir documento to anomaly index
         response = elasticsearchService.indexAnomalyDocument(mapping.getAnomalyIndex(), doc);
@@ -130,6 +145,10 @@ public class InsightsService {
         
         try{
             // Check rate limit before sending
+
+            logger.info("Template variables - kbName: {}, metric: {}, value: {}, timestamp: {}, sourceIndex: {}, dashboardId: {}",
+                    doc.getKbName(), doc.getMetric(), doc.getValue(), doc.getTimestamp(), mapping.getSourceIndex(), mapping.getDashboardId());
+
             logger.info("Checking rate limit for email: {}", recipientEmail);
             if (!emailRateLimiterService.canSendEmail(recipientEmail)) {
                 logger.info("Email to {} rate limited. Status: {}", 
@@ -139,8 +158,10 @@ public class InsightsService {
             }
 
             logger.info("Rate limit check passed. Preparing email template...");
-            logger.info("Template variables - kbName: {}, metric: {}, value: {}, timestamp: {}, sourceIndex: {}", 
-                    doc.getKbName(), doc.getMetric(), doc.getValue(), doc.getTimestamp(), mapping.getSourceIndex());
+
+            //logger.info("Template variables - kbName: {}, metric: {}, value: {}, timestamp: {}, sourceIndex: {}, dashboardId: {}",
+            //        doc.getKbName(), doc.getMetric(), doc.getValue(), doc.getTimestamp(), mapping.getSourceIndex(), mapping.getDashboardId());
+
 
             emailNotificationService.sendHtmlEmailFromTemplate(
                     recipientEmail,
