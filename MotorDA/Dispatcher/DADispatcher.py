@@ -573,13 +573,17 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
         detection_details = anomaly.get("detection_result", {})
         
         # Get dimension results for algorithm_details
-        # Single-dim algorithms return 'dimensions' or 'dimension_results'
-        # Multi-dim algorithms return 'dimension_contributions'
-        dimension_results = (
-            detection_details.get("dimensions", {}) or 
-            detection_details.get("dimension_results", {}) or
-            detection_details.get("dimension_contributions", {})
-        )
+        # Single-dim algorithms return 'dimensions' (dict with per-dimension results)
+        # Multi-dim algorithms return 'dimension_contributions' (dict)
+        # Note: Multi-dim K-means also returns 'dimensions' as a LIST of dimension names
+        raw_dimensions = detection_details.get("dimensions")
+        
+        # Handle both dict (single-dim results) and list (multi-dim dimension names)
+        if isinstance(raw_dimensions, dict):
+            dimension_results = raw_dimensions
+        else:
+            # For multi-dim, try dimension_contributions
+            dimension_results = detection_details.get("dimension_contributions", {})
         
         # For multi-dim, check anomalous_dimensions list
         anomalous_dims = detection_details.get("anomalous_dimensions", [])
