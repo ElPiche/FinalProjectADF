@@ -532,13 +532,23 @@ def should_inject_anomaly(dt: datetime, endpoint_name: str) -> Tuple[bool, str]:
     """
     Determine if this request should be anomalous.
     Returns (is_anomaly, anomaly_type).
+    
+    Anomaly types for multi-dimensional detection:
+    - db_outage: High errors + high response time + low bytes
+    - deployment: High errors + variable response time
+    - payment_failure: Errors on payment endpoints
+    - traffic_spike: Normal status but very high response time
+    - bandwidth_anomaly: Normal status but abnormally high/low bytes_sent
+    - slowdown_no_errors: Very slow but no errors (partial system degradation)
+    - data_corruption: Normal response time but very small bytes (truncated responses)
+    - ddos_pattern: Fast responses, small bytes, high volume (bot traffic)
     """
     hour = dt.hour
     day = dt.day
     month = dt.month
     weekday = dt.weekday()
     
-    # Database outage pattern
+    # Database outage pattern - high errors + slow
     if day == 15 and month in [2, 4, 6, 8, 10, 12] and 2 <= hour <= 4:
         if random.random() < 0.5:
             return True, "db_outage"
@@ -553,11 +563,29 @@ def should_inject_anomaly(dt: datetime, endpoint_name: str) -> Tuple[bool, str]:
         if random.random() < 0.008:
             return True, "payment_failure"
     
+    # NEW: Slowdown without errors (CDN issues, network congestion)
+    # High response time but 200 OK - catches multi-dim patterns
+    if random.random() < 0.003:
+        return True, "slowdown_no_errors"
+    
+    # NEW: Bandwidth anomaly (unusually large or small responses)
+    if random.random() < 0.002:
+        return True, "bandwidth_anomaly"
+    
+    # NEW: Data corruption / truncated responses
+    # Normal response time but tiny bytes (incomplete data)
+    if random.random() < 0.002:
+        return True, "data_corruption"
+    
+    # NEW: DDoS pattern - fast tiny responses (rate limiting kicking in)
+    if random.random() < 0.001:
+        return True, "ddos_pattern"
+    
     # Random traffic spike causing timeouts
     if random.random() < 0.002:
         return True, "traffic_spike"
     
-    # Random baseline anomaly
+    # Random baseline anomaly (classic error spike)
     if random.random() < HISTORICAL_ANOMALY_RATE:
         return True, "random"
     
@@ -594,19 +622,63 @@ def generate_log_entry(
     if session is None:
         session = UserSession.create_random(timestamp)
     
-    # Determine status and response time
-    status_code = get_status_code(is_anomaly)
-    response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+    # =========================================================================
+    # Multi-dimensional anomaly generation
+    # Each anomaly type affects different combinations of metrics
+    # =========================================================================
+    if is_anomaly and anomaly_type == "slowdown_no_errors":
+        # Slow responses but NO errors - CDN/network issues
+        status_code = 200  # Success!
+        response_time = random.randint(5000, 25000)  # Very slow
+        # Normal bytes
+        if endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
-    # Calculate bytes
-    if status_code >= 400:
-        bytes_sent = random.randint(100, 1000)
-    elif endpoint_name in ["product_list", "search"]:
-        bytes_sent = random.randint(10000, 100000)
-    elif endpoint_name in ["product_detail"]:
-        bytes_sent = random.randint(5000, 30000)
+    elif is_anomaly and anomaly_type == "bandwidth_anomaly":
+        # Normal status & response time, but abnormal bytes
+        status_code = 200
+        response_time = random.randint(50, 300)  # Normal
+        # Abnormally large responses (memory leak dumping data)
+        bytes_sent = random.randint(500000, 2000000)  # 500KB-2MB instead of normal
+    
+    elif is_anomaly and anomaly_type == "data_corruption":
+        # Normal response time but tiny bytes (truncated/corrupted responses)
+        status_code = 200  # Looks successful
+        response_time = random.randint(50, 200)  # Fast
+        bytes_sent = random.randint(10, 100)  # Suspiciously small
+    
+    elif is_anomaly and anomaly_type == "ddos_pattern":
+        # Fast tiny responses (rate limiter or firewall blocking)
+        status_code = random.choice([200, 429, 403])  # Mix of success and rate-limit
+        response_time = random.randint(1, 20)  # Very fast (cached/blocked)
+        bytes_sent = random.randint(50, 200)  # Tiny
+    
+    elif is_anomaly and anomaly_type == "traffic_spike":
+        # High latency, normal status (system under load)
+        status_code = 200
+        response_time = random.randint(3000, 15000)  # Slow due to load
+        # Normal bytes but on the larger side
+        bytes_sent = random.randint(8000, 50000)
+    
     else:
-        bytes_sent = random.randint(500, 15000)
+        # Default anomaly behavior (db_outage, deployment, payment_failure, random)
+        # These cause errors + slow responses (original behavior)
+        status_code = get_status_code(is_anomaly)
+        response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+        
+        # Calculate bytes based on status
+        if status_code >= 400:
+            bytes_sent = random.randint(100, 1000)
+        elif endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
     # Build log entry
     entry = {
@@ -926,19 +998,52 @@ def generate_log_entry_fast(timestamp: datetime, is_anomaly: bool, anomaly_type:
     # Geo
     geo = random.choice(WEIGHTED_GEO)
     
-    # Status and response time
-    status_code = get_status_code(is_anomaly)
-    response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+    # =========================================================================
+    # Multi-dimensional anomaly generation (same logic as generate_log_entry)
+    # =========================================================================
+    if is_anomaly and anomaly_type == "slowdown_no_errors":
+        status_code = 200
+        response_time = random.randint(5000, 25000)
+        if endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
-    # Bytes
-    if status_code >= 400:
-        bytes_sent = random.randint(100, 1000)
-    elif endpoint_name in ["product_list", "search"]:
-        bytes_sent = random.randint(10000, 100000)
-    elif endpoint_name in ["product_detail"]:
-        bytes_sent = random.randint(5000, 30000)
+    elif is_anomaly and anomaly_type == "bandwidth_anomaly":
+        status_code = 200
+        response_time = random.randint(50, 300)
+        bytes_sent = random.randint(500000, 2000000)
+    
+    elif is_anomaly and anomaly_type == "data_corruption":
+        status_code = 200
+        response_time = random.randint(50, 200)
+        bytes_sent = random.randint(10, 100)
+    
+    elif is_anomaly and anomaly_type == "ddos_pattern":
+        status_code = random.choice([200, 429, 403])
+        response_time = random.randint(1, 20)
+        bytes_sent = random.randint(50, 200)
+    
+    elif is_anomaly and anomaly_type == "traffic_spike":
+        status_code = 200
+        response_time = random.randint(3000, 15000)
+        bytes_sent = random.randint(8000, 50000)
+    
     else:
-        bytes_sent = random.randint(500, 15000)
+        # Default behavior (db_outage, deployment, payment_failure, random)
+        status_code = get_status_code(is_anomaly)
+        response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+        
+        if status_code >= 400:
+            bytes_sent = random.randint(100, 1000)
+        elif endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
     # User
     user_id = f"user_{random.randint(1, 50000)}" if random.random() < 0.30 else None
