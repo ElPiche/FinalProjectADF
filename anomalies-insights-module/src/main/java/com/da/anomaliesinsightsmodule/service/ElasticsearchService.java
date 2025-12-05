@@ -74,6 +74,10 @@ public class ElasticsearchService {
         return indexKbIdMappingRepo.findByKbId(kbId);
     }
 
+    public Optional<IndexKbIdMapping> getKbMappingBySourceIndex(String sourceIndex) throws Exception {
+        return indexKbIdMappingRepo.findBySourceIndex(sourceIndex);
+    }
+
     public void createIndex(String indexName) throws Exception {
         client.indices().create(c -> c.index(indexName));
     }
