@@ -216,6 +216,7 @@ class KMeans:
             "threshold": chosen_threshold,
             "cluster_thresholds": cluster_thresholds if cluster_thresholds is not None else None,
             "feature_vector": x.tolist(),
+            "dimensions": feature_order,
         }
 
     # Optional convenience: batch detection (not required by register for multi-dim,

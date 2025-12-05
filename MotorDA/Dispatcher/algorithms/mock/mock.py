@@ -542,4 +542,5 @@ class MockAlgorithm:
             "threshold": threshold,
             "dimension_contributions": dimension_contributions,
             "anomalous_dimensions": anomalous_dims,
+            "dimensions": list(centroid.keys()),
         }

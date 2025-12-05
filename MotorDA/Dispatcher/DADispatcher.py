@@ -611,7 +611,9 @@ def post_anomaly_to_insights(detection_result: dict, kb_config: dict):
         
         # Multi-dim fallback: use distance as value if no dimension found
         if not primary_metric and detection_details.get("distance") is not None:
-            primary_metric = "multi_dimensional"
+            # Use dimensions list if available, otherwise fall back to "multi_dimensional"
+            dimensions = detection_details.get("dimensions", [])
+            primary_metric = ",".join(dimensions) if dimensions else "multi_dimensional"
             primary_value = detection_details.get("distance")
         
         # Get timestamp - could be 'bucket' or 'timestamp' depending on query_mode

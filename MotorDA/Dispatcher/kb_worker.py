@@ -285,6 +285,12 @@ class KBWorker:
             query_mode = self.kb_config.get("query_mode", {})
             timestamp_field = query_mode.get("timestamp_field", "timestamp")
             
+            # Log detection attempt
+            logger.info(
+                f"[KBWORKER-{self.kb_id[:8]}] Running detection: "
+                f"timestamp={observation.get('timestamp')}"
+            )
+            
             result = self._detection_orchestrator.detect(
                 observation=observation,
                 timestamp_field=timestamp_field
