@@ -322,7 +322,7 @@ def test_modify_config_replaces_placeholders_before_validation(monkeypatch):
 
     result = asyncio.run(
         modify_kb_config(
-            config_id=str(object_id),
+            kb_id=str(object_id),
             elasticsearch_sql_query=updated_query,
         )
     )
@@ -341,8 +341,8 @@ def test_modify_config_replaces_placeholders_before_validation(monkeypatch):
 
 
 def test_modify_kb_config_stops_when_extractor_rejects(monkeypatch):
-    config_id = str(ObjectId())
-    document = build_existing_document(ObjectId(config_id))
+    kb_id = str(ObjectId())
+    document = build_existing_document(ObjectId(kb_id))
     fake_collection = FakeCollection(document)
 
     monkeypatch.setattr(modify_module, "connect_mongodb", lambda: FakeClient(fake_collection))
@@ -355,15 +355,15 @@ def test_modify_kb_config_stops_when_extractor_rejects(monkeypatch):
     with pytest.raises(ToolError):
         asyncio.run(
             modify_kb_config(
-                config_id=config_id,
+                kb_id=kb_id,
                 elasticsearch_sql_query="SELECT response_time FROM metrics WHERE foo=1",
             )
         )
 
 
 def test_modify_kb_config_runs_when_extractor_passes(monkeypatch):
-    config_id = str(ObjectId())
-    document = build_existing_document(ObjectId(config_id))
+    kb_id = str(ObjectId())
+    document = build_existing_document(ObjectId(kb_id))
     fake_collection = FakeCollection(document)
 
     monkeypatch.setattr(modify_module, "connect_mongodb", lambda: FakeClient(fake_collection))
@@ -379,7 +379,7 @@ def test_modify_kb_config_runs_when_extractor_passes(monkeypatch):
 
     result = asyncio.run(
         modify_kb_config(
-            config_id=config_id,
+            kb_id=kb_id,
             elasticsearch_sql_query="SELECT response_time FROM metrics WHERE foo=1",
         )
     )

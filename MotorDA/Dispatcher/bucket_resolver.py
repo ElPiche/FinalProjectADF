@@ -199,10 +199,11 @@ class BucketProfile:
         profile_id = data.get("_id") or data.get("profile_id", "unknown")
         timezone = data.get("timezone", "UTC")
         
-        # Parse exceptions
+        # Parse exceptions (handle None explicitly)
         exceptions = []
-        for exc in data.get("exceptions", []):
-            rule = exc.get("rule", {})
+        exceptions_data = data.get("exceptions") or []
+        for exc in exceptions_data:
+            rule = exc.get("rule", {}) or {}
             exceptions.append(ExceptionRule(
                 bucket_base_key=exc.get("bucket_base_key", "exception"),
                 month=rule.get("month", 1),
@@ -211,21 +212,22 @@ class BucketProfile:
                 year=rule.get("year"),
             ))
         
-        # Parse schedule
+        # Parse schedule (handle None explicitly)
         schedule = []
-        for sched in data.get("schedule", []):
-            time_range = sched.get("time_range", {})
+        schedule_data = data.get("schedule") or []
+        for sched in schedule_data:
+            time_range = sched.get("time_range", {}) or {}
             schedule.append(ScheduleRule(
                 bucket_base_key=sched.get("bucket_base_key", "default"),
-                days=sched.get("days", []),
+                days=sched.get("days") or [],
                 start_time=time_range.get("start", "00:00"),
                 end_time=time_range.get("end", "23:59"),
                 granularity=sched.get("granularity", "hourly"),
                 months=sched.get("months"),
             ))
         
-        # Parse fallback
-        fb_data = data.get("fallback", {})
+        # Parse fallback (handle None explicitly)
+        fb_data = data.get("fallback") or {}
         fallback = FallbackRule(
             bucket_base_key=fb_data.get("bucket_base_key", "fallback"),
             granularity=fb_data.get("granularity", "hourly"),

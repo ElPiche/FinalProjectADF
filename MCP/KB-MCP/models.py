@@ -1,8 +1,12 @@
 """Pydantic models and helpers for KB-MCP."""
 
+import os
+import json
+from pathlib import Path
 from datetime import datetime
 import re
 from typing import Any, Dict, List, Optional
+import logging
 
 from pydantic import (
     AliasChoices,
@@ -13,8 +17,52 @@ from pydantic import (
     model_validator,
 )
 
+logger = logging.getLogger(__name__)
 
-SUPPORTED_ALGORITHMS = {"zscore"}
+# ============================================================================
+# ALGORITHM REGISTRY - Read from shared volume (written by DA-Dispatcher)
+# ============================================================================
+
+ALGORITHM_REGISTRY_PATH = Path(os.environ.get(
+    "ALGORITHM_REGISTRY_PATH", 
+    "/app/registry/algorithms.json"
+))
+
+
+def get_supported_algorithms() -> Dict[str, Any]:
+    """Read algorithm registry from shared volume.
+    
+    DA-Dispatcher writes this file on startup.
+    Returns dict of {name: metadata} for all registered algorithms.
+    """
+    if not ALGORITHM_REGISTRY_PATH.exists():
+        logger.warning(f"Algorithm registry not found: {ALGORITHM_REGISTRY_PATH}")
+        # Fallback to known algorithms if file doesn't exist yet
+        return {"zscore": {}, "mock": {}, "iqr": {}}
+    
+    try:
+        return json.loads(ALGORITHM_REGISTRY_PATH.read_text())
+    except Exception as e:
+        logger.error(f"Failed to read algorithm registry: {e}")
+        return {"zscore": {}, "mock": {}, "iqr": {}}
+
+
+class _DynamicAlgorithmSet:
+    """Set-like object that reads from the registry file each time."""
+    
+    def __contains__(self, item):
+        algos = get_supported_algorithms()
+        return item.lower() in algos
+    
+    def __iter__(self):
+        return iter(get_supported_algorithms().keys())
+    
+    def __len__(self):
+        return len(get_supported_algorithms())
+
+
+# This is used for validation - reads fresh from file each time
+SUPPORTED_ALGORITHMS = _DynamicAlgorithmSet()
 
 
 class QueryMode(BaseModel):

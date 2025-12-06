@@ -281,7 +281,7 @@ class TestDynamicDescriptions:
             try:
                 result = asyncio.run(
                     modify_kb_config(
-                        config_id="507f1f77bcf86cd799439011",
+                        kb_id="507f1f77bcf86cd799439011",
                         description="updated description"
                     )
                 )

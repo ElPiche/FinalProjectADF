@@ -9,6 +9,7 @@ Periodically creates KB configurations AND bucket profiles to stress test the st
 - Elasticsearch (queries)
 
 Features:
+- Dynamic algorithm discovery from shared Docker volume
 - Continuous config generation at random intervals
 - Burst mode: occasionally spam multiple configs at once
 - Creates bucket profiles with various time-context patterns
@@ -19,6 +20,7 @@ Features:
 
 import os
 import sys
+import json
 import time
 import random
 import signal
@@ -27,6 +29,7 @@ import argparse
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
+from pathlib import Path
 import uuid
 
 from pymongo import MongoClient
@@ -61,7 +64,9 @@ class StressGeneratorConfig:
     mongodb_collection: str = "kb_configs"  # Must match ETL expectation
     bucket_collection: str = "bucket_profiles"  # For bucket profiles
     es_url: str = "http://elasticsearch-dataset:9200"
-    source_index: str = "ecommerce-logs"  # Target index for KB configs
+    source_index: str = "ecommerce-logs"  # Target index for KB configs (must match log-generator INDEX_NAME)
+    historical_days: int = 365  # Must match log-generator HISTORICAL_DAYS setting
+    algorithm_registry_path: str = "/app/registry/algorithms.json"  # Shared volume
     
     mode: str = "continuous"  # continuous, burst, single
     min_interval: int = 30  # seconds between configs
@@ -83,6 +88,8 @@ class StressGeneratorConfig:
             bucket_collection=os.getenv("BUCKET_COLLECTION", cls.bucket_collection),
             es_url=os.getenv("ES_URL", cls.es_url),
             source_index=os.getenv("SOURCE_INDEX", cls.source_index),
+            historical_days=int(os.getenv("HISTORICAL_DAYS", str(cls.historical_days))),
+            algorithm_registry_path=os.getenv("ALGORITHM_REGISTRY_PATH", cls.algorithm_registry_path),
             mode=os.getenv("MODE", cls.mode),
             min_interval=int(os.getenv("MIN_INTERVAL", str(cls.min_interval))),
             max_interval=int(os.getenv("MAX_INTERVAL", str(cls.max_interval))),
@@ -215,12 +222,101 @@ class BucketProfileGenerator:
         }
 
 
+class AlgorithmRegistry:
+    """Reads and manages available algorithms from the shared Docker volume."""
+    
+    # Default algorithms in case registry file is not available
+    DEFAULT_ALGORITHMS = {
+        "zscore": {
+            "name": "zscore",
+            "description": "Z-Score statistical anomaly detection",
+            "parameters": ["percentile", "min_points"],
+        },
+        "iqr": {
+            "name": "iqr",
+            "description": "IQR-based outlier detection",
+            "parameters": ["multiplier"],
+        },
+        "mock": {
+            "name": "mock",
+            "description": "Mock algorithm for testing",
+            "parameters": ["percentile"],
+        },
+    }
+    
+    def __init__(self, registry_path: str = "/app/registry/algorithms.json"):
+        self.registry_path = Path(registry_path)
+        self._algorithms: Dict[str, Any] = {}
+        self._last_load_time: Optional[datetime] = None
+        self._reload_interval = timedelta(minutes=5)  # Reload every 5 minutes
+        
+        # Initial load
+        self._load_registry()
+    
+    def _load_registry(self) -> None:
+        """Load algorithms from the registry file."""
+        try:
+            if self.registry_path.exists():
+                with open(self.registry_path, 'r') as f:
+                    self._algorithms = json.load(f)
+                self._last_load_time = datetime.now(timezone.utc)
+                logger.info(f"📚 Loaded {len(self._algorithms)} algorithms from registry: {list(self._algorithms.keys())}")
+            else:
+                logger.warning(f"⚠️ Algorithm registry not found at {self.registry_path}, using defaults")
+                self._algorithms = self.DEFAULT_ALGORITHMS.copy()
+        except Exception as e:
+            logger.error(f"❌ Failed to load algorithm registry: {e}")
+            self._algorithms = self.DEFAULT_ALGORITHMS.copy()
+    
+    def _maybe_reload(self) -> None:
+        """Reload registry if enough time has passed."""
+        now = datetime.now(timezone.utc)
+        if self._last_load_time is None or (now - self._last_load_time) > self._reload_interval:
+            self._load_registry()
+    
+    def get_algorithms(self) -> Dict[str, Any]:
+        """Get all available algorithms (reloads periodically)."""
+        self._maybe_reload()
+        return self._algorithms.copy()
+    
+    def get_algorithm_names(self) -> List[str]:
+        """Get list of algorithm names."""
+        self._maybe_reload()
+        return list(self._algorithms.keys())
+    
+    def get_random_algorithm(self) -> str:
+        """Get a random algorithm name."""
+        names = self.get_algorithm_names()
+        return random.choice(names) if names else "zscore"
+    
+    def get_algorithm_info(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get info for a specific algorithm."""
+        self._maybe_reload()
+        return self._algorithms.get(name.lower())
+    
+    def get_algorithm_parameters(self, name: str) -> List[str]:
+        """Get parameter names for an algorithm."""
+        info = self.get_algorithm_info(name)
+        if info:
+            return info.get("parameters", [])
+        return []
+
+
 class KBConfigGenerator:
     """Generates randomized KB configurations for stress testing."""
     
-    def __init__(self, source_index: str = "ecommerce-logs", seed: Optional[int] = None):
+    def __init__(
+        self,
+        source_index: str = "ecommerce-logs",
+        historical_days: int = 365,
+        algorithm_registry: Optional[AlgorithmRegistry] = None,
+        seed: Optional[int] = None
+    ):
         self.fake = Faker()
         self.source_index = source_index
+        self.historical_days = historical_days  # From log-generator settings
+        self.algorithm_registry = algorithm_registry or AlgorithmRegistry()
+        
         if seed is not None:
             random.seed(seed)
             Faker.seed(seed)
@@ -233,38 +329,44 @@ class KBConfigGenerator:
             {
                 "name": "status_codes",
                 "description": "Monitor HTTP status code distribution",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS status_200_count, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS status_5xx_count, COUNT(*) AS total_requests FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS bucket, SUM(CASE WHEN status_code = 200 THEN 1 ELSE 0 END) AS status_200_count, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS status_5xx_count, COUNT(*) AS total_requests FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY 1 ORDER BY bucket''',
                 "dimensions": ["status_200_count", "status_5xx_count", "total_requests"],
             },
             {
                 "name": "latency_metrics",
                 "description": "Monitor API response latency",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, AVG(response_time_ms) AS avg_latency, MAX(response_time_ms) AS max_latency, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS bucket, AVG(response_time_ms) AS avg_latency, MAX(response_time_ms) AS max_latency, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY 1 ORDER BY bucket''',
                 "dimensions": ["avg_latency", "max_latency", "request_count"],
             },
             {
                 "name": "error_traffic",
                 "description": "Monitor error rates and traffic volume",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count, SUM(bytes_sent) AS total_bytes, COUNT(*) AS total_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS bucket, SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) AS error_count, SUM(bytes_sent) AS total_bytes, COUNT(*) AS total_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY 1 ORDER BY bucket''',
                 "dimensions": ["error_count", "total_bytes", "total_count"],
             },
             {
                 "name": "user_activity",
                 "description": "Monitor unique users and endpoints",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, COUNT(DISTINCT endpoint) AS unique_endpoints, COUNT(DISTINCT user_id) AS unique_users, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS bucket, COUNT(DISTINCT endpoint) AS unique_endpoints, COUNT(DISTINCT user_id) AS unique_users, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY 1 ORDER BY bucket''',
                 "dimensions": ["unique_endpoints", "unique_users", "request_count"],
             },
             {
                 "name": "client_errors",
                 "description": "Monitor 4xx client errors",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS client_errors, SUM(CASE WHEN status_code = 404 THEN 1 ELSE 0 END) AS not_found_count, COUNT(*) AS total_requests FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS bucket, SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END) AS client_errors, SUM(CASE WHEN status_code = 404 THEN 1 ELSE 0 END) AS not_found_count, COUNT(*) AS total_requests FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY 1 ORDER BY bucket''',
                 "dimensions": ["client_errors", "not_found_count", "total_requests"],
             },
             {
                 "name": "server_health",
                 "description": "Monitor server errors and response times",
-                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS es_timestamp, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS server_errors, AVG(response_time_ms) AS avg_response_time, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY es_timestamp ORDER BY es_timestamp''',
+                "sql": '''SELECT DATE_TRUNC('MINUTE', "@timestamp") AS bucket, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS server_errors, AVG(response_time_ms) AS avg_response_time, COUNT(*) AS request_count FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY 1 ORDER BY bucket''',
                 "dimensions": ["server_errors", "avg_response_time", "request_count"],
+            },
+            {
+                "name": "hourly_traffic",
+                "description": "Monitor hourly traffic patterns",
+                "sql": '''SELECT DATE_TRUNC('hour', "@timestamp") AS bucket, COUNT(*) AS request_count, SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END) AS error_5xx_count, AVG(response_time_ms) AS avg_response_time FROM "{index}" WHERE "@timestamp" >= '$from' AND "@timestamp" < '$to' GROUP BY 1 ORDER BY bucket''',
+                "dimensions": ["request_count", "error_5xx_count", "avg_response_time"],
             },
         ]
         
@@ -284,14 +386,21 @@ class KBConfigGenerator:
             "0 */5 * * * *",    # Every 5 minutes
         ]
         
-        # Detection windows in seconds (matches frequency options)
+        # Detection windows in seconds
+        # IMPORTANT: With ~0.5 RPS data, we need longer windows to get enough samples:
+        # - 60s = ~30 logs (minimum reasonable)
+        # - 300s = ~150 logs (good)
+        # - 600s = ~300 logs (better)
+        # - 3600s = ~1800 logs (best for stable metrics)
+        # Small windows (5s, 10s, 30s) don't work with low RPS data!
         self.detection_windows = [
-            5,     # 5 seconds (for 1-5s frequencies)
-            10,    # 10 seconds
-            30,    # 30 seconds
-            60,    # 1 minute
+            60,    # 1 minute - minimum reasonable with 0.5 RPS
+            120,   # 2 minutes
             300,   # 5 minutes
             600,   # 10 minutes
+            900,   # 15 minutes  
+            1800,  # 30 minutes
+            3600,  # 1 hour
         ]
         
         # Config name templates
@@ -310,16 +419,56 @@ class KBConfigGenerator:
         ]
     
     def _generate_training_period(self) -> tuple:
-        """Generate a training period based on available data."""
+        """Generate a training period based on available historical data.
+        
+        IMPORTANT: Must respect the log-generator's HISTORICAL_DAYS setting.
+        Historical data spans from (now - HISTORICAL_DAYS) to (now - buffer).
+        
+        Training windows are realistic for anomaly detection:
+        - Short: 1-7 days (for quick tests)
+        - Medium: 1-4 weeks (typical use case)  
+        - Long: 1-6 months (comprehensive baseline)
+        
+        The training window is placed randomly within the available historical range.
+        """
         now = datetime.now(timezone.utc)
         
-        # Training should cover recent data (last few hours to 1 day)
-        # Since log generator creates continuous data
-        training_hours = random.randint(1, 6)  # 1-6 hours of training data
+        # Buffer: avoid the most recent data (gap between historical end and continuous start)
+        buffer_days = 1  # Safe buffer to avoid timing edge cases
         
-        # Training ends a few minutes ago to ensure data exists
-        training_end = now - timedelta(minutes=random.randint(5, 30))
-        training_start = training_end - timedelta(hours=training_hours)
+        # Maximum days back we can go (respecting log-generator's HISTORICAL_DAYS)
+        max_days_back = self.historical_days - buffer_days
+        
+        # Choose training duration type randomly
+        duration_type = random.choice(["short", "medium", "long"])
+        
+        if duration_type == "short":
+            # 1-7 days of training data
+            training_days = random.randint(1, 7)
+        elif duration_type == "medium":
+            # 1-4 weeks (7-28 days)
+            training_days = random.randint(7, 28)
+        else:  # long
+            # 1-6 months (30-180 days), capped by available data
+            training_days = random.randint(30, min(180, max_days_back - 7))
+        
+        # Ensure training_days doesn't exceed available data
+        training_days = min(training_days, max_days_back - 7)
+        
+        # Pick where to end training (must leave room for training duration)
+        # Training ends between (buffer_days + 7) and (max_days_back - training_days) days ago
+        min_end_days_ago = buffer_days + 7  # At least 7 days ago
+        max_end_days_ago = max_days_back - training_days  # Leave room for training window
+        
+        if max_end_days_ago < min_end_days_ago:
+            # Fallback if historical_days is too small
+            max_end_days_ago = min_end_days_ago
+            training_days = min(7, max_days_back - min_end_days_ago)
+        
+        end_days_ago = random.randint(min_end_days_ago, max_end_days_ago)
+        
+        training_end = now - timedelta(days=end_days_ago)
+        training_start = training_end - timedelta(days=training_days)
         
         return (
             training_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -327,14 +476,47 @@ class KBConfigGenerator:
         )
     
     def _generate_detection_start(self, training_to: str) -> str:
-        """Generate detection start time (after training ends)."""
-        training_end = datetime.fromisoformat(training_to.replace("Z", "+00:00"))
-        # Detection starts 1-5 minutes after training ends
-        detection_start = training_end + timedelta(minutes=random.randint(1, 5))
+        """Generate detection start time.
+        
+        Detection should start NOW (or very recently) since we want to detect
+        on the continuous real-time data being generated.
+        
+        The training_to is in the past (yesterday), but detection runs on current data.
+        """
+        now = datetime.now(timezone.utc)
+        # Detection starts NOW or up to 5 minutes ago
+        detection_start = now - timedelta(minutes=random.randint(0, 5))
         return detection_start.strftime("%Y-%m-%dT%H:%M:%SZ")
     
+    def _generate_algorithm_metadata(self, algorithm_name: str) -> List[Dict[str, Any]]:
+        """Generate algorithm-specific metadata based on its parameters."""
+        metadata = []
+        params = self.algorithm_registry.get_algorithm_parameters(algorithm_name)
+        
+        for param in params:
+            if param == "percentile":
+                metadata.append({
+                    "key": "percentile",
+                    "value": str(random.choice([95.0, 97.5, 99.0, 99.5]))
+                })
+            elif param == "min_points":
+                metadata.append({
+                    "key": "min_points",
+                    "value": str(random.choice([3, 5, 10]))
+                })
+            elif param == "multiplier":
+                # IQR multiplier: Higher values = less sensitive to outliers
+                # 1.5 is standard but too tight for high-variance e-commerce data
+                # Use 2.5-4.0 range for realistic detection
+                metadata.append({
+                    "key": "multiplier",
+                    "value": str(random.choice([2.5, 3.0, 3.5, 4.0]))
+                })
+        
+        return metadata if metadata else None
+    
     def generate_config(self, bucket_profile_id: Optional[str] = None) -> Dict[str, Any]:
-        """Generate a random KB configuration."""
+        """Generate a random KB configuration with a randomly selected algorithm."""
         self.config_counter += 1
         
         # Select random query template
@@ -349,36 +531,39 @@ class KBConfigGenerator:
         focus = random.choice(self.focus_areas)
         config_name = name_template.format(focus=focus, num=self.config_counter)
         
+        # Select a random algorithm from the registry
+        algorithm_name = self.algorithm_registry.get_random_algorithm()
+        
         # Select dimensions (use 1-3 dimensions)
         available_dims = query_template["dimensions"]
         num_dims = min(len(available_dims), random.randint(1, 3))
         selected_dims = random.sample(available_dims, num_dims)
         
-        # Build algorithm parameters
+        # Build algorithm parameters with algorithm-specific metadata
         algorithm_params = []
         for dim in selected_dims:
             param = {
                 "dimension": dim,
                 "is_active": True,
             }
-            # 30% chance to add metadata
-            if random.random() < 0.3:
-                param["metadata"] = [
-                    {"key": "percentile", "value": str(random.choice([95, 97.5, 99, 99.5]))}
-                ]
+            # Add algorithm-specific metadata for some parameters
+            if random.random() < 0.4:  # 40% chance
+                metadata = self._generate_algorithm_metadata(algorithm_name)
+                if metadata:
+                    param["metadata"] = metadata
             algorithm_params.append(param)
         
         # Build the KB config document (matching MongoDB schema)
         config = {
             "name": config_name,
             "description": f"Auto-generated stress test: {query_template['description']}. "
-                          f"Monitoring {', '.join(selected_dims)}.",
+                          f"Monitoring {', '.join(selected_dims)} using {algorithm_name.upper()} algorithm.",
             "change_flag": 0,
             "elasticsearch_sql_query": query_template["sql"].format(index=self.source_index),
             "source_index": self.source_index,
             "query_mode": {
                 "type": "aggregated",
-                "timestamp_field": "es_timestamp",
+                "timestamp_field": "bucket",
             },
             "bucket_profile_id": bucket_profile_id,  # Can be None or a profile ID
             "scheduling": {
@@ -396,7 +581,7 @@ class KBConfigGenerator:
                 },
             },
             "algorithm": {
-                "name": "zscore",
+                "name": algorithm_name,
                 "parameters": algorithm_params,
             },
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -411,7 +596,16 @@ class StressGenerator:
     
     def __init__(self, config: StressGeneratorConfig):
         self.config = config
-        self.kb_generator = KBConfigGenerator(source_index=config.source_index, seed=config.seed)
+        
+        # Initialize algorithm registry from shared volume
+        self.algorithm_registry = AlgorithmRegistry(config.algorithm_registry_path)
+        
+        self.kb_generator = KBConfigGenerator(
+            source_index=config.source_index,
+            historical_days=config.historical_days,
+            algorithm_registry=self.algorithm_registry,
+            seed=config.seed
+        )
         self.bucket_generator = BucketProfileGenerator(config.seed)
         self.mongo_client: Optional[MongoClient] = None
         self.db = None
@@ -422,6 +616,7 @@ class StressGenerator:
         self.total_buckets_created = 0
         self.total_bursts = 0
         self.created_bucket_ids: List[str] = []
+        self.algorithm_usage_counts: Dict[str, int] = {}  # Track algorithm usage
         
         # Set up signal handlers
         signal.signal(signal.SIGINT, signal_handler)
@@ -492,8 +687,13 @@ class StressGenerator:
         """Insert a KB config into MongoDB."""
         try:
             result = self.kb_collection.insert_one(kb_config)
+            
+            # Track algorithm usage
+            algo_name = kb_config.get("algorithm", {}).get("name", "unknown")
+            self.algorithm_usage_counts[algo_name] = self.algorithm_usage_counts.get(algo_name, 0) + 1
+            
             bucket_info = f" (bucket: {kb_config['bucket_profile_id']})" if kb_config.get('bucket_profile_id') else ""
-            logger.info(f"✅ Created config: '{kb_config['name']}'{bucket_info}")
+            logger.info(f"✅ Created config: '{kb_config['name']}' [algo: {algo_name.upper()}]{bucket_info}")
             self.total_configs_created += 1
             return True
         except Exception as e:
@@ -547,11 +747,14 @@ class StressGenerator:
         logger.info("=" * 60)
         logger.info("🚀 KB Stress Generator - CONTINUOUS MODE")
         logger.info("=" * 60)
-        logger.info(f"Index: {self.config.source_index}")
+        logger.info(f"Source index: {self.config.source_index}")
+        logger.info(f"Historical days: {self.config.historical_days} (training data range)")
         logger.info(f"Interval: {self.config.min_interval}-{self.config.max_interval}s")
         logger.info(f"Burst probability: {self.config.burst_probability * 100:.0f}%")
         logger.info(f"Burst size: {self.config.burst_size_min}-{self.config.burst_size_max}")
         logger.info(f"Bucket creation probability: {self.config.bucket_probability * 100:.0f}%")
+        logger.info("-" * 60)
+        logger.info(f"📚 Available algorithms: {', '.join(self.algorithm_registry.get_algorithm_names())}")
         logger.info("=" * 60)
         
         while running:
@@ -606,6 +809,11 @@ class StressGenerator:
         logger.info(f"Total bucket profiles created: {self.total_buckets_created}")
         logger.info(f"Total bursts: {self.total_bursts}")
         logger.info(f"Available bucket profiles: {len(self.created_bucket_ids)}")
+        logger.info("-" * 60)
+        logger.info("📚 Algorithm usage breakdown:")
+        for algo_name, count in sorted(self.algorithm_usage_counts.items()):
+            pct = (count / self.total_configs_created * 100) if self.total_configs_created > 0 else 0
+            logger.info(f"   {algo_name.upper()}: {count} configs ({pct:.1f}%)")
         logger.info("=" * 60)
     
     def run(self):

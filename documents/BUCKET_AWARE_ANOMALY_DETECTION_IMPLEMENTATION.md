@@ -3,12 +3,24 @@
 **Date:** November 25, 2025  
 **Branch:** `feature/big-bucketing-feature`  
 **Author:** GitHub Copilot & Elinzar  
+**Last Updated:** December 2, 2025 - Production Validation Complete
 
 ---
 
 ## Executive Summary
 
 This document details the complete implementation of **Dynamic Context-Aware Anomaly Detection** for the FinalProjectADF (Anomaly Detection Framework). The feature enables the system to maintain separate statistical baselines for different time contexts (e.g., workdays vs. weekends, business hours vs. off-hours), significantly improving anomaly detection accuracy by reducing false positives caused by predictable traffic pattern variations.
+
+### Production Status: ✅ VALIDATED (December 2, 2025)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Bucket profile creation | ✅ Working | 127+ buckets tested |
+| Complex schedule rules | ✅ Working | Holidays, workdays, weekends, shifts |
+| Bucket-aware training | ✅ Working | Per-bucket baselines with global fallback |
+| Bucket-aware detection | ✅ Working | Resolves bucket from timestamp |
+| Kibana dashboard compatibility | ✅ Fixed | Flat `algorithm_details.z_score` fields added |
+| modify_kb_config | ✅ Tested | 20 operations stress tested |
 
 ---
 
@@ -25,6 +37,7 @@ This document details the complete implementation of **Dynamic Context-Aware Ano
 9. [End-to-End Flow](#9-end-to-end-flow)
 10. [Configuration Examples](#10-configuration-examples)
 11. [Future Improvements](#11-future-improvements)
+12. [**December 2025 Fixes**](#12-december-2025-fixes)
 
 ---
 
@@ -41,13 +54,19 @@ This document details the complete implementation of **Dynamic Context-Aware Ano
       │                   │                   │
       ▼                   ▼                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                          MongoDB (anomaly_detection)                      │
-│  ┌──────────────┐  ┌───────────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │ bucket_      │  │ training_     │  │ series       │  │ series_     │ │
-│  │ profiles     │  │ config        │  │              │  │ result      │ │
-│  └──────────────┘  └───────────────┘  └──────────────┘  └─────────────┘ │
+│                          MongoDB                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ knowledge_base (SINGLE DB for configs)                            │   │
+│  │   kb_configs, bucket_profiles                                     │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │ anomaly_detection (runtime data)                                  │   │
+│  │   training_config, series, trained_models                         │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+> ⚠️ **IMPORTANT**: As of December 2025, `bucket_profiles` is stored in `knowledge_base` DB alongside `kb_configs` for consistency. All components must use this database.
 
 ### Key Concepts
 
@@ -831,13 +850,93 @@ Bucket profiles could be scoped per tenant:
 
 ---
 
+## 12. December 2025 Fixes
+
+This section documents critical fixes discovered during production validation on December 2, 2025.
+
+### 12.1 Database Consistency Issue
+
+**Problem**: `bucket_profiles` collection was being accessed from different databases by different components.
+
+| Component | Before (Wrong) | After (Correct) |
+|-----------|----------------|-----------------|
+| KB-MCP create_da_config | `anomaly_detection.bucket_profiles` | `knowledge_base.bucket_profiles` |
+| KB-MCP modify_kb_config | `anomaly_detection.bucket_profiles` | `knowledge_base.bucket_profiles` |
+| KB-MCP bucket_profile_tools | `knowledge_base.bucket_profiles` | `knowledge_base.bucket_profiles` ✅ |
+| Dispatcher | `anomaly_detection.bucket_profiles` | `knowledge_base.bucket_profiles` |
+
+**Solution**: Standardized on `knowledge_base` database for all bucket_profiles operations.
+
+**Files Changed**:
+- `MCP/KB-MCP/mcp_tools_pkg/create_da_config.py`
+- `MCP/KB-MCP/mcp_tools_pkg/modify_kb_config.py`
+- `MotorDA/Dispatcher/DADispatcher.py`
+
+### 12.2 Kibana Dashboard Field Mapping
+
+**Problem**: Kibana dashboard expected flat field `algorithm_details.z_score` but dispatcher was only providing nested `algorithm_details.<metric_name>.z_score`.
+
+**Solution**: Added flat convenience fields at `algorithm_details` root level:
+
+```python
+# In post_anomaly_to_insights():
+algorithm_details_with_flat = serialize_for_json(dimension_results)
+
+# Add flat fields for Kibana dashboard visualization
+if flat_z_score is not None:
+    algorithm_details_with_flat["z_score"] = flat_z_score
+if flat_mean is not None:
+    algorithm_details_with_flat["mean"] = flat_mean
+if flat_std is not None:
+    algorithm_details_with_flat["std"] = flat_std
+if flat_threshold is not None:
+    algorithm_details_with_flat["threshold"] = flat_threshold
+if flat_lower_bound is not None:
+    algorithm_details_with_flat["lower_bound"] = flat_lower_bound
+if flat_upper_bound is not None:
+    algorithm_details_with_flat["upper_bound"] = flat_upper_bound
+```
+
+**Result**: Anomaly documents now have both nested (per-dimension) and flat (for Kibana) fields.
+
+### 12.3 Null Field Handling in BucketResolver
+
+**Problem**: MongoDB stores explicit `null` for missing array fields. Python's `.get("field", [])` returns `None` (the actual value) instead of the default `[]`, causing `TypeError: 'NoneType' object is not iterable`.
+
+**Before (Broken)**:
+```python
+for exc in data.get("exceptions", []):  # Returns None if field is null
+```
+
+**After (Fixed)**:
+```python
+exceptions_data = data.get("exceptions") or []  # Handles both missing and null
+for exc in exceptions_data:
+```
+
+**Files Changed**:
+- `MotorDA/Dispatcher/bucket_resolver.py`
+
+### 12.4 Production Validation Results
+
+| Test | Result |
+|------|--------|
+| Complex bucket profile (127 buckets) | ✅ Created successfully |
+| Training with bucket-aware baselines | ✅ All buckets trained |
+| Detection with bucket resolution | ✅ Correct bucket used |
+| Kibana dashboard z_score visualization | ✅ Fields visible |
+| modify_kb_config stress test (20 ops) | ✅ 16 pass, 4 rejected |
+| Null bucket profile fields | ✅ Handled gracefully |
+
+---
+
 ## Appendix A: File Changes Summary
 
 | File | Type | Description |
 |------|------|-------------|
-| `MotorDA/Dispatcher/bucket_resolver.py` | NEW | BucketResolver class |
+| `MotorDA/Dispatcher/bucket_resolver.py` | NEW/MODIFIED | BucketResolver class + null field handling |
 | `MotorDA/Dispatcher/training_orchestrator.py` | NEW | Training/Detection orchestrators |
-| `MotorDA/Dispatcher/DADispatcher.py` | MODIFIED | Race condition fix, bucket-aware training |
+| `MotorDA/Dispatcher/DADispatcher.py` | MODIFIED | Race condition fix, bucket-aware training, Kibana flat fields, DB consistency |
 | `MotorDA/Dispatcher/tests/test_bucket_resolver.py` | NEW | BucketResolver tests |
 | `MotorDA/Dispatcher/tests/test_training_orchestrator.py` | NEW | Orchestrator tests |
 | `MotorDA/ZScore/zscore_algorithm.py` | NEW | Pure ZScore algorithm |
@@ -845,6 +944,8 @@ Bucket profiles could be scoped per tenant:
 | `MotorDA/ZScore/__init__.py` | MODIFIED | Export new functions |
 | `MCP/KB-MCP/bucket_profile_models.py` | NEW | Pydantic models |
 | `MCP/KB-MCP/mcp_tools_pkg/bucket_profile_tools.py` | NEW | MCP tools |
+| `MCP/KB-MCP/mcp_tools_pkg/create_da_config.py` | MODIFIED | DB consistency fix |
+| `MCP/KB-MCP/mcp_tools_pkg/modify_kb_config.py` | MODIFIED | DB consistency fix |
 | `MCP/KB-MCP/models.py` | MODIFIED | KBConfig updates |
 | `MCP/KB-MCP/point_to_point_test.py` | NEW | Spec verification |
 | `extractor/.../KbMongo.java` | MODIFIED | New fields |
@@ -869,10 +970,10 @@ docker-compose restart dispatcher
 docker logs da-dispatcher --tail 100 -f
 ```
 
-### Test Bucket Profile in MongoDB
+### Test Bucket Profile in MongoDB (UPDATED - use knowledge_base)
 ```bash
 docker exec mongodb mongosh "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin" --quiet --eval "
-  db = db.getSiblingDB('anomaly_detection');
+  db = db.getSiblingDB('knowledge_base');
   db.bucket_profiles.find().pretty()
 "
 ```
@@ -881,8 +982,15 @@ docker exec mongodb mongosh "mongodb://admin:1q2w3E*@localhost:27017/?authSource
 ```bash
 docker exec mongodb mongosh "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin" --quiet --eval "
   db = db.getSiblingDB('anomaly_detection');
-  db.series_result.findOne({dimension: 'status_code_200_counter'})
+  db.trained_models.findOne()
 "
+```
+
+### Verify Kibana Flat Fields
+```bash
+docker exec elasticsearch-anomalies curl -s "http://localhost:9200/ecommerce-logs_anomalies/_search?size=1" | jq '.hits.hits[0]._source.algorithm_details | keys'
+# Should include: z_score, mean, std, threshold (for zscore)
+# Or: lower_bound, upper_bound (for iqr)
 ```
 
 ---

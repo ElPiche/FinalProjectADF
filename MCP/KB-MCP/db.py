@@ -138,7 +138,7 @@ class DatabaseWrapper:
 
 def get_db() -> DatabaseWrapper:
     """
-    Get the anomaly_detection database wrapper.
+    Get the knowledge_base database wrapper.
     
     Returns:
         DatabaseWrapper: Wrapper providing access to MongoDB collections.
@@ -150,5 +150,5 @@ def get_db() -> DatabaseWrapper:
     if client is None:
         raise RuntimeError("Failed to connect to MongoDB")
     
-    # Use anomaly_detection database for bucket profiles and KB configs
-    return DatabaseWrapper(client["anomaly_detection"])
+    # Use knowledge_base database for bucket profiles and KB configs
+    return DatabaseWrapper(client["knowledge_base"])

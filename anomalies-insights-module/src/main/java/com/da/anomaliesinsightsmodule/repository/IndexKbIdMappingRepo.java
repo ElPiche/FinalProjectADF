@@ -9,5 +9,6 @@ import java.util.Optional;
 @Repository
 public interface IndexKbIdMappingRepo extends ElasticsearchRepository<IndexKbIdMapping, String> {
     Optional<IndexKbIdMapping> findByKbId(String kbId);
+
     Optional<IndexKbIdMapping> findBySourceIndex(String sourceIndex);
 }

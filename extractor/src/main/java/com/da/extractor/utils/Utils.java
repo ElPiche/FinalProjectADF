@@ -1,6 +1,7 @@
 package com.da.extractor.utils;
 
 
+import java.io.IOException;
 import java.util.Date;
 
 public class Utils {
@@ -9,10 +10,10 @@ public class Utils {
     /// @param className El nombre del tipo de dato de Elasticsearch
     /// @return La clase correspondiente al tipo de dato, puede ser del la libreria estándar de Java o
     /// o de la librería de <code>co.elastic.clients.util</code> de Elasticsearch
-    public static Class<?> getClassFromString(String className) {
+    public static Class<?> getClassFromString(String className) throws IOException {
 
         return switch (className){
-            case "string", "text" -> String.class;
+//            case "string", "text" -> String.class;
 
 //            case "long" -> Long.class;
             case "double",
@@ -24,11 +25,15 @@ public class Utils {
                  "unsigned_long",
                  "short" -> Double.class;
 
-            case "boolean" -> Boolean.class;
+//            case "boolean" -> Boolean.class;
 
             case "datetime" -> Date.class;
 
-            default -> Object.class;
+            default -> throw new IOException("""
+                   One of these happens:
+                   1. One ore more selected dimensions field isn't numeric type.
+                   2. Timestamp field isn't date type."""
+            );
         };
     }
 

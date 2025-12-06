@@ -70,8 +70,11 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 ES_HOST = os.getenv("ES_HOST", "http://elasticsearch-dataset:9200")
 INDEX_NAME = os.getenv("INDEX_NAME", "ecommerce-logs")
 
+# Generation mode: "random" (original) or "event" (realistic event-based)
+GENERATION_MODE = os.getenv("GENERATION_MODE", "random").lower()
+
 # Historical data settings - MASSIVE DATA GENERATION
-HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "365"))
+HISTORICAL_DAYS = int(os.getenv("HISTORICAL_DAYS", "1"))
 HISTORICAL_BATCH_SIZE = int(os.getenv("HISTORICAL_BATCH_SIZE", "10000"))
 
 # Traffic volume settings (requests per hour at base load)
@@ -98,6 +101,26 @@ BULK_THREAD_COUNT = int(os.getenv("BULK_THREAD_COUNT", "32"))  # Parallel bulk s
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "10000"))  # Docs per bulk chunk (smaller = more parallelism)
 
 # =============================================================================
+# EVENT-BASED MODE CONFIGURATION
+# =============================================================================
+# Event mode: realistic system events that affect metrics in correlated ways
+# CRITICAL: Derive RPS from BASE_REQUESTS_PER_HOUR to ensure consistency with historical data!
+# This ensures training data and detection data have similar distributions.
+_event_rps_override = os.getenv("EVENT_MODE_BASE_RPS", "")
+if _event_rps_override:
+    EVENT_MODE_BASE_RPS = float(_event_rps_override)  # Allow manual override
+else:
+    # Calculate from BASE_REQUESTS_PER_HOUR: 500/hour = 0.139 RPS
+    # DO NOT multiply by PEAK_MULTIPLIER - the historical generator already uses
+    # time-of-day patterns, so the average rate IS the base rate, not base*peak.
+    # Using peak multiplier would create 4x more logs than historical average!
+    EVENT_MODE_BASE_RPS = BASE_REQUESTS_PER_HOUR / 3600.0
+
+EVENT_PROBABILITY = float(os.getenv("EVENT_PROBABILITY", "0.001"))  # Chance of event starting per second
+EVENT_MIN_DURATION = int(os.getenv("EVENT_MIN_DURATION", "30"))  # Min event duration in seconds
+EVENT_MAX_DURATION = int(os.getenv("EVENT_MAX_DURATION", "300"))  # Max event duration in seconds
+
+# =============================================================================
 # LOGGING SETUP
 # =============================================================================
 logging.basicConfig(
@@ -106,6 +129,341 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# EVENT-BASED MODE: SYSTEM STATE & EVENTS
+# =============================================================================
+@dataclass
+class SystemEvent:
+    """Represents a system event that affects metrics in a correlated way."""
+    event_type: str
+    start_time: datetime
+    duration_seconds: int
+    intensity: float  # 0.0 to 1.0, how severe the event is
+    
+    # Metric modifiers (how this event affects each metric)
+    error_5xx_modifier: float = 1.0  # Multiplier for 5xx error rate
+    error_4xx_modifier: float = 1.0  # Multiplier for 4xx error rate
+    response_time_modifier: float = 1.0  # Multiplier for response time
+    bytes_modifier: float = 1.0  # Multiplier for bytes sent
+    request_rate_modifier: float = 1.0  # Multiplier for request volume
+    auth_rate_modifier: float = 1.0  # Multiplier for authenticated requests
+    session_modifier: float = 1.0  # Multiplier for unique sessions
+    
+    @property
+    def end_time(self) -> datetime:
+        return self.start_time + timedelta(seconds=self.duration_seconds)
+    
+    def is_active(self, current_time: datetime) -> bool:
+        return self.start_time <= current_time <= self.end_time
+    
+    def get_progress(self, current_time: datetime) -> float:
+        """Returns 0.0 at start, 1.0 at end."""
+        if current_time < self.start_time:
+            return 0.0
+        if current_time > self.end_time:
+            return 1.0
+        elapsed = (current_time - self.start_time).total_seconds()
+        return elapsed / self.duration_seconds
+
+
+# Event type definitions with their metric impacts
+EVENT_TYPES = {
+    "db_connection_pool_exhaustion": {
+        "description": "Database connection pool exhausted - queries queue up",
+        "error_5xx_modifier": (3.0, 8.0),  # 3-8x more 5xx errors
+        "response_time_modifier": (5.0, 15.0),  # Much slower
+        "bytes_modifier": (0.1, 0.3),  # Tiny error responses
+        "request_rate_modifier": (0.8, 1.0),  # Slightly reduced (retries stop)
+        "weight": 10,
+    },
+    "memory_pressure": {
+        "description": "High memory usage causing GC pauses and OOM",
+        "error_5xx_modifier": (2.0, 5.0),
+        "response_time_modifier": (3.0, 10.0),  # GC pauses
+        "bytes_modifier": (0.5, 0.8),
+        "request_rate_modifier": (0.7, 0.9),
+        "weight": 8,
+    },
+    "network_latency_spike": {
+        "description": "Network issues between services",
+        "error_5xx_modifier": (1.0, 2.0),  # Some timeouts
+        "response_time_modifier": (4.0, 12.0),  # High latency
+        "bytes_modifier": (0.9, 1.0),  # Normal bytes
+        "request_rate_modifier": (0.95, 1.0),
+        "weight": 12,
+    },
+    "cdn_degradation": {
+        "description": "CDN having issues - static assets slow",
+        "error_5xx_modifier": (1.0, 1.5),
+        "response_time_modifier": (2.0, 5.0),
+        "bytes_modifier": (1.5, 3.0),  # Serving from origin = more bytes
+        "request_rate_modifier": (0.9, 1.0),
+        "weight": 10,
+    },
+    "ddos_attack": {
+        "description": "DDoS attack causing rate limiting",
+        "error_4xx_modifier": (5.0, 20.0),  # Lots of 429 Too Many Requests
+        "response_time_modifier": (0.1, 0.3),  # Fast rejections
+        "bytes_modifier": (0.05, 0.1),  # Tiny rate-limit responses
+        "request_rate_modifier": (3.0, 10.0),  # Huge traffic spike
+        "session_modifier": (0.3, 0.5),  # Fewer unique sessions (bots)
+        "auth_rate_modifier": (0.1, 0.3),  # Bots aren't authenticated
+        "weight": 5,
+    },
+    "payment_gateway_outage": {
+        "description": "Payment provider having issues",
+        "error_5xx_modifier": (1.5, 3.0),  # Only checkout affected
+        "response_time_modifier": (2.0, 8.0),
+        "bytes_modifier": (0.8, 1.0),
+        "request_rate_modifier": (0.9, 1.0),
+        "weight": 8,
+    },
+    "deployment_rollout": {
+        "description": "New deployment causing temporary instability",
+        "error_5xx_modifier": (2.0, 4.0),
+        "response_time_modifier": (1.5, 3.0),
+        "bytes_modifier": (0.9, 1.1),
+        "request_rate_modifier": (0.95, 1.0),
+        "weight": 15,
+    },
+    "cache_invalidation": {
+        "description": "Cache cleared - everything hitting DB",
+        "error_5xx_modifier": (1.0, 2.0),
+        "response_time_modifier": (3.0, 8.0),
+        "bytes_modifier": (1.0, 1.2),
+        "request_rate_modifier": (0.9, 1.0),
+        "weight": 10,
+    },
+    "traffic_surge": {
+        "description": "Viral product or flash sale",
+        "error_5xx_modifier": (1.5, 3.0),  # Some capacity issues
+        "response_time_modifier": (1.5, 4.0),
+        "bytes_modifier": (1.0, 1.2),
+        "request_rate_modifier": (2.0, 5.0),  # Big traffic increase
+        "session_modifier": (2.0, 4.0),  # Many new users
+        "auth_rate_modifier": (0.7, 0.9),  # New users not logged in
+        "weight": 12,
+    },
+    "ssl_cert_issue": {
+        "description": "SSL certificate problems",
+        "error_4xx_modifier": (2.0, 5.0),  # Connection failures
+        "error_5xx_modifier": (1.0, 1.5),
+        "response_time_modifier": (0.5, 1.0),  # Fast failures
+        "bytes_modifier": (0.1, 0.3),
+        "request_rate_modifier": (0.6, 0.8),  # Users give up
+        "weight": 5,
+    },
+    "data_corruption": {
+        "description": "Data integrity issues - truncated responses",
+        "error_5xx_modifier": (1.0, 2.0),
+        "response_time_modifier": (0.8, 1.2),  # Normal timing
+        "bytes_modifier": (0.01, 0.1),  # Very small responses!
+        "request_rate_modifier": (0.9, 1.0),
+        "weight": 5,
+    },
+}
+
+
+class SystemState:
+    """Manages the current system state and active events."""
+    
+    def __init__(self):
+        self.active_events: List[SystemEvent] = []
+        self.event_history: List[SystemEvent] = []
+        self.last_event_check = datetime.now(timezone.utc)
+        
+        # Baseline metrics (normal operation)
+        self.baseline = {
+            "error_5xx_rate": 0.005,  # 0.5% baseline 5xx errors
+            "error_4xx_rate": 0.02,   # 2% baseline 4xx errors (bad requests, not found)
+            "avg_response_time_ms": 150,  # 150ms baseline
+            "avg_bytes": 15000,  # 15KB baseline
+            "requests_per_second": EVENT_MODE_BASE_RPS,
+            "auth_rate": 0.30,  # 30% authenticated
+            "unique_session_rate": 0.8,  # 80% of requests are unique sessions
+        }
+    
+    def maybe_start_event(self, current_time: datetime) -> Optional[SystemEvent]:
+        """Probabilistically start a new event."""
+        if random.random() > EVENT_PROBABILITY:
+            return None
+        
+        # Select event type weighted by occurrence probability
+        event_types = list(EVENT_TYPES.keys())
+        weights = [EVENT_TYPES[e]["weight"] for e in event_types]
+        event_type = random.choices(event_types, weights=weights)[0]
+        event_def = EVENT_TYPES[event_type]
+        
+        duration = random.randint(EVENT_MIN_DURATION, EVENT_MAX_DURATION)
+        intensity = random.uniform(0.5, 1.0)
+        
+        # Create event with randomized modifiers within defined ranges
+        def get_modifier(key: str) -> float:
+            if key in event_def:
+                low, high = event_def[key]
+                return random.uniform(low, high) * intensity
+            return 1.0
+        
+        event = SystemEvent(
+            event_type=event_type,
+            start_time=current_time,
+            duration_seconds=duration,
+            intensity=intensity,
+            error_5xx_modifier=get_modifier("error_5xx_modifier"),
+            error_4xx_modifier=get_modifier("error_4xx_modifier"),
+            response_time_modifier=get_modifier("response_time_modifier"),
+            bytes_modifier=get_modifier("bytes_modifier"),
+            request_rate_modifier=get_modifier("request_rate_modifier"),
+            auth_rate_modifier=get_modifier("auth_rate_modifier"),
+            session_modifier=get_modifier("session_modifier"),
+        )
+        
+        self.active_events.append(event)
+        self.event_history.append(event)
+        logger.info(f"🚨 EVENT STARTED: {event_type} (duration={duration}s, intensity={intensity:.2f})")
+        logger.info(f"   → {event_def['description']}")
+        return event
+    
+    def update(self, current_time: datetime):
+        """Update system state - remove expired events, maybe start new ones."""
+        # Remove expired events
+        expired = [e for e in self.active_events if not e.is_active(current_time)]
+        for e in expired:
+            logger.info(f"✅ EVENT ENDED: {e.event_type}")
+        self.active_events = [e for e in self.active_events if e.is_active(current_time)]
+        
+        # Maybe start new event (limit concurrent events)
+        if len(self.active_events) < 2:  # Max 2 concurrent events
+            self.maybe_start_event(current_time)
+    
+    def get_current_modifiers(self, current_time: datetime) -> Dict[str, float]:
+        """Get combined modifiers from all active events."""
+        modifiers = {
+            "error_5xx": 1.0,
+            "error_4xx": 1.0,
+            "response_time": 1.0,
+            "bytes": 1.0,
+            "request_rate": 1.0,
+            "auth_rate": 1.0,
+            "session": 1.0,
+        }
+        
+        for event in self.active_events:
+            if event.is_active(current_time):
+                # Events compound multiplicatively
+                modifiers["error_5xx"] *= event.error_5xx_modifier
+                modifiers["error_4xx"] *= event.error_4xx_modifier
+                modifiers["response_time"] *= event.response_time_modifier
+                modifiers["bytes"] *= event.bytes_modifier
+                modifiers["request_rate"] *= event.request_rate_modifier
+                modifiers["auth_rate"] *= event.auth_rate_modifier
+                modifiers["session"] *= event.session_modifier
+        
+        return modifiers
+    
+    def generate_log_with_state(self, timestamp: datetime, local_fake: Faker) -> dict:
+        """Generate a single log entry based on current system state."""
+        modifiers = self.get_current_modifiers(timestamp)
+        
+        # Determine if this request has an error
+        is_5xx = random.random() < (self.baseline["error_5xx_rate"] * modifiers["error_5xx"])
+        is_4xx = random.random() < (self.baseline["error_4xx_rate"] * modifiers["error_4xx"]) if not is_5xx else False
+        
+        if is_5xx:
+            status_code = random.choice([500, 502, 503, 504])
+        elif is_4xx:
+            status_code = random.choice([400, 401, 403, 404, 429])
+        else:
+            status_code = 200
+        
+        # Response time based on status and modifiers
+        base_response_time = self.baseline["avg_response_time_ms"]
+        if is_5xx:
+            response_time = int(base_response_time * modifiers["response_time"] * random.uniform(2, 5))
+        elif is_4xx and status_code == 429:  # Rate limited = fast
+            response_time = int(random.uniform(5, 30))
+        else:
+            response_time = int(base_response_time * modifiers["response_time"] * random.uniform(0.5, 1.5))
+        
+        # Bytes sent
+        base_bytes = self.baseline["avg_bytes"]
+        if is_5xx or is_4xx:
+            bytes_sent = int(random.uniform(100, 1000) * modifiers["bytes"])
+        else:
+            bytes_sent = int(base_bytes * modifiers["bytes"] * random.uniform(0.5, 2.0))
+        
+        # Session and user info
+        is_authenticated = random.random() < (self.baseline["auth_rate"] * modifiers["auth_rate"])
+        session_id = hashlib.md5(f"{timestamp.isoformat()}{random.random()}".encode()).hexdigest()[:16]
+        user_id = f"user_{random.randint(1, 50000)}" if is_authenticated else None
+        
+        # Pick endpoint
+        endpoint_name, endpoint_data = random.choice(WEIGHTED_ENDPOINTS)
+        category = random.choice(list(CATEGORIES.keys()))
+        product = random.choice(CATEGORIES[category]["products"])
+        
+        method = endpoint_data.get("method", "GET")
+        path = endpoint_data["path"]
+        if "{product_id}" in path:
+            path = path.replace("{product_id}", product["id"])
+        if "{category}" in path:
+            path = path.replace("{category}", category)
+        
+        # Device type
+        device_type = random.choices(["mobile", "desktop", "bot"], weights=[55, 40, 5])[0]
+        
+        # Determine anomaly type based on active events
+        anomaly_type = None
+        is_anomaly = False
+        if self.active_events:
+            is_anomaly = True
+            anomaly_type = self.active_events[0].event_type  # Primary event
+        
+        geo = random.choice(WEIGHTED_GEO)
+        
+        entry = {
+            "@timestamp": timestamp.isoformat().replace("+00:00", "Z") if timestamp.tzinfo else timestamp.isoformat() + "Z",
+            "method": method,
+            "endpoint": path,
+            "endpoint_name": endpoint_name,
+            "status_code": status_code,
+            "response_time_ms": response_time,
+            "bytes_sent": bytes_sent,
+            "session_id": session_id,
+            "user_id": user_id,
+            "is_authenticated": is_authenticated,
+            "device_type": device_type,
+            "client_ip": local_fake.ipv4_public(),
+            "user_agent": random.choice(USER_AGENTS[device_type]),
+            "geo": {"country": geo["country"], "city": random.choice(geo["cities"])},
+            "category": category if "{product_id}" in endpoint_data["path"] or "{category}" in endpoint_data["path"] else None,
+            "product_id": product["id"] if "{product_id}" in endpoint_data["path"] else None,
+            "product_name": product["name"] if "{product_id}" in endpoint_data["path"] else None,
+            "product_price": product["price"] if "{product_id}" in endpoint_data["path"] else None,
+            "request_id": local_fake.uuid4(),
+            "is_anomaly_marker": is_anomaly,
+            "anomaly_type": anomaly_type,
+        }
+        
+        # Add payment/order info for checkout
+        if endpoint_name in ["checkout_payment", "order_confirm"]:
+            entry["payment_method"] = random.choice(PAYMENT_METHODS)
+            if endpoint_name == "order_confirm" and status_code < 400:
+                entry["order_total"] = round(random.uniform(20, 500), 2)
+                entry["items_count"] = random.randint(1, 8)
+        
+        if endpoint_name in ["search", "search_suggestions"]:
+            entry["search_query"] = local_fake.word()
+            entry["search_results_count"] = random.randint(0, 500) if status_code == 200 else 0
+        
+        return entry
+
+
+# Global system state for event mode
+SYSTEM_STATE = SystemState()
+
 
 # =============================================================================
 # E-COMMERCE DATA MODEL
@@ -532,13 +890,23 @@ def should_inject_anomaly(dt: datetime, endpoint_name: str) -> Tuple[bool, str]:
     """
     Determine if this request should be anomalous.
     Returns (is_anomaly, anomaly_type).
+    
+    Anomaly types for multi-dimensional detection:
+    - db_outage: High errors + high response time + low bytes
+    - deployment: High errors + variable response time
+    - payment_failure: Errors on payment endpoints
+    - traffic_spike: Normal status but very high response time
+    - bandwidth_anomaly: Normal status but abnormally high/low bytes_sent
+    - slowdown_no_errors: Very slow but no errors (partial system degradation)
+    - data_corruption: Normal response time but very small bytes (truncated responses)
+    - ddos_pattern: Fast responses, small bytes, high volume (bot traffic)
     """
     hour = dt.hour
     day = dt.day
     month = dt.month
     weekday = dt.weekday()
     
-    # Database outage pattern
+    # Database outage pattern - high errors + slow
     if day == 15 and month in [2, 4, 6, 8, 10, 12] and 2 <= hour <= 4:
         if random.random() < 0.5:
             return True, "db_outage"
@@ -553,11 +921,29 @@ def should_inject_anomaly(dt: datetime, endpoint_name: str) -> Tuple[bool, str]:
         if random.random() < 0.008:
             return True, "payment_failure"
     
+    # NEW: Slowdown without errors (CDN issues, network congestion)
+    # High response time but 200 OK - catches multi-dim patterns
+    if random.random() < 0.003:
+        return True, "slowdown_no_errors"
+    
+    # NEW: Bandwidth anomaly (unusually large or small responses)
+    if random.random() < 0.002:
+        return True, "bandwidth_anomaly"
+    
+    # NEW: Data corruption / truncated responses
+    # Normal response time but tiny bytes (incomplete data)
+    if random.random() < 0.002:
+        return True, "data_corruption"
+    
+    # NEW: DDoS pattern - fast tiny responses (rate limiting kicking in)
+    if random.random() < 0.001:
+        return True, "ddos_pattern"
+    
     # Random traffic spike causing timeouts
     if random.random() < 0.002:
         return True, "traffic_spike"
     
-    # Random baseline anomaly
+    # Random baseline anomaly (classic error spike)
     if random.random() < HISTORICAL_ANOMALY_RATE:
         return True, "random"
     
@@ -594,19 +980,63 @@ def generate_log_entry(
     if session is None:
         session = UserSession.create_random(timestamp)
     
-    # Determine status and response time
-    status_code = get_status_code(is_anomaly)
-    response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+    # =========================================================================
+    # Multi-dimensional anomaly generation
+    # Each anomaly type affects different combinations of metrics
+    # =========================================================================
+    if is_anomaly and anomaly_type == "slowdown_no_errors":
+        # Slow responses but NO errors - CDN/network issues
+        status_code = 200  # Success!
+        response_time = random.randint(5000, 25000)  # Very slow
+        # Normal bytes
+        if endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
-    # Calculate bytes
-    if status_code >= 400:
-        bytes_sent = random.randint(100, 1000)
-    elif endpoint_name in ["product_list", "search"]:
-        bytes_sent = random.randint(10000, 100000)
-    elif endpoint_name in ["product_detail"]:
-        bytes_sent = random.randint(5000, 30000)
+    elif is_anomaly and anomaly_type == "bandwidth_anomaly":
+        # Normal status & response time, but abnormal bytes
+        status_code = 200
+        response_time = random.randint(50, 300)  # Normal
+        # Abnormally large responses (memory leak dumping data)
+        bytes_sent = random.randint(500000, 2000000)  # 500KB-2MB instead of normal
+    
+    elif is_anomaly and anomaly_type == "data_corruption":
+        # Normal response time but tiny bytes (truncated/corrupted responses)
+        status_code = 200  # Looks successful
+        response_time = random.randint(50, 200)  # Fast
+        bytes_sent = random.randint(10, 100)  # Suspiciously small
+    
+    elif is_anomaly and anomaly_type == "ddos_pattern":
+        # Fast tiny responses (rate limiter or firewall blocking)
+        status_code = random.choice([200, 429, 403])  # Mix of success and rate-limit
+        response_time = random.randint(1, 20)  # Very fast (cached/blocked)
+        bytes_sent = random.randint(50, 200)  # Tiny
+    
+    elif is_anomaly and anomaly_type == "traffic_spike":
+        # High latency, normal status (system under load)
+        status_code = 200
+        response_time = random.randint(3000, 15000)  # Slow due to load
+        # Normal bytes but on the larger side
+        bytes_sent = random.randint(8000, 50000)
+    
     else:
-        bytes_sent = random.randint(500, 15000)
+        # Default anomaly behavior (db_outage, deployment, payment_failure, random)
+        # These cause errors + slow responses (original behavior)
+        status_code = get_status_code(is_anomaly)
+        response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+        
+        # Calculate bytes based on status
+        if status_code >= 400:
+            bytes_sent = random.randint(100, 1000)
+        elif endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
     # Build log entry
     entry = {
@@ -926,19 +1356,52 @@ def generate_log_entry_fast(timestamp: datetime, is_anomaly: bool, anomaly_type:
     # Geo
     geo = random.choice(WEIGHTED_GEO)
     
-    # Status and response time
-    status_code = get_status_code(is_anomaly)
-    response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+    # =========================================================================
+    # Multi-dimensional anomaly generation (same logic as generate_log_entry)
+    # =========================================================================
+    if is_anomaly and anomaly_type == "slowdown_no_errors":
+        status_code = 200
+        response_time = random.randint(5000, 25000)
+        if endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
-    # Bytes
-    if status_code >= 400:
-        bytes_sent = random.randint(100, 1000)
-    elif endpoint_name in ["product_list", "search"]:
-        bytes_sent = random.randint(10000, 100000)
-    elif endpoint_name in ["product_detail"]:
-        bytes_sent = random.randint(5000, 30000)
+    elif is_anomaly and anomaly_type == "bandwidth_anomaly":
+        status_code = 200
+        response_time = random.randint(50, 300)
+        bytes_sent = random.randint(500000, 2000000)
+    
+    elif is_anomaly and anomaly_type == "data_corruption":
+        status_code = 200
+        response_time = random.randint(50, 200)
+        bytes_sent = random.randint(10, 100)
+    
+    elif is_anomaly and anomaly_type == "ddos_pattern":
+        status_code = random.choice([200, 429, 403])
+        response_time = random.randint(1, 20)
+        bytes_sent = random.randint(50, 200)
+    
+    elif is_anomaly and anomaly_type == "traffic_spike":
+        status_code = 200
+        response_time = random.randint(3000, 15000)
+        bytes_sent = random.randint(8000, 50000)
+    
     else:
-        bytes_sent = random.randint(500, 15000)
+        # Default behavior (db_outage, deployment, payment_failure, random)
+        status_code = get_status_code(is_anomaly)
+        response_time = get_response_time(status_code, endpoint_name, is_anomaly)
+        
+        if status_code >= 400:
+            bytes_sent = random.randint(100, 1000)
+        elif endpoint_name in ["product_list", "search"]:
+            bytes_sent = random.randint(10000, 100000)
+        elif endpoint_name in ["product_detail"]:
+            bytes_sent = random.randint(5000, 30000)
+        else:
+            bytes_sent = random.randint(500, 15000)
     
     # User
     user_id = f"user_{random.randint(1, 50000)}" if random.random() < 0.30 else None
@@ -1247,20 +1710,21 @@ async def generate_historical_data_async(es_manager: ElasticsearchManager, days:
                     except Exception as e:
                         logger.warning(f"Stream error: {e}")
             
-            # Progress report
+            # Progress report (based on DAYS completed, not docs - guaranteed to reach 100%)
             now = time.time()
             if now - last_report_time >= report_interval:
                 elapsed = now - start_time
-                rate = total_docs / elapsed if elapsed > 0 else 0
-                pct = (total_docs / estimated_total) * 100
-                eta = (estimated_total - total_docs) / rate if rate > 0 else 0
+                docs_per_sec = total_docs / elapsed if elapsed > 0 else 0
+                days_per_sec = days_completed / elapsed if elapsed > 0 else 0
+                pct = (days_completed / days) * 100  # % based on days, not docs
+                remaining_days = days - days_completed
+                eta = remaining_days / days_per_sec if days_per_sec > 0 else 0
                 pending = len(pending_streams)
                 
                 logger.info(
-                    f"Progress: {pct:.1f}% | "
-                    f"{total_docs:,} docs | "
-                    f"{rate:,.0f} docs/sec | "
-                    f"ETA: {eta/60:.1f} min | "
+                    f"Progress: {pct:.1f}% | Day {days_completed}/{days} | "
+                    f"{total_docs:,} docs | {docs_per_sec:,.0f} docs/sec | "
+                    f"{days_per_sec:.2f} days/sec | ETA: {eta/60:.1f} min | "
                     f"pending: {pending}"
                 )
                 last_report_time = now
@@ -1487,6 +1951,121 @@ async def run_continuous_async(es_manager: ElasticsearchManager):
             await asyncio.sleep(5)
 
 
+async def run_event_mode_async(es_manager: ElasticsearchManager):
+    """
+    Event-based continuous log generation mode.
+    
+    This mode simulates realistic system behavior where:
+    - Traffic follows consistent patterns (baseline)
+    - System events (outages, deployments, attacks) cause correlated metric changes
+    - Events have defined duration and intensity
+    - Metrics are affected in realistic, correlated ways
+    
+    This makes anomalies more meaningful - when K-means detects something,
+    you can trace it back to a specific system event.
+    """
+    logger.info("=" * 70)
+    logger.info("🎯 EVENT-BASED LOG GENERATION MODE")
+    logger.info("    Realistic system events with correlated metrics")
+    logger.info("=" * 70)
+    logger.info(f"Base RPS: {EVENT_MODE_BASE_RPS}")
+    logger.info(f"Event probability: {EVENT_PROBABILITY*100:.2f}% per second")
+    logger.info(f"Event duration: {EVENT_MIN_DURATION}-{EVENT_MAX_DURATION}s")
+    logger.info("")
+    logger.info("Available event types:")
+    for event_type, event_def in EVENT_TYPES.items():
+        logger.info(f"  • {event_type}: {event_def['description']}")
+    logger.info("=" * 70)
+    
+    total_logs = 0
+    total_events = 0
+    start_time = time.time()
+    last_stats_time = start_time
+    local_fake = Faker()
+    
+    # Accumulator for sub-1 RPS: carries fractional logs between iterations
+    # This ensures 0.56 RPS produces ~1 log every ~2 seconds on average
+    log_accumulator = 0.0
+    
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            
+            # Update system state (expire old events, maybe start new ones)
+            SYSTEM_STATE.update(now)
+            
+            # Get current modifiers based on active events
+            modifiers = SYSTEM_STATE.get_current_modifiers(now)
+            
+            # Accumulate logs over time for sub-1 RPS support
+            # E.g., 0.56 RPS: after 2 seconds, accumulator reaches ~1.12 → generate 1 log
+            base_rps = EVENT_MODE_BASE_RPS
+            logs_this_second = base_rps * modifiers["request_rate"] * random.uniform(0.9, 1.1)
+            log_accumulator += logs_this_second
+            
+            # Generate integer number of logs, keep fractional part for next iteration
+            num_logs = int(log_accumulator)
+            log_accumulator -= num_logs  # Keep the fractional remainder
+            
+            # Generate logs with state-aware metrics
+            batch = []
+            for _ in range(num_logs):
+                ts_offset = random.uniform(0, 1.0)  # Spread within the second
+                timestamp = now - timedelta(seconds=ts_offset)
+                entry = SYSTEM_STATE.generate_log_with_state(timestamp, local_fake)
+                batch.append(entry)
+            
+            # Index batch
+            if batch:
+                success, errors = await stream_bulk_index(
+                    es_manager.session, es_manager.host, es_manager.index_name, batch
+                )
+                total_logs += success
+            
+            # Track events
+            total_events = len(SYSTEM_STATE.event_history)
+            
+            # Print stats every 30 seconds
+            current_time = time.time()
+            if current_time - last_stats_time >= 30:
+                elapsed = current_time - start_time
+                rate = total_logs / elapsed if elapsed > 0 else 0
+                active_events = len(SYSTEM_STATE.active_events)
+                
+                status_icon = "🔴" if active_events > 0 else "🟢"
+                event_names = ", ".join([e.event_type for e in SYSTEM_STATE.active_events]) if active_events else "none"
+                
+                logger.info(
+                    f"📊 Event Mode Stats: {total_logs:,} logs | "
+                    f"Rate: {rate:.1f}/sec | "
+                    f"Events: {total_events} total | "
+                    f"{status_icon} Active: {event_names}"
+                )
+                
+                # Log current modifiers if events active
+                if active_events > 0:
+                    logger.info(
+                        f"   Modifiers: 5xx={modifiers['error_5xx']:.2f}x, "
+                        f"4xx={modifiers['error_4xx']:.2f}x, "
+                        f"latency={modifiers['response_time']:.2f}x, "
+                        f"bytes={modifiers['bytes']:.2f}x, "
+                        f"rps={modifiers['request_rate']:.2f}x"
+                    )
+                
+                last_stats_time = current_time
+            
+            await asyncio.sleep(1.0)  # Event mode always runs at 1 second intervals
+            
+        except asyncio.CancelledError:
+            logger.info("Event mode generation cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Error in event mode generation: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            await asyncio.sleep(5)
+
+
 # =============================================================================
 # MAIN
 # =============================================================================
@@ -1499,6 +2078,7 @@ async def main_async():
         logger.info(f"Elasticsearch: {ES_HOST}")
         logger.info(f"Index: {INDEX_NAME}")
         logger.info(f"Historical days: {HISTORICAL_DAYS}")
+        logger.info(f"Generation mode: {GENERATION_MODE.upper()}")
         logger.info(f"Products: {sum(len(c['products']) for c in CATEGORIES.values())} across {len(CATEGORIES)} categories")
         
         # Connect to Elasticsearch using async
@@ -1512,7 +2092,7 @@ async def main_async():
             logger.error("Failed to create index, exiting")
             sys.exit(1)
         
-        # Phase 1: Generate historical data
+        # Phase 1: Generate historical data (both modes need this)
         await generate_historical_data_async(es_manager, HISTORICAL_DAYS)
         
         logger.info("Historical data generation complete!")
@@ -1528,8 +2108,16 @@ async def main_async():
         except Exception as e:
             logger.warning(f"Could not re-enable refresh: {e}")
         
-        # Phase 2: Continuous generation (runs forever)
-        await run_continuous_async(es_manager)
+        # Phase 2: Continuous generation based on mode
+        if GENERATION_MODE == "event":
+            logger.info("")
+            logger.info("🎯 Starting EVENT-BASED mode - correlated system events")
+            await run_event_mode_async(es_manager)
+        else:
+            logger.info("")
+            logger.info("🎲 Starting RANDOM mode - independent anomalies")
+            await run_continuous_async(es_manager)
+            
     except Exception as e:
         logger.error(f"FATAL ERROR in main_async: {e}")
         import traceback

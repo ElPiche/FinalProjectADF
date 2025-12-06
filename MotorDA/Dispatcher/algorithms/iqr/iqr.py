@@ -1,0 +1,181 @@
+"""IQR Algorithm - Interquartile Range anomaly detection.
+
+Self-contained algorithm using IQR (Interquartile Range) method.
+Values outside Q1 - multiplier*IQR or Q3 + multiplier*IQR are anomalies.
+
+This is a robust method that works well with non-normal distributions
+and is less sensitive to extreme outliers than Z-Score.
+"""
+
+from dataclasses import dataclass
+from typing import Dict, Any, List
+import logging
+
+from ...algorithm_interface import register_algorithm
+
+logger = logging.getLogger(__name__)
+
+
+@register_algorithm
+@dataclass
+class IQRAlgorithm:
+    """Interquartile Range (IQR) anomaly detection.
+    
+    Uses the IQR method to detect outliers:
+    - Q1 = 25th percentile
+    - Q3 = 75th percentile
+    - IQR = Q3 - Q1
+    - Lower bound = Q1 - multiplier * IQR
+    - Upper bound = Q3 + multiplier * IQR
+    
+    Values outside these bounds are flagged as anomalies.
+    Default multiplier is 1.5 (standard) or 3.0 (extreme outliers only).
+    
+    Algorithm Properties:
+        is_multi_dimensional: False - trains/detects one dimension at a time
+        supports_bucketing: True - separate model per time-context bucket
+        min_training_samples: 4 - minimum points for quartile calculation
+    """
+    
+    __algorithm_meta__ = {
+        "description": "IQR-based outlier detection using quartiles, robust to non-normal distributions",
+        "best_for": "Data with outliers, non-normal distributions, or when Z-Score is too sensitive",
+        "parameters": ["multiplier"],
+    }
+    
+    # ─────────────────────────────────────────────────────────────────────────────
+    # Algorithm Interface Properties (Phase 2)
+    # ─────────────────────────────────────────────────────────────────────────────
+    
+    @property
+    def name(self) -> str:
+        return "iqr"
+    
+    @property
+    def is_multi_dimensional(self) -> bool:
+        """IQR processes dimensions independently (single-dimensional)."""
+        return False
+    
+    @property
+    def supports_bucketing(self) -> bool:
+        """IQR supports separate models per time-context bucket."""
+        return True
+    
+    @property
+    def min_training_samples(self) -> int:
+        """Minimum samples needed for quartile calculation (Q1, Q3)."""
+        return 4
+    
+    def _percentile(self, values: List[float], p: float) -> float:
+        """Calculate percentile of sorted values."""
+        if not values:
+            return 0.0
+        sorted_vals = sorted(values)
+        k = (len(sorted_vals) - 1) * (p / 100.0)
+        f = int(k)
+        c = f + 1 if f + 1 < len(sorted_vals) else f
+        return sorted_vals[f] + (k - f) * (sorted_vals[c] - sorted_vals[f])
+    
+    def train(self, values: List[float], parameter: Dict[str, Any] = None, **_) -> Dict[str, Any]:
+        """Train IQR model from values.
+        
+        Args:
+            values: List of numeric values
+            parameter: Algorithm parameter dict with optional metadata overrides:
+                - multiplier: via metadata[key="multiplier"].value (default: 1.5)
+        
+        Returns:
+            Model dict with q1, q3, iqr, bounds
+        """
+        # ─────────────────────────────────────────────────────────────────────────
+        # Resolve parameters: metadata overrides > defaults (User-Overridable Pattern)
+        # ─────────────────────────────────────────────────────────────────────────
+        multiplier = 1.5  # Algorithm default
+        
+        if parameter:
+            for meta in parameter.get("metadata", []):
+                key = meta.get("key")
+                val = meta.get("value")
+                if key == "multiplier" and val is not None:
+                    try:
+                        multiplier = float(val)
+                    except (ValueError, TypeError):
+                        pass
+        
+        if len(values) < self.min_training_samples:
+            # Not enough data for quartiles
+            mean = sum(values) / len(values) if values else 0.0
+            return {
+                "q1": mean,
+                "q3": mean,
+                "iqr": 0.0,
+                "lower_bound": mean - 10.0,
+                "upper_bound": mean + 10.0,
+                "multiplier": multiplier,
+                "data_points": len(values),
+            }
+        
+        q1 = self._percentile(values, 25)
+        q3 = self._percentile(values, 75)
+        iqr = q3 - q1
+        
+        lower_bound = q1 - multiplier * iqr
+        upper_bound = q3 + multiplier * iqr
+        
+        logger.info(f"[IQR] Trained: Q1={q1:.2f}, Q3={q3:.2f}, IQR={iqr:.2f}, bounds=[{lower_bound:.2f}, {upper_bound:.2f}]")
+        
+        return {
+            "q1": q1,
+            "q3": q3,
+            "iqr": iqr,
+            "lower_bound": lower_bound,
+            "upper_bound": upper_bound,
+            "multiplier": multiplier,
+            "data_points": len(values),
+        }
+    
+    def detect(self, value: float, model: Dict[str, Any], parameter: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Detect if value is outside IQR bounds.
+        
+        Args:
+            value: The value to check
+            model: Trained model dict
+            parameter: Algorithm parameter dict (unused for detection, bounds from model)
+        
+        Returns:
+            Dict with is_anomaly, bounds, etc.
+        """
+        lower = model.get("lower_bound", float("-inf"))
+        upper = model.get("upper_bound", float("inf"))
+        
+        is_anomaly = value < lower or value > upper
+        
+        # Calculate how far outside bounds (0 if inside)
+        if value < lower:
+            distance = lower - value
+        elif value > upper:
+            distance = value - upper
+        else:
+            distance = 0.0
+        
+        return {
+            "is_anomaly": is_anomaly,
+            "value": value,
+            "lower_bound": lower,
+            "upper_bound": upper,
+            "distance_from_bounds": distance,
+            "q1": model.get("q1"),
+            "q3": model.get("q3"),
+        }
+    
+    def detect_batch(self, values: List[float], model: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Detect anomalies for multiple values.
+        
+        Args:
+            values: List of values to check
+            model: Trained model dict
+        
+        Returns:
+            List of detection result dicts
+        """
+        return [self.detect(v, model) for v in values]

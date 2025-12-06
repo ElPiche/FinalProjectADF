@@ -621,9 +621,8 @@ async def create_da_config(
 
             db_instance = client[db.db_kb_name]
             collection = db_instance[db.db_kb_collection_name]
-            # Bucket profiles are stored in anomaly_detection database (via get_db())
-            anomaly_detection_db = client["anomaly_detection"]
-            bucket_profiles_collection = anomaly_detection_db.get_collection("bucket_profiles")
+            # Bucket profiles are stored in knowledge_base database (same as KB configs)
+            bucket_profiles_collection = db_instance.get_collection("bucket_profiles")
             enforce_unique = os.getenv("ENFORCE_UNIQUE_CONFIG_NAMES", "false").lower() == "true"
             existing = await asyncio.to_thread(collection.find_one, {"name": name})
             if existing:

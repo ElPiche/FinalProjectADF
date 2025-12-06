@@ -2,7 +2,7 @@
 
 This directory contains intelligent log generators for testing the Anomaly Detection Framework, featuring a **realistic e-commerce website simulation**.
 
-## 🛒 Smart E-Commerce Generator (NEW)
+## 🛒 Smart E-Commerce Generator
 
 The main generator (`ecommerce_log_generator.py`) simulates a complete online store with:
 
@@ -23,11 +23,46 @@ The main generator (`ecommerce_log_generator.py`) simulates a complete online st
 - **Peak hours**: Up to 20,000 requests/hour during sales events
 - **1 year of data**: ~45-60 million documents
 
-### Realistic Anomaly Patterns
-- **Database outages**: Every 2nd month, 15th day, 2-4 AM
-- **Deployment issues**: Wednesday evenings
-- **Payment failures**: Occasional payment gateway problems
-- **Traffic spikes**: Random viral moments
+---
+
+## 🎯 Generation Modes
+
+The generator supports two modes, configurable via `GENERATION_MODE` environment variable:
+
+### Random Mode (`GENERATION_MODE=random`)
+Original mode with independent anomaly injection:
+- High throughput, random anomalies
+- Anomalies are independent - a high response time doesn't correlate with errors
+- Good for stress testing and high-volume scenarios
+
+### Event Mode (`GENERATION_MODE=event`) ⭐ NEW
+Realistic system event simulation:
+- **Correlated metrics**: When an event occurs, multiple metrics change together
+- **Defined event types**: Each event has specific impact on errors, latency, bytes, etc.
+- **Event duration**: Events last 30-300 seconds (configurable)
+- **Traceable anomalies**: You can understand WHY an anomaly was detected
+
+#### Available Event Types
+
+| Event | Description | Impact |
+|-------|-------------|--------|
+| `db_connection_pool_exhaustion` | DB connections depleted | High 5xx, very slow, tiny responses |
+| `memory_pressure` | GC pauses, OOM risks | High 5xx, slow (GC), reduced bytes |
+| `network_latency_spike` | Inter-service network issues | Some 5xx, very high latency |
+| `cdn_degradation` | CDN problems | Slow, larger responses (origin) |
+| `ddos_attack` | Attack with rate limiting | High 4xx (429), fast, tiny, many requests |
+| `payment_gateway_outage` | Payment provider down | 5xx on checkout, slow payments |
+| `deployment_rollout` | New code causing instability | Moderate 5xx, slower responses |
+| `cache_invalidation` | Cache miss storm | Slow (DB hits), normal errors |
+| `traffic_surge` | Viral moment or flash sale | High traffic, some capacity issues |
+| `ssl_cert_issue` | Certificate problems | 4xx errors, connection failures |
+| `data_corruption` | Truncated/corrupted responses | Normal timing, tiny bytes |
+
+#### Event Mode Benefits for K-Means
+- When K-means detects an anomaly, you can trace it to a specific event
+- Metrics are realistically correlated (e.g., slow + errors + small bytes = DB outage)
+- Training data is stable baseline; anomalies are discrete events
+- Makes anomaly detection meaningful and interpretable
 
 ---
 
@@ -36,10 +71,8 @@ The main generator (`ecommerce_log_generator.py`) simulates a complete online st
 | File | Description |
 |------|-------------|
 | `ecommerce_log_generator.py` | **Main** - Smart e-commerce simulation (writes to `ecommerce-logs`) |
-| `unified_log_generator.py` | Legacy generic web logs (writes to `app-logs`) |
-| `continuous_log_generator.py` | Real-time log generation only |
-| `generate_historical_data.py` | Standalone historical data generator |
-| `add_recent_data.py` | Add recent data to existing index |
+| `requirements.txt` | Python dependencies |
+| `Dockerfile` | Container build configuration |
 
 ---
 
@@ -48,26 +81,18 @@ The main generator (`ecommerce_log_generator.py`) simulates a complete online st
 ### Docker (Recommended)
 
 ```bash
-# Build and run e-commerce generator
-docker-compose up log-generator
+# Build and run e-commerce generator (event mode by default)
+docker-compose --profile generate-logs up -d
 
-# Or run directly
-docker build -t ecommerce-log-gen .
-docker run -e ES_HOST=http://elasticsearch:9200 ecommerce-log-gen
+# Or with random mode
+docker-compose --profile generate-logs up -d -e GENERATION_MODE=random
 ```
 
 ### Local Development
 
 ```bash
 pip install -r requirements.txt
-python ecommerce_log_generator.py
-```
-
-### Run Legacy Generator
-
-```bash
-# Override CMD to use old generator
-docker run ecommerce-log-gen python -u unified_log_generator.py
+GENERATION_MODE=event python ecommerce_log_generator.py
 ```
 
 ---
@@ -80,21 +105,30 @@ docker run ecommerce-log-gen python -u unified_log_generator.py
 | `ES_HOST` | `http://elasticsearch-dataset:9200` | Elasticsearch URL |
 | `INDEX_NAME` | `ecommerce-logs` | Target index name |
 | `HISTORICAL_DAYS` | `365` | Days of historical data to generate |
+| `GENERATION_MODE` | `random` | `random` or `event` |
 
-### Volume Settings
+### Event Mode Settings
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EVENT_MODE_BASE_RPS` | *auto* | Requests per second (auto-calculated from BASE_REQUESTS_PER_HOUR * PEAK_MULTIPLIER / 3600) |
+| `EVENT_PROBABILITY` | `0.001` | Probability of new event per second |
+| `EVENT_MIN_DURATION` | `30` | Minimum event duration (seconds) |
+| `EVENT_MAX_DURATION` | `300` | Maximum event duration (seconds) |
+
+### Volume Settings (Random Mode)
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `BASE_REQUESTS_PER_HOUR` | `5000` | Base traffic volume per hour |
 | `PEAK_MULTIPLIER` | `4.0` | Multiplier for peak hours |
 | `HISTORICAL_BATCH_SIZE` | `10000` | Bulk indexing batch size |
 
-### Anomaly Settings
+### Anomaly Settings (Random Mode)
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HISTORICAL_ANOMALY_RATE` | `0.015` | 1.5% anomaly rate in historical data |
 | `CONTINUOUS_ANOMALY_RATE` | `0.02` | 2% anomaly rate in real-time data |
 
-### Continuous Generation
+### Continuous Generation (Random Mode)
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CONTINUOUS_INTERVAL` | `1.0` | Seconds between batches |

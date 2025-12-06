@@ -207,12 +207,14 @@ services:
     environment:
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
       - ES_HOSTS=http://elasticsearch-dataset:9200,http://elasticsearch-anomalies:9200
+      - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
     ports:
       - "8000:8000"
     networks:
       - adf-network
     volumes:
       - kb_mcp_logs:/app/logs
+      - algorithm_registry:/app/registry:ro
     restart: unless-stopped
     stdin_open: true
     tty: true
@@ -313,12 +315,11 @@ services:
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
       - ES_HOSTS=http://elasticsearch-anomalies:9200
       - PYTHONUNBUFFERED=1
+      - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
+    volumes:
+      - algorithm_registry:/app/registry
     networks:
       - adf-network
-    # optional: mount a log folder or the code for dev
-    # volumes:
-    #   - ./logs/dispatcher:/app/logs
-    #   - ./MotorDA:/app/MotorDA
 
 
   log-generator:
@@ -352,6 +353,22 @@ services:
       - NUM_WORKERS=4 # Number of parallel worker threads
       - BULK_THREAD_COUNT=16 # Number of parallel bulk streams
       - CHUNK_SIZE=5000 # Docs per bulk chunk (smaller = more parallelism)
+      # =================================================================
+      # GENERATION MODE: "random" or "event"
+      # =================================================================
+      # "random" - Original mode: independent anomalies, high throughput
+      # "event"  - Event-based: realistic system events with correlated metrics
+      #            Events like db_outage, ddos_attack, deployment affect 
+      #            multiple metrics together (errors + latency + bytes)
+      - GENERATION_MODE=event
+      # Event mode settings (only used when GENERATION_MODE=event)
+      # NOTE: EVENT_MODE_BASE_RPS is auto-calculated from BASE_REQUESTS_PER_HOUR!
+      #       500/hour / 3600 = ~0.139 RPS (matches historical average rate)
+      #       Set EVENT_MODE_BASE_RPS only if you need to override this.
+      # - EVENT_MODE_BASE_RPS=0.139 # Uncomment to override auto-calculation
+      - EVENT_PROBABILITY=0.0001 # Probability of new event per second (0.01% = ~1 event per 2-3 hours)
+      - EVENT_MIN_DURATION=45 # Minimum event duration in seconds
+      - EVENT_MAX_DURATION=120 # Maximum event duration in seconds
     networks:
       - adf-network
     # Explicitly disable Dockerfile healthcheck during long data generation
@@ -435,13 +452,17 @@ services:
         condition: service_healthy
       elasticsearch-dataset:
         condition: service_healthy
+      dispatcher:
+        condition: service_started  # Wait for dispatcher to export algorithms
     environment:
       - MONGODB_URI=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
       - MONGODB_DB=knowledge_base
       - MONGODB_COLLECTION=kb_configs
       - BUCKET_COLLECTION=bucket_profiles
       - ES_URL=http://elasticsearch-dataset:9200
-      - SOURCE_INDEX=ecommerce-logs
+      # IMPORTANT: These must match log-generator settings!
+      - SOURCE_INDEX=ecommerce-logs  # Must match log-generator INDEX_NAME
+      - HISTORICAL_DAYS=365          # Must match log-generator HISTORICAL_DAYS
       - MODE=continuous
       - MIN_INTERVAL=1
       - MAX_INTERVAL=3
@@ -449,6 +470,9 @@ services:
       - BURST_SIZE_MIN=3
       - BURST_SIZE_MAX=20
       - BUCKET_PROBABILITY=0.3
+      - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
+    volumes:
+      - algorithm_registry:/app/registry:ro  # Read-only access to algorithm registry
     networks:
       - adf-network
 
@@ -459,6 +483,7 @@ volumes:
   elastic_anomalies_data: null
   mongo_key: null
   kb_mcp_logs: null
+  algorithm_registry: null
 
 networks:
   adf-network:

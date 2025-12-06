@@ -4,7 +4,6 @@ import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
@@ -12,7 +11,6 @@ import org.springframework.util.StreamUtils;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.Map;
 
 @Service
@@ -24,19 +22,6 @@ public class EmailNotificationService {
     public EmailNotificationService(JavaMailSender mailSender) {
         this.mailSender = mailSender;
         logger.info("EmailNotificationService initialized with JavaMailSender: {}", mailSender.getClass().getName());
-    }
-
-    //List<String> to
-    public void sendSimpleEmail(String to, String subject, String body) {
-        SimpleMailMessage message = new SimpleMailMessage();
-        //message.setTo(to.toArray(new String[0]));
-        message.setTo(to);
-        message.setSubject(subject);
-        message.setText(body);
-        // opcional: from explícito
-        // message.setFrom("adfnotificationsnoreply@gmail.com");
-
-        mailSender.send(message);
     }
 
     public void sendHtmlEmailFromTemplate(

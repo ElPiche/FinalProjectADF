@@ -68,7 +68,7 @@ Optional:
 **2) modify_kb_config**
 Update existing configuration.
 
-Required: config_id (MongoDB ObjectId from list_kb_configurations)
+Required: kb_id (MongoDB ObjectId from list_kb_configurations)
 Optional: Any field from create_da_config
 
 ---

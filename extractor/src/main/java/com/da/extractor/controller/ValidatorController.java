@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.web.bind.annotation.*;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -347,7 +348,11 @@ public class ValidatorController {
         } catch (ElasticsearchException e) {
             logger.warn("Query validation Elasticsearch error", e);
             errors.add("The query does not conform to Elasticsearch SQL syntax: " + e.getMessage());
-        } catch (Exception e) {
+        }catch (IOException e){
+            logger.warn("Query validation Elasticsearch error", e);
+            errors.add(e.getMessage());
+        }
+        catch (Exception e) {
             logger.error("Query validation unexpected error", e);
             errors.add("Query validation failed with unexpected error: " + e.getMessage());
         }

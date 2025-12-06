@@ -42,7 +42,7 @@ def list_kb_configurations() -> str:
         for config_doc in configs:
             kb_config = config_doc
 
-            config_id = str(kb_config.get("_id", "Unknown"))
+            kb_id = str(kb_config.get("_id", "Unknown"))
             name = kb_config.get("name", "Unknown")
             description = kb_config.get("description", "No description")
 
@@ -64,7 +64,7 @@ def list_kb_configurations() -> str:
             detection_from = detection_config.get("from", "Unknown")
 
             output += f"## Configuration: {name}\n"
-            output += f"- **ID**: {config_id}\n"
+            output += f"- **ID**: {kb_id}\n"
             output += f"- **Description**: {description}\n"
             output += f"- **Algorithms**: {', '.join(algorithms) if algorithms else 'None'}\n"
             output += f"- **Training Period**: {training_from} to {training_to}\n"

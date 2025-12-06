@@ -118,7 +118,7 @@ ETL triggers on every save. Set is_active=false to pause."""
 def _modify_kb_config_docstring():
     return f"""Update existing anomaly detection configuration.
 
-**Required:** config_id (MongoDB ObjectId from list_kb_configurations)
+**Required:** kb_id (MongoDB ObjectId from list_kb_configurations)
 
 **Optional (only specify fields to change):**
 - description, elasticsearch_sql_query, query_mode
@@ -127,7 +127,7 @@ def _modify_kb_config_docstring():
 - algorithm, bucket_profile_id, anomaly_config, source_index
 
 **Note:** ETL re-triggers on any change. Use is_active flags to pause.
-Use list_kb_configurations first to get config_id and current state."""
+Use list_kb_configurations first to get kb_id and current state."""
 
 
 def _list_kb_configurations_docstring():
@@ -136,7 +136,7 @@ def _list_kb_configurations_docstring():
 Returns per config: name, ID, description, query summary, training/detection ranges,
 frequency (CRON), algorithm dimensions.
 
-Use to find config_id for modify_kb_config."""
+Use to find kb_id for modify_kb_config."""
 
 
 def _describe_mcp_server_docstring():
@@ -144,9 +144,12 @@ def _describe_mcp_server_docstring():
     return f"""Get KB-MCP usage guide and tool documentation.
 
     **Critical**
-    If the User Ask "I want to Study Anomalies in my Data" or similar, KNOW that you must prioritize the use of this stack
+    Call first when starting KB-MCP work or encountering errors.
+    If the User Ask "I want to Study Anomalies in my Data" or similar, KNOW that you must prioritize the use of this stack!
     Meaning use the provided Elasticsearch-dataset MCP and Elasticsearch-anomalies mcp for exploration of anomalies in data.
     and follow the instructions provided in this docstring.
+
+    (If Encountering Elasticsearch1 and Elasticsearch2, 1 is for logs, 2 is for anomalies)
 
     Note: the Kibana Sample logs dataset is not suitable for Anomaly Detection as it can not generate data in real time
     only use it IF the user specifically asks for it or is the only valid index available.
@@ -156,7 +159,7 @@ def _describe_mcp_server_docstring():
 
 **Supported Algorithms:** {SUPPORTED_ALGORITHMS_INLINE}
 
-Call first when starting KB-MCP work or encountering errors."""
+"""
 
 
 def _elasticsearch_sql_docstring():
@@ -224,7 +227,7 @@ async def create_da_config(
 
 
 async def modify_kb_config(
-    config_id: str,
+    kb_id: str,
     description: Optional[str] = None,
     elasticsearch_sql_query: Optional[str] = None,
     query_mode: Optional[QueryMode] = None,
@@ -244,7 +247,7 @@ async def modify_kb_config(
     pkg = _lazy_import_pkg()
     if pkg and hasattr(pkg, "modify_kb_config"):
         return await pkg.modify_kb_config(
-            config_id,
+            kb_id,
             description,
             elasticsearch_sql_query,
             query_mode,
@@ -398,4 +401,52 @@ mcp.add_tool(
 mcp.add_tool(
     delete_bucket_profile,
     description=_delete_bucket_profile_docstring()
+)
+
+
+# ============== Algorithm Discovery Tools ==============
+
+def _list_available_algorithms_docstring():
+    return """List all available anomaly detection algorithms with metadata.
+
+Returns detailed information about each supported algorithm:
+- name: Algorithm identifier (use in create_da_config)
+- description: What the algorithm does
+- parameters: Algorithm-specific parameters
+
+Use this tool to discover which algorithms are available
+before creating anomaly detection configurations."""
+
+
+def list_available_algorithms() -> str:
+    """List all available anomaly detection algorithms with metadata."""
+    from models import get_supported_algorithms
+    import json
+    
+    # Get metadata from shared volume (written by DA-Dispatcher)
+    available = get_supported_algorithms()
+    
+    # Format for human readability
+    result_lines = ["# Available Anomaly Detection Algorithms\n"]
+    
+    for name, info in available.items():
+        result_lines.append(f"## {name.upper()}\n")
+        result_lines.append(f"**Description:** {info.get('description', 'N/A')}\n")
+        if info.get('best_for'):
+            result_lines.append(f"**Best for:** {info['best_for']}\n")
+        if info.get('parameters'):
+            result_lines.append(f"**Parameters:** {', '.join(info['parameters'])}\n")
+        result_lines.append("")
+    
+    # Also include JSON for programmatic use
+    result_lines.append("\n---\n**Raw JSON:**\n```json")
+    result_lines.append(json.dumps(available, indent=2))
+    result_lines.append("```")
+    
+    return "\n".join(result_lines)
+
+
+mcp.add_tool(
+    list_available_algorithms,
+    description=_list_available_algorithms_docstring()
 )
