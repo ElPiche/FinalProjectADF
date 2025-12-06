@@ -20,6 +20,12 @@ Ver [Doc/Modular_Algorithm_Architecture.md](Doc/Modular_Algorithm_Architecture.m
 
 ## Setup 
 
+### Configuración servicio de correos
+Dentro de la siguiente ubicación: `anomalies-insights-module\src\main\resources` crear un archivo de nombre application-secrtets.properties, el mismo 
+funciona como archivo de configuracion que contiene la clave del correo que utiliza el sistema, con este archivo se evita exponerla de manera pública.
+
+Dentro del archivo colocar el siguiente contenido: spring.mail.password=<MAIL_PASSWORD> colocar dentro de <> la contraseña del correo proporcionada.
+
 ### Infraestructura principal
 Utilizando Docker: En la raiz del proyecto ejecutar: `docker-compose up -d --build`
 
