@@ -68,7 +68,7 @@ class StressGeneratorConfig:
     historical_days: int = 365  # Must match log-generator HISTORICAL_DAYS setting
     algorithm_registry_path: str = "/app/registry/algorithms.json"  # Shared volume
     
-    mode: str = "continuous"  # continuous, burst, single
+    mode: str = "continuous"  # continuous, burst, single, always_active
     min_interval: int = 30  # seconds between configs
     max_interval: int = 120
     burst_probability: float = 0.1  # 10% chance of burst
@@ -310,12 +310,14 @@ class KBConfigGenerator:
         source_index: str = "ecommerce-logs",
         historical_days: int = 365,
         algorithm_registry: Optional[AlgorithmRegistry] = None,
-        seed: Optional[int] = None
+        seed: Optional[int] = None,
+        always_active: bool = False
     ):
         self.fake = Faker()
         self.source_index = source_index
         self.historical_days = historical_days  # From log-generator settings
         self.algorithm_registry = algorithm_registry or AlgorithmRegistry()
+        self.always_active = always_active  # New parameter for always_active mode
         
         if seed is not None:
             random.seed(seed)
@@ -571,13 +573,13 @@ class KBConfigGenerator:
                     "type": "static",
                     "from": training_from,
                     "to": training_to,
-                    "is_active": random.choice([True, True, True, False]),  # 75% active
+                    "is_active": True if self.always_active else random.choice([True, True, True, False]),  # Always active in always_active mode
                 },
                 "detection_config": {
                     "from": detection_start,
                     "frequency": random.choice(self.detection_frequencies),
                     "detection_window": random.choice(self.detection_windows),
-                    "is_active": random.choice([True, True, True, False]),  # 75% active
+                    "is_active": True if self.always_active else random.choice([True, True, True, False]),  # Always active in always_active mode
                 },
             },
             "algorithm": {
@@ -604,7 +606,8 @@ class StressGenerator:
             source_index=config.source_index,
             historical_days=config.historical_days,
             algorithm_registry=self.algorithm_registry,
-            seed=config.seed
+            seed=config.seed,
+            always_active=(config.mode == "always_active")  # Pass always_active flag
         )
         self.bucket_generator = BucketProfileGenerator(config.seed)
         self.mongo_client: Optional[MongoClient] = None
@@ -801,6 +804,32 @@ class StressGenerator:
     
     def _print_summary(self):
         """Print final summary."""
+        # Count active configurations
+        training_active = 0
+        detection_active = 0
+        both_active = 0
+        
+        try:
+            # Query all KB configs to count active ones
+            all_configs = list(self.kb_collection.find({}, {
+                "scheduling.training_config.is_active": 1,
+                "scheduling.detection_config.is_active": 1
+            }))
+            
+            for config in all_configs:
+                training_is_active = config.get("scheduling", {}).get("training_config", {}).get("is_active", False)
+                detection_is_active = config.get("scheduling", {}).get("detection_config", {}).get("is_active", False)
+                
+                if training_is_active:
+                    training_active += 1
+                if detection_is_active:
+                    detection_active += 1
+                if training_is_active and detection_is_active:
+                    both_active += 1
+                    
+        except Exception as e:
+            logger.warning(f"Could not count active configurations: {e}")
+        
         logger.info("")
         logger.info("=" * 60)
         logger.info("📊 STRESS TEST SUMMARY")
@@ -809,6 +838,11 @@ class StressGenerator:
         logger.info(f"Total bucket profiles created: {self.total_buckets_created}")
         logger.info(f"Total bursts: {self.total_bursts}")
         logger.info(f"Available bucket profiles: {len(self.created_bucket_ids)}")
+        logger.info("-" * 60)
+        logger.info("🎯 Active Configuration Counts:")
+        logger.info(f"   Training active: {training_active}")
+        logger.info(f"   Detection active: {detection_active}")
+        logger.info(f"   Both active: {both_active}")
         logger.info("-" * 60)
         logger.info("📚 Algorithm usage breakdown:")
         for algo_name, count in sorted(self.algorithm_usage_counts.items()):
@@ -829,6 +863,8 @@ class StressGenerator:
                 self.run_burst()
             elif self.config.mode == "single":
                 self.run_single()
+            elif self.config.mode == "always_active":
+                self.run_continuous()  # always_active uses continuous mode but with always active configs
             else:
                 logger.error(f"Unknown mode: {self.config.mode}")
                 sys.exit(1)
@@ -840,7 +876,7 @@ class StressGenerator:
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="KB Stress Generator")
-    parser.add_argument("--mode", choices=["continuous", "burst", "single"],
+    parser.add_argument("--mode", choices=["continuous", "burst", "single", "always_active"],
                        default=None, help="Run mode")
     parser.add_argument("--min-interval", type=int, default=None,
                        help="Minimum seconds between configs")

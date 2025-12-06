@@ -29,7 +29,7 @@ A stress testing tool that periodically creates KB anomaly detection configurati
 | `ES_URL` | `http://elasticsearch-dataset:9200` | Elasticsearch URL for query validation |
 | `SOURCE_INDEX` | `ecommerce-logs` | Target index for KB configs |
 | `ALGORITHM_REGISTRY_PATH` | `/app/registry/algorithms.json` | Path to algorithm registry (shared volume) |
-| `MODE` | `continuous` | Run mode: `continuous`, `burst`, or `single` |
+| `MODE` | `continuous` | Run mode: `continuous`, `burst`, `single`, or `always_active` |
 | `MIN_INTERVAL` | `30` | Minimum seconds between config creations |
 | `MAX_INTERVAL` | `120` | Maximum seconds between config creations |
 | `BURST_PROBABILITY` | `0.1` | Probability of a burst (0-1) |
@@ -107,6 +107,14 @@ Generates a single config and exits:
 python stress_generator.py --mode single
 ```
 
+### Always Active
+Generates configs continuously like continuous mode, but **always sets both training and detection to active** (100% active rate instead of 75%):
+```bash
+python stress_generator.py --mode always_active
+```
+
+This mode is useful for testing scenarios where you want maximum worker activation and full system load.
+
 ## Example Output
 
 ```
@@ -122,6 +130,11 @@ python stress_generator.py --mode single
 2025-12-02 02:40:34 - INFO - 📊 STRESS TEST SUMMARY
 2025-12-02 02:40:34 - INFO - ============================================================
 2025-12-02 02:40:34 - INFO - Total KB configs created: 10
+2025-12-02 02:40:34 - INFO - ------------------------------------------------------------
+2025-12-02 02:40:34 - INFO - 🎯 Active Configuration Counts:
+2025-12-02 02:40:34 - INFO -    Training active: 8
+2025-12-02 02:40:34 - INFO -    Detection active: 7
+2025-12-02 02:40:34 - INFO -    Both active: 6
 2025-12-02 02:40:34 - INFO - ------------------------------------------------------------
 2025-12-02 02:40:34 - INFO - 📚 Algorithm usage breakdown:
 2025-12-02 02:40:34 - INFO -    IQR: 2 configs (20.0%)

@@ -296,12 +296,15 @@ def run_training(
     )
     
     # Use the timestamp_field passed from caller (from KB config query_mode)
+    import time
+    train_start = time.time()
     result = orchestrator.train(
         observed_values=observed_values,
         timestamp_field=timestamp_field
     )
+    train_elapsed = time.time() - train_start
     
-    logger.info(f"[TRAINING] Completed for KB {kb_id}")
+    logger.info(f"[TRAINING] Completed for KB {kb_id} in {train_elapsed:.4f}s")
     logger.info(f"[TRAINING] Buckets trained: {list(result.get('buckets', {}).keys())}")
     
     return result

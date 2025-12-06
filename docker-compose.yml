@@ -366,7 +366,7 @@ services:
       #       500/hour / 3600 = ~0.139 RPS (matches historical average rate)
       #       Set EVENT_MODE_BASE_RPS only if you need to override this.
       # - EVENT_MODE_BASE_RPS=0.139 # Uncomment to override auto-calculation
-      - EVENT_PROBABILITY=0.0001 # Probability of new event per second (0.01% = ~1 event per 2-3 hours)
+      - EVENT_PROBABILITY=0.1 # Probability of new event per second (0.01% = ~1 event per 2-3 hours)
       - EVENT_MIN_DURATION=45 # Minimum event duration in seconds
       - EVENT_MAX_DURATION=120 # Maximum event duration in seconds
     networks:
@@ -463,7 +463,7 @@ services:
       # IMPORTANT: These must match log-generator settings!
       - SOURCE_INDEX=ecommerce-logs  # Must match log-generator INDEX_NAME
       - HISTORICAL_DAYS=365          # Must match log-generator HISTORICAL_DAYS
-      - MODE=continuous
+      - MODE=always_active           # Always active mode: 100% training/detection activation
       - MIN_INTERVAL=1
       - MAX_INTERVAL=3
       - BURST_PROBABILITY=0.1

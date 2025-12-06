@@ -90,7 +90,7 @@ def _create_da_config_docstring():
 
 **Pre-flight:** 
 - Validate query with elasticsearch_sql tool first.
-- MUST CREATE BUCKETS IF PLANNING TO CREATE ANY FORM OF BUCKETING, SPECIALLY FOR AGGREGATED MODE, DO NOT BUCKET IN THE QUERY ITSELF.
+- **MUST USE CREATE_BUCKET_PROFILE to define time-context profiles before linking. DO NOT CREATE BUCKETS IN THE QUERY ITSELF.**
 
 **Required:**
 - name: Unique config identifier

@@ -159,6 +159,7 @@ class KBWorker:
     mongo_client: MongoClient
     db_name: str = "anomaly_detection"
     series_collection_name: str = "series"
+    total_workers: int = 0
     
     # Internal state
     _running: bool = field(default=False, init=False)
@@ -211,7 +212,7 @@ class KBWorker:
         )
         
         logger.info(
-            f"[KBWORKER-{self.kb_id[:8]}] Initialized: "
+            f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Initialized: "
             f"algorithm={alg_name}, mode={'multi' if self.is_multi_dimensional else 'single'}-dim, "
             f"dimensions={expected_dims}"
         )
@@ -287,18 +288,30 @@ class KBWorker:
             
             # Log detection attempt
             logger.info(
-                f"[KBWORKER-{self.kb_id[:8]}] Running detection ({self._algorithm_name}): "
+                f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Running detection ({self._algorithm_name}): "
                 f"timestamp={observation.get('timestamp')}"
             )
             
+            import time
+            start_time = time.time()
             result = self._detection_orchestrator.detect(
                 observation=observation,
                 timestamp_field=timestamp_field
             )
+            elapsed = time.time() - start_time
+            
+            # Log detection result and timing
+            logger.info(
+                f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Detection completed ({self._algorithm_name}): "
+                f"timestamp={observation.get('timestamp')}, elapsed={elapsed:.4f}s, "
+                f"is_anomaly={result.get('is_anomaly', False)}, "
+                f"dimensions={list(result.get('dimensions', {}).keys())}, "
+                f"bucket_key={result.get('bucket_key', 'unknown')}"
+            )
             
             if result.get("is_anomaly", False):
                 logger.info(
-                    f"[KBWORKER-{self.kb_id[:8]}] Anomaly detected ({self._algorithm_name}): "
+                    f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Anomaly detected ({self._algorithm_name}): "
                     f"timestamp={observation.get('timestamp')}"
                 )
                 
@@ -311,7 +324,7 @@ class KBWorker:
                     self._on_anomaly_callback(result)
         
         except Exception as e:
-            logger.error(f"[KBWORKER-{self.kb_id[:8]}] Detection error: {e}")
+            logger.error(f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Detection error: {e}")
             import traceback
             traceback.print_exc()
     
@@ -329,7 +342,7 @@ class KBWorker:
             discarded = self._buffer.cleanup_stale(BUFFER_TIMEOUT_MS)
             for entry in discarded:
                 logger.warning(
-                    f"[KBWORKER-{self.kb_id[:8]}] Discarding incomplete observation: "
+                    f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Discarding incomplete observation: "
                     f"timestamp={entry['timestamp']}, age={entry['age_ms']}ms, "
                     f"received={entry['received_dims']}, missing={entry['missing_dims']}"
                 )
@@ -339,7 +352,7 @@ class KBWorker:
         collection = self._get_series_collection()
         pipeline = self._build_change_stream_pipeline()
         
-        logger.info(f"[KBWORKER-{self.kb_id[:8]}] Starting change stream watcher")
+        logger.info(f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Starting change stream watcher")
         
         try:
             with collection.watch(pipeline, full_document="updateLookup") as stream:
@@ -360,14 +373,14 @@ class KBWorker:
                             self._run_detection(observation)
                     
                     except Exception as e:
-                        logger.error(f"[KBWORKER-{self.kb_id[:8]}] Document processing error: {e}")
+                        logger.error(f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Document processing error: {e}")
         
         except Exception as e:
             if self._running:  # Only log if not intentionally stopped
-                logger.error(f"[KBWORKER-{self.kb_id[:8]}] Change stream error: {e}")
+                logger.error(f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Change stream error: {e}")
         
         finally:
-            logger.info(f"[KBWORKER-{self.kb_id[:8]}] Change stream watcher stopped")
+            logger.info(f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Change stream watcher stopped")
     
     def start(self):
         """Start the worker."""
@@ -393,7 +406,7 @@ class KBWorker:
         )
         self._thread.start()
         
-        logger.info(f"[KBWORKER-{self.kb_id[:8]}] Started")
+        logger.info(f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Started")
     
     def stop(self):
         """Stop the worker gracefully."""
@@ -413,7 +426,7 @@ class KBWorker:
         if self._buffer:
             self._buffer.clear()
         
-        logger.info(f"[KBWORKER-{self.kb_id[:8]}] Stopped")
+        logger.info(f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Stopped")
 
 
 # =============================================================================
@@ -550,7 +563,8 @@ class DispatcherManager:
                 kb_config=kb_config,
                 training_result=training_result,
                 mongo_client=self._get_mongo_client(),
-                db_name=self.anomaly_db_name
+                db_name=self.anomaly_db_name,
+                total_workers=len(self._workers) + 1
             )
             
             if self.on_anomaly_callback:
@@ -559,7 +573,7 @@ class DispatcherManager:
             worker.start()
             self._workers[kb_id] = worker
             
-            logger.info(f"[MANAGER] Spawned worker for KB {kb_id} ({kb_config.get('name', 'unknown')})")
+            logger.info(f"[MANAGER] Spawned worker for KB {kb_id} ({kb_config.get('name', 'unknown')}) - Total workers: {len(self._workers)}")
     
     def _stop_worker(self, kb_id: str):
         """Stop a worker.
