@@ -301,11 +301,20 @@ class KBWorker:
             elapsed = time.time() - start_time
             
             # Log detection result and timing
+            # Handle dimensions field: can be dict (single-dim) or list (multi-dim)
+            dimensions_data = result.get('dimensions', {})
+            if isinstance(dimensions_data, dict):
+                dimensions_list = list(dimensions_data.keys())
+            elif isinstance(dimensions_data, list):
+                dimensions_list = dimensions_data
+            else:
+                dimensions_list = []
+            
             logger.info(
                 f"[KB-WORKER-{self.kb_id[:8]} Nro:{self.total_workers}] Detection completed ({self._algorithm_name}): "
                 f"timestamp={observation.get('timestamp')}, elapsed={elapsed:.4f}s, "
                 f"is_anomaly={result.get('is_anomaly', False)}, "
-                f"dimensions={list(result.get('dimensions', {}).keys())}, "
+                f"dimensions={dimensions_list}, "
                 f"bucket_key={result.get('bucket_key', 'unknown')}"
             )
             
