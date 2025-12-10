@@ -32,7 +32,14 @@ def create_bucket_profile(
     fallback: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Create a reusable bucket profile for time-context definitions.
-    
+
+    Hierarchy: exceptions (highest priority) → schedule → fallback (lowest priority).
+    Within exceptions and schedule, rules are evaluated in order - first match wins.
+    Exceptions override schedules, schedules override fallback.
+
+    the Args described below are all and the only fields supported in the profile definition.
+    adding extra fields will be silently ignored.
+
     Args:
         profile_id: Unique string ID for this profile (e.g., "business_hours_v1")
         timezone: IANA timezone string (e.g., "America/New_York")
