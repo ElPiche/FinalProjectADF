@@ -40,6 +40,9 @@ def create_bucket_profile(
     the Args described below are all and the only fields supported in the profile definition.
     adding extra fields will be silently ignored.
 
+    Impotant: use "bucket_base_key" as a descriptive key, example: "black_friday", "Xmas_2023", Sunday_morning", etc.
+    they not only work as keys but also as unique identifiers
+
     Args:
         profile_id: Unique string ID for this profile (e.g., "business_hours_v1")
         timezone: IANA timezone string (e.g., "America/New_York")
