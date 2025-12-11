@@ -8,6 +8,7 @@ exact inputs each tool needs.
 import time
 import uuid
 from utils import log_message as _utils_log_message
+from models import get_supported_algorithms
 
 
 def log_message(message: str, level: str = "info", component: str = "mcp_tools", method: str = "entry", **kwargs):
@@ -27,7 +28,24 @@ def describe_mcp_server() -> str:
     log_message("Tool execution started", "info", "describe_mcp_server", "entry",
                 request_id=request_id)
 
-    text = """
+    # Get dynamically supported algorithms
+    algorithms = get_supported_algorithms()
+    supported_algorithms = ", ".join(sorted(algorithms.keys()))
+    
+    # Use first available algorithm for example (default to 'zscore' if none available)
+    example_algorithm = sorted(algorithms.keys())[0] if algorithms else "zscore"
+    
+    # Build algorithm details section
+    algorithm_details = []
+    for name in sorted(algorithms.keys()):
+        info = algorithms[name]
+        details = f"- **{name}**: {info.get('description', 'No description available')}"
+        if info.get('best_for'):
+            details += f" (Best for: {info['best_for']})"
+        algorithm_details.append(details)
+    algorithm_details_text = "\n".join(algorithm_details) if algorithm_details else "- No algorithms available"
+
+    text = f"""
 KB-MCP: Usage Guide
 
 **8 Available Tools:**
@@ -40,7 +58,9 @@ KB-MCP: Usage Guide
 7) list_bucket_profiles - List bucket profiles
 8) delete_bucket_profile - Delete bucket profile
 
-**Supported Algorithms:** zscore
+**Supported Algorithms:** {supported_algorithms}
+
+{algorithm_details_text}
 
 ---
 
@@ -52,16 +72,16 @@ Required:
 - description: What this monitors
 - source_index: ES index being monitored (e.g., 'app-logs')
 - elasticsearch_sql_query: SQL with $from/$to placeholders
-- query_mode: {"type": "raw"|"aggregated", "timestamp_field": "<column>"}
+- query_mode: {{"type": "raw"|"aggregated", "timestamp_field": "<column>"}}
 - training_from/to: ISO 8601 timestamps for training period
 - detection_frequency: CRON (5-field or 6-field with seconds)
 - detection_window: Seconds per detection cycle
 - detection_start: When detection begins (ISO 8601)
-- algorithm: {"name": "zscore", "parameters": [{"dimension": "<column>", "is_active": true}]}
+- algorithm: {{"name": "{example_algorithm}", "parameters": [{{"dimension": "<column>", "is_active": true}}]}}
 
 Optional:
 - bucket_profile_id: Link to time-context profile
-- anomaly_config: {"user_emails": ["email@example.com"]}
+- anomaly_config: {{"user_emails": ["email@example.com"]}}
 
 ---
 
@@ -100,12 +120,12 @@ delete_bucket_profile: Delete profile (cannot delete if referenced by KBs)
 
 **Example Configuration:**
 ```json
-{
+{{
   "name": "Web Traffic Monitor",
   "description": "Monitor HTTP status codes",
   "source_index": "kibana_sample_data_logs",
   "elasticsearch_sql_query": "SELECT DATE_TRUNC('hour', \\"@timestamp\\") AS bucket, COUNT(*) AS requests FROM \\".ds-kibana_sample_data_logs-*\\" WHERE \\"@timestamp\\" >= '$from' AND \\"@timestamp\\" < '$to' GROUP BY bucket ORDER BY bucket",
-  "query_mode": {"type": "aggregated", "timestamp_field": "bucket"},
+  "query_mode": {{"type": "aggregated", "timestamp_field": "bucket"}},
   "training_from": "2025-10-01T00:00:00Z",
   "training_to": "2025-10-14T23:59:59Z",
   "training_is_active": true,
@@ -113,11 +133,11 @@ delete_bucket_profile: Delete profile (cannot delete if referenced by KBs)
   "detection_frequency": "*/15 * * * *",
   "detection_window": 3600,
   "detection_start": "2025-10-15T00:00:00Z",
-  "algorithm": {
-    "name": "zscore",
-    "parameters": [{"dimension": "requests", "is_active": true}]
-  }
-}
+  "algorithm": {{
+    "name": "{example_algorithm}",
+    "parameters": [{{"dimension": "requests", "is_active": true}}]
+  }}
+}}
 ```
 
 """
