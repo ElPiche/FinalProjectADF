@@ -1,7 +1,7 @@
 {
     "Connection_Config": {
         "Url": "mongodb://admin:1q2w3E*@localhost:27017/?authSource=admin",
-        "Database": "logsdb",
+        "Database": "anomaly_detection",
         "Collection": "fec117c9-457a-49f4-841e-0f0a4dcd83be"
     },
     "Scheduling": {

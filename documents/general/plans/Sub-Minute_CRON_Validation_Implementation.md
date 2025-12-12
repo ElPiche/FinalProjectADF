@@ -407,7 +407,7 @@ tests/test_models.py - 7 passed
 | `extractor/src/main/java/com/da/extractor/dto/ValidateQueryModeRequestDto.java` | Query mode validation request |
 | `extractor/src/main/java/com/da/extractor/dto/ValidateTimestampFieldRequestDto.java` | Timestamp field validation request |
 | `extractor/src/test/java/com/da/extractor/controller/ValidatorControllerStressTest.java` | JUnit stress tests |
-| `stress_test_validation.ps1` | PowerShell stress test script (65 tests) |
+| `MCP/KB-MCP/scripts/stress_test_validation.ps1` | PowerShell stress test script (65 tests) |
 
 ### Modified Files
 | File | Changes |

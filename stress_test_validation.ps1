@@ -1,34 +1,9 @@
-<#
-.SYNOPSIS
-    Stress test for validation endpoints
-.DESCRIPTION
-    Tests various invalid inputs to ensure proper rejection.
-    Invalid inputs should return HTTP 400 or 200 with errors array.
-    
-    Tests the following endpoints:
-    - /api/validate/cron
-    - /api/validate/query-mode
-    - /api/validate/timestamp-field
-    - /api/validate/kb-config (unified)
-#>
-
-$baseUrl = "http://localhost:8086/api/validate"
-$passed = 0
-$failed = 0
-
-function Test-CronValidation {
-    param(
-        [string]$TestName,
-        [string]$CronExpression,
-        [string]$QueryMode = "aggregated",
-        [string]$ExpectedResult,  # "valid", "rejected"
-        [int]$ExpectedInterval = 0
-    )
-    
-    $body = @{
-        cron_expression = $CronExpression
-        query_mode = $QueryMode
-    } | ConvertTo-Json
+Write-Host "This script has been moved to 'MCP/KB-MCP/scripts/stress_test_validation.ps1'"
+Write-Host "Please run the script from the KB-MCP scripts folder instead of the repository root."
+Write-Host "Examples:"
+Write-Host "  pwsh MCP/KB-MCP/scripts/stress_test_validation.ps1" -ForegroundColor Cyan
+Write-Host "  # Or run it interactively inside the KB-MCP Docker container as documented in 'MCP/KB-MCP/README.md'." -ForegroundColor DarkGray
+exit 0
     
     try {
         $response = Invoke-WebRequest -Uri "$baseUrl/cron" -Method POST -ContentType "application/json" -Body $body -ErrorAction Stop

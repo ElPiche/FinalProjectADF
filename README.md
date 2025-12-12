@@ -16,7 +16,7 @@ Proyecto final tecnólogo en informática Framework de detección de anomalías
 - **Perfiles de Bucket**: Detección consciente del contexto temporal (horario laboral, feriados)
 - **Observabilidad Completa**: Detalles del algoritmo preservados en Elasticsearch
 
-Ver [Doc/Modular_Algorithm_Architecture.md](Doc/Modular_Algorithm_Architecture.md) para detalles técnicos.
+Ver [documents/dispatcher/specifications/Modular_Algorithm_Architecture.md](documents/dispatcher/specifications/Modular_Algorithm_Architecture.md) para detalles técnicos.
 
 ## Setup 
 
@@ -104,6 +104,9 @@ docker-compose up -d --build
 docker-compose --profile generate-logs up -d --build
 ```
 
+Nota: `docker-compose up -d` no activa por defecto la generación de logs. Para ejecutar tests de estrés o pruebas que generan tráfico sintético, utilice `--profile generate-logs` o `--profile stress`. Use estos perfiles sólo cuando desee generar carga intencionalmente.
+```
+
 2. En Claude Desktop, usar las herramientas de KB-MCP:
 ```
 Listar algoritmos disponibles:
@@ -127,6 +130,6 @@ curl "http://localhost:9201/*_anomalies/_search?pretty"
 
 ## Documentación
 
-- [Arquitectura Modular de Algoritmos](Doc/Modular_Algorithm_Architecture.md)
-- [Reporte E2E Test Diciembre 2025](Doc/E2E_Test_Report_December_2025.md)
-- [Guía de Replicación Fire Test](Doc/Fire_Test_Replication_Guide.md)
+- [Arquitectura Modular de Algoritmos](documents/dispatcher/specifications/Modular_Algorithm_Architecture.md)
+- [Reporte E2E Test Diciembre 2025](documents/general/reports/E2E_Test_Report_December_2025.md)
+- [Guía de Replicación Fire Test](documents/general/guides/Fire_Test_Replication_Guide.md)

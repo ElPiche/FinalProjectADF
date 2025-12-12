@@ -39,15 +39,15 @@ This guide explains how to implement **any** anomaly detection algorithm for the
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                        Algorithm Layer                              │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────────┐   │
-│  │    ZScore      │  │      IQR       │  │       Mock         │   │
-│  │  (single-dim)  │  │  (single-dim)  │  │   (dual-mode)      │   │
-│  │                │  │                │  │                    │   │
-│  │  train()       │  │  train()       │  │  train()           │   │
-│  │  detect()      │  │  detect()      │  │  detect()          │   │
-│  │  detect_batch()│  │  detect_batch()│  │  train_multi_dim() │   │
-│  └────────────────┘  └────────────────┘  │  detect_multi_dim()│   │
-│                                          └────────────────────┘   │
+│  ┌────────────────┐  ┌────────────────┐  ┌────────────────────┐  ┌────────────────┐   │
+│  │    ZScore      │  │      IQR       │  │       Mock         │  │     KMeans      │   │
+│  │  (single-dim)  │  │  (single-dim)  │  │   (dual-mode)      │  │ (multi-dim)     │   │
+│  │                │  │                │  │                    │  │                │   │
+│  │  train()       │  │  train()       │  │  train()           │  │ train_multi_dim │   │
+│  │  detect()      │  │  detect()      │  │  detect()          │  │ detect_multi_dim│   │
+│  │  detect_batch()│  │  detect_batch()│  │  train_multi_dim() │  │                │   │
+│  └────────────────┘  └────────────────┘  │  detect_multi_dim()│  └────────────────┘   │
+│                                          └────────────────────┘                      │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -72,7 +72,7 @@ Processes each metric dimension independently. The orchestrator handles the loop
 ### 2.2 Multi-Dimensional Algorithm
 Considers correlations between dimensions. You receive ALL dimensions at once.
 
-**Examples:** Mahalanobis Distance, Isolation Forest, DBSCAN, Autoencoders
+**Examples:** Mahalanobis Distance, KMeans, Isolation Forest, DBSCAN, Autoencoders
 
 **You implement:**
 - `train_multi_dimensional(observations, parameters)` → Returns baselines dict

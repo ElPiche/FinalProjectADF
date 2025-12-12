@@ -111,7 +111,7 @@ output {
 
   mongodb {
     uri => "mongodb://admin:1q2w3E*@mongodb:27017/?authSource=admin"
-    database => "logsdb"
+	database => "anomaly_detection"
     collection => "grouped_response_code"
     isodate => true
     id => "%{response}"

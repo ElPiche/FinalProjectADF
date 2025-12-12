@@ -351,6 +351,8 @@ Create a KB configuration to detect e-commerce anomalies:
 The generator handles `SIGINT` and `SIGTERM` gracefully:
 ```bash
 docker stop log-generator
+
+Note: `log-generator` is not part of the default `docker-compose up -d` service set and will only run if started using `docker-compose --profile generate-logs up -d` or `--profile stress`. This service is resource intensive—run intentionally during tests only.
 # Logs: "Shutdown signal received, stopping..."
 # Logs final stats before exit
 ```

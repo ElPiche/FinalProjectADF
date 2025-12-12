@@ -8,16 +8,20 @@ This folder contains all anomaly detection algorithms for the DA (Data Anomaly) 
 algorithms/
 ├── __init__.py              # Auto-discovers all algorithms (no manual imports needed!)
 ├── README.md                # This file
-├── zscore/                  # Z-Score algorithm (subfolder)
+├── zscore/                  # Z-Score algorithm (single-dimensional)
 │   ├── zscore.py            # Main algorithm class with @register_algorithm
 │   ├── zscore_algorithm.py  # Pure statistical functions
 │   └── tests/
 │       └── test_zscore_algorithm.py
-├── iqr/                     # IQR algorithm (subfolder)
+├── iqr/                     # IQR algorithm (single-dimensional)
 │   ├── iqr.py
 │   └── tests/
 │       └── test_iqr_algorithm.py
-└── mock/                    # Mock algorithm for testing (subfolder)
+├── k_means/                 # K-Means algorithm (multi-dimensional)
+│   ├── k_means.py
+│   └── tests/
+│       └── test_k_means_algorithm.py
+└── mock/                    # Mock algorithm for testing (dual-mode)
     ├── mock.py
     └── tests/
         └── test_mock_algorithm.py

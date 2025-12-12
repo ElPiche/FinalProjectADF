@@ -90,7 +90,7 @@ from ...algorithm_interface import register_algorithm
 logger = logging.getLogger(__name__)
 
 
-@register_algorithm
+# @register_algorithm // comented out to avoid auto-registration, since this is only an example algorithm implementation.
 @dataclass
 class MockAlgorithm:
     """Mock algorithm supporting BOTH single and multi-dimensional modes.
