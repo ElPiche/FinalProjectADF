@@ -90,6 +90,60 @@ Una vez alli agregamos la siguiente configuración:
   }
 }
 ```
+En caso que se cuente ya con un servidor propio de Elasticsearch con logs se puede reemplazar el contenido de `elasticsearch-logs-exploration` por algo como:
+```json
+"elasticsearch-logs-exploration": {
+  "command": "docker",
+  "args": [
+    "run",
+    "-i",
+    "--rm",
+    "-e",
+    "ES_URL",
+    "-e",
+    "ES_API_KEY",
+    "-e",
+    "ES_VERIFY_SSL",
+    "mcp/elasticsearch",
+    "stdio"
+  ],
+  "env": {
+    "ES_URL": "{URL_ELASTIC}",
+    "ES_API_KEY": "BASE64(ID:API_KEY)", // Authorization: ApiKey <BASE64(ID:API_KEY)>
+    "ES_VERIFY_SSL": "true"
+  }
+},
+```
+si tienes configurada una Api Key en tu servidor.
+Para una conexión via usuario y contraseña:
+```json
+{
+  "mcpServers": {
+    "elasticsearch-logs-exploration": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ES_URL",
+        "-e",
+        "ES_USERNAME",
+        "-e",
+        "ES_PASSWORD",
+        "mcp/elasticsearch",
+        "stdio"
+      ],
+      "env": {
+        "ES_URL": "{URL_ELASTIC}",
+        "ES_USERNAME": "{USERNAME}",
+        "ES_PASSWORD": "{PASSWORD}"
+      }
+    }
+  }
+}
+```
+
 
 Una vez completado estos pasos solo bastaria con empezar a conversar con Claude. Se recomienda utilizar el modelo de Sonnet en sus versiones 4.1 o 4.5.
 
