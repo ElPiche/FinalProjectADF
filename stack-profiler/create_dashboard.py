@@ -16,8 +16,8 @@ import json
 import time
 import requests
 
-KIBANA_URL = os.getenv('KIBANA_URL', 'http://localhost:5602')
-ES_URL = os.getenv('ES_URL', 'http://localhost:9201')
+KIBANA_URL = os.getenv('KIBANA_URL', 'http://localhost:5601')
+ES_URL = os.getenv('ES_URL', 'http://localhost:9200')
 INDEX_PATTERN = 'docker-container-metrics*'
 DATA_VIEW_ID = 'docker-metrics-dataview'
 DASHBOARD_ID = 'docker-stack-monitor-dashboard'

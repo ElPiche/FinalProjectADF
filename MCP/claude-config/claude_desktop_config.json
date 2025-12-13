@@ -42,7 +42,7 @@
         "mcp/elasticsearch", "stdio"
       ],
       "env": {
-        "ES_URL": "http://host.docker.internal:9201"
+        "ES_URL": "http://host.docker.internal:9200"
       }
     }
   }

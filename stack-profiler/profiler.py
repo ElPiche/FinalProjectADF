@@ -37,7 +37,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration from environment
-ES_HOST = os.getenv('ES_URL', os.getenv('ES_HOST', 'http://localhost:9201'))
+ES_HOST = os.getenv('ES_URL', os.getenv('ES_HOST', 'http://localhost:9200'))
 INDEX_NAME = os.getenv('INDEX_NAME', 'docker-container-metrics')
 BATCH_SIZE = int(os.getenv('BATCH_SIZE', '50'))  # Max metrics per bulk request
 FLUSH_INTERVAL = float(os.getenv('FLUSH_INTERVAL', '1.0'))  # Seconds between flushes

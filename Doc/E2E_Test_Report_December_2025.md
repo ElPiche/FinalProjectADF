@@ -554,10 +554,10 @@ docker-compose up -d
 docker logs da-dispatcher --tail 50
 
 # 5. Check anomalies in Elasticsearch
-docker exec elasticsearch-anomalies curl -s "http://localhost:9200/ecommerce-logs_anomalies/_search?size=1&sort=created_at:desc"
+docker exec elasticsearch-dataset curl -s "http://localhost:9200/ecommerce-logs_anomalies/_search?size=1&sort=created_at:desc"
 
 # 6. Verify flat fields exist
-docker exec elasticsearch-anomalies curl -s "http://localhost:9200/ecommerce-logs_anomalies/_search" | jq '.hits.hits[0]._source.algorithm_details | keys'
+docker exec elasticsearch-dataset curl -s "http://localhost:9200/ecommerce-logs_anomalies/_search" | jq '.hits.hits[0]._source.algorithm_details | keys'
 
 # 7. Refresh Kibana data view to pick up new fields
 # Stack Management → Data Views → ecommerce-logs_anomalies → Refresh field list

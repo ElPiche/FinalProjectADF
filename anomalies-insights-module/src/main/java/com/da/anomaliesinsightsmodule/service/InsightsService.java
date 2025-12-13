@@ -173,7 +173,7 @@ public class InsightsService {
                             "anomalyValue", doc.getValue().toString(),
                             "anomalyTimestamp", doc.getTimestamp(),
                             "sourceIndex", mapping.getSourceIndex(),
-                            "kibanaUrl", "http://localhost:5602/app/dashboards#/view/" + mapping.getDashboardId()
+                            "kibanaUrl", "http://localhost:5601/app/dashboards#/view/" + mapping.getDashboardId()
                     )
             );
 
@@ -213,7 +213,7 @@ public class InsightsService {
                         "anomalyValue", anomalyValue,
                         "anomalyTimestamp", timestamp.toString(),
                         "resultsIndexName", indexName,
-                        "kibanaUrl", "http://localhost:5602/app/dashboards#/view/" + kibanaId
+                        "kibanaUrl", "http://localhost:5601/app/dashboards#/view/" + kibanaId
                 )
         );
     }

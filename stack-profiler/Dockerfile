@@ -11,8 +11,8 @@ COPY profiler.py .
 COPY create_dashboard.py .
 
 # Environment variables with defaults
-ENV ES_URL=http://elasticsearch-anomalies:9200
-ENV KIBANA_URL=http://kibana-anomalies:5601
+ENV ES_URL=http://elasticsearch-dataset:9200
+ENV KIBANA_URL=http://kibana:5601
 ENV COLLECTION_INTERVAL=5
 ENV CREATE_DASHBOARD=true
 

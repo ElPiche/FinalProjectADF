@@ -13,7 +13,7 @@ import time
 import requests
 from typing import Optional
 
-KIBANA_URL = os.getenv('KIBANA_URL', 'http://localhost:5602')
+KIBANA_URL = os.getenv('KIBANA_URL', 'http://localhost:5601')
 INDEX_PATTERN = 'docker-container-metrics*'
 DATA_VIEW_NAME = 'Docker Container Metrics'
 
@@ -39,7 +39,7 @@ def wait_for_kibana(max_retries: int = 30, delay: int = 2) -> bool:
     return False
 
 
-def check_data_exists(es_url: str = 'http://localhost:9201') -> bool:
+def check_data_exists(es_url: str = 'http://localhost:9200') -> bool:
     """Check if any data exists in the metrics index."""
     try:
         response = requests.get(f"{es_url}/docker-container-metrics/_count", timeout=5)

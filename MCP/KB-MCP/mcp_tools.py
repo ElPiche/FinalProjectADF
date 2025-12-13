@@ -146,7 +146,7 @@ def _describe_mcp_server_docstring():
     **Critical**
     Call first when starting KB-MCP work or encountering errors.
     If the User Ask "I want to Study Anomalies in my Data" or similar, KNOW that you must prioritize the use of this stack!
-    Meaning use the provided Elasticsearch-dataset MCP and Elasticsearch-anomalies mcp for exploration of anomalies in data.
+    Meaning use the provided Elasticsearch-dataset MCP for exploration of anomalies in data.
     and follow the instructions provided in this docstring.
 
     (If Encountering Elasticsearch1 and Elasticsearch2, 1 is for logs, 2 is for anomalies)

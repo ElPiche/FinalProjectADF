@@ -10,7 +10,7 @@
     Seconds between metric collections (default: 5)
 
 .PARAMETER EsHost
-    Elasticsearch host URL (default: http://localhost:9201)
+    Elasticsearch host URL (default: http://localhost:9200)
 
 .PARAMETER SkipDashboard
     Skip dashboard creation (default: false)
@@ -19,12 +19,12 @@
     .\Start-Profiler.ps1
     
 .EXAMPLE
-    .\Start-Profiler.ps1 -CollectionInterval 2 -EsHost "http://localhost:9201"
+    .\Start-Profiler.ps1 -CollectionInterval 2 -EsHost "http://localhost:9200"
 #>
 
 param(
     [int]$CollectionInterval = 5,
-    [string]$EsHost = "http://localhost:9201",
+    [string]$EsHost = "http://localhost:9200",
     [switch]$SkipDashboard
 )
 

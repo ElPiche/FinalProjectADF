@@ -28,40 +28,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-  elasticsearch-anomalies:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.4
-    container_name: elasticsearch-anomalies
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms256m -Xmx256m
-      - cluster.name=anomalies-cluster
-      - node.name=anomalies-node
-    ports:
-      - 9201:9200
-    networks:
-      - adf-network
-    volumes:
-      - elastic_anomalies_data:/usr/share/elasticsearch/data
-    deploy:
-      resources:
-        limits:
-          memory: 2g
-        reservations:
-          memory: 512m
-    healthcheck:
-      test:
-        - CMD
-        - curl
-        - -f
-        - http://localhost:9200
-      interval: 10s
-      timeout: 5s
-      retries: 10
   kibana:
     image: docker.elastic.co/kibana/kibana:8.19.3
     container_name: kibana
-    restart: 'no'
+    restart: unless-stopped
     depends_on:
       - elasticsearch-dataset
     environment:
@@ -80,26 +50,6 @@ services:
       interval: 10s
       timeout: 50s
       retries: 100
-  kibana-anomalies:
-    image: docker.elastic.co/kibana/kibana:8.19.3
-    container_name: kibana-anomalies
-    depends_on:
-      - elasticsearch-anomalies
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch-anomalies:9200
-    ports:
-      - 5602:5601
-    networks:
-      - adf-network
-    healthcheck:
-      test:
-        - CMD
-        - curl
-        - -f
-        - http://localhost:5601/api/status
-      interval: 10s
-      timeout: 5s
-      retries: 10
   kibana-init:
     image: docker:27-cli
     container_name: kibana-init
@@ -122,11 +72,7 @@ services:
 
       \  curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
 
-      \  echo 'Sample data instalado. Deteniendo Kibana...';
-
-      \  docker stop kibana;
-
-      \  echo 'Kibana detenido.';
+      \  echo 'Sample data instalado. Kibana listo.';
 
       \"\n"
 
@@ -206,7 +152,7 @@ services:
         condition: service_healthy
     environment:
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
-      - ES_HOSTS=http://elasticsearch-dataset:9200,http://elasticsearch-anomalies:9200
+      - ES_HOSTS=http://elasticsearch-dataset:9200
       - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
     ports:
       - "8000:8000"
@@ -271,9 +217,9 @@ services:
     container_name: anomalies-insights
     restart: unless-stopped
     depends_on:
-      elasticsearch-anomalies:
+      elasticsearch-dataset:
         condition: service_healthy
-      kibana-anomalies:
+      kibana:
         condition: service_healthy
     environment:
     - JAVA_OPTS=-Xmx512m -Xms256m
@@ -308,12 +254,12 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
-      elasticsearch-anomalies:
+      elasticsearch-dataset:
         condition: service_healthy
     environment:
       # use the service names (not localhost) so the container can reach them over the bridge network
       - MONGO_CONNECTION_STRING=mongodb://admin:1q2w3E%2A@mongodb:27017/?authSource=admin&replicaSet=rs0
-      - ES_HOSTS=http://elasticsearch-anomalies:9200
+      - ES_HOSTS=http://elasticsearch-dataset:9200
       - PYTHONUNBUFFERED=1
       - ALGORITHM_REGISTRY_PATH=/app/registry/algorithms.json
     volumes:
@@ -417,13 +363,13 @@ services:
     container_name: stack-profiler
     restart: unless-stopped
     depends_on:
-      elasticsearch-anomalies:
+      elasticsearch-dataset:
         condition: service_healthy
-      kibana-anomalies:
+      kibana:
         condition: service_healthy
     environment:
-      - ES_URL=http://elasticsearch-anomalies:9200
-      - KIBANA_URL=http://kibana-anomalies:5601
+      - ES_URL=http://elasticsearch-dataset:9200
+      - KIBANA_URL=http://kibana:5601
       - COLLECTION_INTERVAL=5
       - CREATE_DASHBOARD=true
     volumes:
@@ -480,7 +426,6 @@ services:
 volumes:
   mongo_data: null
   elastic_data: null
-  elastic_anomalies_data: null
   mongo_key: null
   kb_mcp_logs: null
   algorithm_registry: null

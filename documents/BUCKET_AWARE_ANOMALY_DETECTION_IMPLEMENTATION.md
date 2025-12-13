@@ -988,7 +988,7 @@ docker exec mongodb mongosh "mongodb://admin:1q2w3E*@localhost:27017/?authSource
 
 ### Verify Kibana Flat Fields
 ```bash
-docker exec elasticsearch-anomalies curl -s "http://localhost:9200/ecommerce-logs_anomalies/_search?size=1" | jq '.hits.hits[0]._source.algorithm_details | keys'
+docker exec elasticsearch-dataset curl -s "http://localhost:9200/ecommerce-logs_anomalies/_search?size=1" | jq '.hits.hits[0]._source.algorithm_details | keys'
 # Should include: z_score, mean, std, threshold (for zscore)
 # Or: lower_bound, upper_bound (for iqr)
 ```

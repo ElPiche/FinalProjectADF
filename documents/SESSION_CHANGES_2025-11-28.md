@@ -428,7 +428,7 @@ Training config now correctly stores and reads:
 
 2. **Verify Mapping Created:**
    ```bash
-   curl -s "localhost:9201/index_kb_id_mappings/_search?pretty"
+   curl -s "localhost:9200/index_kb_id_mappings/_search?pretty"
    ```
    
    **Expected Response:**
@@ -442,14 +442,14 @@ Training config now correctly stores and reads:
 
 3. **Verify Dashboard Title:**
    ```bash
-   curl -s "localhost:5602/api/saved_objects/dashboard/{dashboardId}"
+   curl -s "localhost:5601/api/saved_objects/dashboard/{dashboardId}"
    ```
    
    **Expected:** `"title": "Dashboard - app-logs"`
 
 4. **Verify Anomaly Index:**
    ```bash
-   curl -s "localhost:9201/_cat/indices?v" | grep app-logs
+   curl -s "localhost:9200/_cat/indices?v" | grep app-logs
    ```
    
    **Expected:** `app-logs_anomalies` (not `app-logs_anomalies_result_anomalies`)
@@ -544,10 +544,10 @@ docker exec mongodb mongosh -u admin -p '1q2w3E*' --quiet --eval "
 
 ```bash
 # Check mapping document
-curl -s "localhost:9201/index_kb_id_mappings/_search?pretty"
+curl -s "localhost:9200/index_kb_id_mappings/_search?pretty"
 
 # Check indices
-curl -s "localhost:9201/_cat/indices?v" | grep anomalies
+curl -s "localhost:9200/_cat/indices?v" | grep anomalies
 ```
 
 ### Trigger KB Config Reprocessing

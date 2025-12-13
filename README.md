@@ -78,7 +78,7 @@ Una vez alli agregamos la siguiente configuración:
         "mcp/elasticsearch", "stdio"
       ],
       "env": {
-        "ES_URL": "http://host.docker.internal:9201"
+        "ES_URL": "http://host.docker.internal:9200"
       }
     }
   }
@@ -116,7 +116,7 @@ Crear una configuración de detección de anomalías:
 docker logs da-dispatcher --tail 50
 
 # Consultar anomalías
-curl "http://localhost:9201/*_anomalies/_search?pretty"
+curl "http://localhost:9200/*_anomalies/_search?pretty"
 ```
 
 ## Documentación

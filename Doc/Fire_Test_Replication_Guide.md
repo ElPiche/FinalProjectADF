@@ -25,7 +25,7 @@ docker-compose up -d
 docker ps
 ```
 
-**Expected Result**: 3 containers running (elasticsearch-dataset, kibana-anomalies, mongodb)
+**Expected Result**: 3 containers running (elasticsearch-dataset, kibana, mongodb)
 
 ### 1.2 Verify Elasticsearch Access
 ```bash

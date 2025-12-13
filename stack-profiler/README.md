@@ -27,8 +27,8 @@ This will:
 
 - Python 3.9+
 - Docker running on the host
-- Elasticsearch accessible (default: localhost:9201)
-- Kibana accessible (default: localhost:5602)
+- Elasticsearch accessible (default: localhost:9200)
+- Kibana accessible (default: localhost:5601)
 
 ## Installation
 
@@ -61,7 +61,7 @@ Environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ES_HOST` | `http://localhost:9201` | Elasticsearch host URL |
+| `ES_HOST` | `http://localhost:9200` | Elasticsearch host URL |
 | `COLLECTION_INTERVAL` | `5` | Seconds between metric collections |
 | `INDEX_NAME` | `docker-container-metrics` | Elasticsearch index name |
 
@@ -86,11 +86,11 @@ Each document contains:
 
 ## Kibana Dashboard
 
-After running the profiler, access Kibana at `http://localhost:5602` and:
+After running the profiler, access Kibana at `http://localhost:5601` and:
 
 1. The dashboard is **automatically created** when you run `Start-Profiler.ps1`
 2. Or manually create it: `python create_dashboard.py`
-3. Open: `http://localhost:5602/app/dashboards#/view/docker-stack-monitor-dashboard`
+3. Open: `http://localhost:5601/app/dashboards#/view/docker-stack-monitor-dashboard`
 
 ### Dashboard Features:
 - **5-second auto-refresh** for real-time monitoring
@@ -104,7 +104,7 @@ After running the profiler, access Kibana at `http://localhost:5602` and:
 
 ```powershell
 # Run with custom Elasticsearch host
-$env:ES_HOST = "http://elasticsearch-anomalies:9201"
+$env:ES_HOST = "http://elasticsearch-dataset:9200"
 python profiler.py
 
 # Run with faster collection interval (2 seconds)
