@@ -110,25 +110,42 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - adf-network
-    entrypoint: "sh -c \"
+    entrypoint:
+    - sh
+    - -c
+    - |
+      set -e
 
-      \  echo 'Esperando a Kibana...';
+      echo "Instalando curl..."
+      apk add --no-cache curl >/dev/null
 
-      \  apk add --no-cache curl >/dev/null;
+      echo "Esperando a Elasticsearch..."
+      until curl -sf http://elasticsearch-dataset:9200 >/dev/null; do sleep 2; done
 
-      \  until curl -sf http://kibana:5601/api/status >/dev/null; do sleep 2; done;
+      echo "Esperando a Kibana..."
+      until curl -sf http://kibana:5601/api/status >/dev/null; do sleep 2; done
 
-      \  echo 'Instalando sample data (logs)...';
+      echo "Creando índice placeholder logs-test..."
+      curl -s -X PUT http://elasticsearch-dataset:9200/logs-test >/dev/null || true
 
-      \  curl -s -XPOST http://kibana:5601/api/sample_data/logs -H 'kbn-xsrf: true' -H 'Content-Type: application/json';
+      echo "Creando Data View logs-* (Logstash logs)..."
+      curl -s -X POST http://kibana:5601/api/data_views/data_view \
+        -H "kbn-xsrf: true" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "data_view": {
+            "title": "logs-*",
+            "name": "Logstash logs",
+            "timeFieldName": "@timestamp"
+          }
+        }' >/dev/null || true
 
-      \  echo 'Sample data instalado. Deteniendo Kibana...';
+      echo "Instalando sample data (logs)..."
+      curl -s -X POST http://kibana:5601/api/sample_data/logs \
+        -H "kbn-xsrf: true" \
+        -H "Content-Type: application/json" >/dev/null || true
 
-      \  docker stop kibana;
-
-      \  echo 'Kibana detenido.';
-
-      \"\n"
+      echo "Bootstrap de Kibana terminado."
 
   mongodb-keygen:
     image: alpine:3.20
