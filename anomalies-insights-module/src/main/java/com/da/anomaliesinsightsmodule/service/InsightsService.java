@@ -5,6 +5,8 @@ import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+
+
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
@@ -104,8 +106,24 @@ public class InsightsService {
         logger.info("Mapping DashboardId: " + mapping.getDashboardId());
 
         //Subir documento to anomaly index
-        response = elasticsearchService.indexAnomalyDocument(mapping.getAnomalyIndex(), doc);
-        logger.info("Inserting document in index:  " + mapping.getAnomalyIndex());
+
+        try{
+
+            response = elasticsearchService.indexAnomalyDocument(mapping.getAnomalyIndex(), kbId, doc);
+            logger.info("Inserting document in index:  " + mapping.getAnomalyIndex());
+
+        } catch (NullPointerException e) {
+
+            logger.error("Invalid anomaly document. Skipping indexing. {}", e.getMessage());
+            return null;
+
+        }
+        catch(IllegalArgumentException e){
+            logger.info("Duplicate anomaly skipped. No email sent. {}", e.getMessage());
+            return null;
+        }
+
+
 
         //Refrescar dataView
         if (mapping.getDataViewId() != null) {

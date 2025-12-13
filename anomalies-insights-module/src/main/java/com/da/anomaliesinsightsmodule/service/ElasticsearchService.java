@@ -9,9 +9,15 @@ import co.elastic.clients.json.JsonpMapper;
 import com.da.anomaliesinsightsmodule.dto.DocumentDto;
 import com.da.anomaliesinsightsmodule.entity.IndexKbIdMapping;
 import com.da.anomaliesinsightsmodule.repository.IndexKbIdMappingRepo;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.elasticsearch.client.ResponseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
@@ -29,6 +35,8 @@ public class ElasticsearchService {
     final ElasticsearchSqlClient sqlClient;
 
     final IndexKbIdMappingRepo indexKbIdMappingRepo;
+
+    private final Logger logger = LoggerFactory.getLogger(InsightsService.class);
 
     public ElasticsearchService(ElasticsearchClient client, JsonpMapper jsonpMapper, IndexKbIdMappingRepo indexKbIdMappingRepo) {
         this.client = client;
@@ -51,21 +59,33 @@ public class ElasticsearchService {
         );
     }
 
-    public IndexResponse indexAnomalyDocument(String indexName, DocumentDto doc) throws Exception {
+    public IndexResponse indexAnomalyDocument(String indexName, String kbId, DocumentDto doc) throws Exception {
 
         Map<String, Object> docMap = toDocumentMap(doc);
+
+        String documentId = generateDocumentId(kbId, doc);
+
+        logger.info("Generating documentId: " + documentId);
 
         try {
             return client.index(i -> i
                     .index(indexName)
+                    .id(documentId)
+                    .opType(OpType.Create)
                     .document(docMap)
             );
         } catch (ElasticsearchException e) {
-            //Nunca se debería de dar, dto no tiene id de documento
             if (e.status() == 409) {
                 throw new IllegalArgumentException("Document conflict: a document with the same ID already exists in index '" + indexName + "'.", e);
             }
-            throw new Exception(e.getMessage());
+            throw new Exception("Error indexing anomaly document", e);
+
+        } catch (ResponseException e) {
+            int status = e.getResponse().getStatusLine().getStatusCode();
+            if (status == 409) {
+                throw new IllegalArgumentException("Duplicate anomaly (doc already exists). docId=" + documentId, e);
+            }
+            throw new Exception("Elasticsearch ResponseException (" + status + ")", e);
         }
 
     }
@@ -123,5 +143,52 @@ public class ElasticsearchService {
         m.put("created_at", created);
 
         return m;
+    }
+
+    private String generateDocumentId(String kbId, DocumentDto doc) {
+
+        requireNonBlank(kbId, "kbId");
+        requireNonBlank(doc.algorithm, "algorithm");
+        requireNonBlank(doc.metric, "metric");
+        requireNonBlank(doc.timestamp, "timestamp");
+        requireValidDouble(doc.value, "value");
+
+        String rawKey = String.join("|",
+                kbId.trim(),
+                doc.algorithm.trim(),
+                doc.metric.trim(),
+                doc.timestamp.trim(),
+                normalizeDouble(doc.value)
+        );
+
+        return DigestUtils.sha256Hex(rawKey);
+    }
+
+    private void requireNonBlank(String value, String fieldName) {
+        if (value == null || value.isBlank()) {
+            throw new NullPointerException(
+                    "Invalid anomaly document: required field '" + fieldName + "' is null or blank"
+            );
+        }
+    }
+
+    private String normalizeDouble(Double value) {
+
+        return BigDecimal.valueOf(value)
+                .setScale(4, RoundingMode.HALF_UP)
+                .toPlainString();
+    }
+
+    private void requireValidDouble(Double value, String fieldName) {
+        if (value == null) {
+            throw new NullPointerException(
+                    "Invalid anomaly document: required field '" + fieldName + "' is null"
+            );
+        }
+        if (value.isNaN() || value.isInfinite()) {
+            throw new IllegalArgumentException(
+                    "Invalid anomaly document: field '" + fieldName + "' is NaN or Infinite"
+            );
+        }
     }
 }
