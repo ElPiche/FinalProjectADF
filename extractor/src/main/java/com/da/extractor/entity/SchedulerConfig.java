@@ -10,6 +10,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.util.Date;
+import java.util.List;
 
 @NoArgsConstructor
 @AllArgsConstructor
@@ -35,4 +36,12 @@ public class SchedulerConfig {
 
     @Field("last_run")
     private Date lastRun;
+
+    @Field("observed_values")
+    private List<String> observedValues;
+    
+    @Field("timestamp_field")
+    private String timestampField;
+
+
 }

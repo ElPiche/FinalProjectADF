@@ -1,11 +1,13 @@
 package com.da.extractor.service;
 
 import com.da.extractor.entity.SchedulerConfig;
+import com.da.extractor.entity.serie.Mode;
 import com.da.extractor.entity.training.TrainConfig;
 import com.da.extractor.pipeline.DataPipelineFactory;
 import com.da.extractor.pipeline.PipeMetadata;
 import com.da.extractor.repository.anomaly_detection.TrainingConfigRepository;
 import com.da.extractor.repository.scheduler.SchedulerConfigRepository;
+import jakarta.annotation.PostConstruct;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.scheduling.Trigger;
 import org.springframework.scheduling.support.CronTrigger;
@@ -43,7 +45,47 @@ public class SchedulerService {
         this.dataPipelineFactory = dataPipelineFactory;
     }
 
-    public void createStreamingTask(SchedulerConfig config, PipeMetadata pipeMetadata) {
+    @PostConstruct
+    void loadScheduledTasksOnStartup(){
+        log.info("========================================");
+        log.info("Initializing scheduled tasks on startup...");
+        log.info("========================================");
+
+        try {
+            List<SchedulerConfig> configs = schedulerConfigRepository.findAll();
+            log.info("Found {} scheduler configurations in database", configs.size());
+
+            int successCount = 0;
+            int failCount = 0;
+
+            for (SchedulerConfig config : configs) {
+                try {
+                    log.info("Loading scheduled task for KB ID: {} with frequency: {}",
+                            config.getKbId(), config.getFrequency());
+                    createStreamingTask(config);
+                    successCount++;
+                } catch (Exception ex) {
+                    failCount++;
+                    log.error("Failed to load scheduled task for KB ID: {}. Error: {}",
+                            config.getKbId(), ex.getMessage(), ex);
+                }
+            }
+
+            log.info("========================================");
+            log.info("Scheduled tasks startup complete!");
+            log.info("Successfully loaded: {}", successCount);
+            log.info("Failed to load: {}", failCount);
+            log.info("Total active tasks: {}", scheduledTasks.size());
+            log.info("========================================");
+
+        } catch (Exception ex) {
+            log.error("========================================");
+            log.error("CRITICAL ERROR loading scheduled tasks on startup: {}", ex.getMessage(), ex);
+            log.error("========================================");
+        }
+    }
+
+    public void createStreamingTask(SchedulerConfig config) {
 
         CronTrigger cronTrigger = new CronTrigger(config.getFrequency());
         Runnable task = () -> {
@@ -63,7 +105,12 @@ public class SchedulerService {
                             .replace("$from", ISO.format(from))
                             .replace("$to",   ISO.format(to));
 
-                    var pipeline = dataPipelineFactory.createPipeline(pipeMetadata);
+                    var pipeline = dataPipelineFactory.createPipeline(new PipeMetadata(
+                        config.getKbId(),
+                        config.getObservedValues(),
+                        Mode.DETECTION,
+                        config.getTimestampField()
+                    ));
                     pipeline.process(elasticQuery);
 
                     config.setLastRun(Date.from(Instant.now()));

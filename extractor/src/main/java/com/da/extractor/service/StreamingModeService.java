@@ -66,22 +66,17 @@ public class StreamingModeService {
                     frequency,
                     queryElastic,
                     startAt,
-                    new Date()
-            );
-
-            PipeMetadata pipeMetadata = new PipeMetadata(
-                    id,
+                    new Date(),
                     observedValues,
-                    Mode.DETECTION,
                     timestampField
             );
+
 
             schedulerConfigRepository.findByKbId(id).ifPresent(existingConfig ->
                     schedulerConfig.setId(existingConfig.getId()));
 
             schedulerService.createStreamingTask(
-                    schedulerConfigRepository.save(schedulerConfig),
-                    pipeMetadata
+                    schedulerConfigRepository.save(schedulerConfig)
             );
         }
     }
