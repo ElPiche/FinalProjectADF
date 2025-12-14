@@ -1,12 +1,6 @@
 # Detector de Anomalías 
 
-Proyecto final tecnólogo en informática Framework de detección de anomalías
-
-[Parking Lot](https://docs.google.com/document/d/1zOSzxRsrPZe7DSr-DHhbfsDFXiPR3SI07RYdtVkiDpQ/edit?tab=t.0#heading=h.yzf6b27f5gn7)
-
-[Diagrama](https://app.diagrams.net/#G1OnaDn2s1fRY0rvP8RLPCqJ3RhfiUmgje#%7B%22pageId%22%3A%2234t6jlsbtPh1E6wETkqf%22%7D)
-
-[Jira](https://braian-granero.atlassian.net/jira/software/projects/KAN/boards/1)
+El siguiente es un framework orientado a la detección de anomalías en servidores de aplicaciones potenciado por IA como asistente. El objetivo de este proyecto es aprovechar el poder de un LLM para agilizar el analisis de logs y la configuracion de un pipeline de detección de anomalias automatizado.
 
 ## Características
 
@@ -90,6 +84,60 @@ Una vez alli agregamos la siguiente configuración:
   }
 }
 ```
+En caso que se cuente ya con un servidor propio de Elasticsearch con logs se puede reemplazar el contenido de `elasticsearch-logs-exploration` por algo como:
+```json
+"elasticsearch-logs-exploration": {
+  "command": "docker",
+  "args": [
+    "run",
+    "-i",
+    "--rm",
+    "-e",
+    "ES_URL",
+    "-e",
+    "ES_API_KEY",
+    "-e",
+    "ES_VERIFY_SSL",
+    "mcp/elasticsearch",
+    "stdio"
+  ],
+  "env": {
+    "ES_URL": "{URL_ELASTIC}",
+    "ES_API_KEY": "BASE64(ID:API_KEY)", // Authorization: ApiKey <BASE64(ID:API_KEY)>
+    "ES_VERIFY_SSL": "true"
+  }
+},
+```
+si tienes configurada una Api Key en tu servidor.
+Para una conexión via usuario y contraseña:
+```json
+{
+  "mcpServers": {
+    "elasticsearch-logs-exploration": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "ES_URL",
+        "-e",
+        "ES_USERNAME",
+        "-e",
+        "ES_PASSWORD",
+        "mcp/elasticsearch",
+        "stdio"
+      ],
+      "env": {
+        "ES_URL": "{URL_ELASTIC}",
+        "ES_USERNAME": "{USERNAME}",
+        "ES_PASSWORD": "{PASSWORD}"
+      }
+    }
+  }
+}
+```
+
 
 Una vez completado estos pasos solo bastaria con empezar a conversar con Claude. Se recomienda utilizar el modelo de Sonnet en sus versiones 4.1 o 4.5.
 
