@@ -2,6 +2,7 @@ package com.da.anomaliesinsightsmodule.service;
 
 import com.da.anomaliesinsightsmodule.entity.DataView;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonGenerator;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import java.net.URI;
@@ -22,10 +23,16 @@ public class KibanaService {
     private String baseUrl;
 
 
-    public KibanaService(HttpClient httpClient, ObjectMapper objectMapper) {
-        this.httpClient = httpClient;
-        this.objectMapper = objectMapper;
-    }
+        public KibanaService(HttpClient httpClient, ObjectMapper objectMapper) {
+                this.httpClient = httpClient;
+                this.objectMapper = objectMapper;
+                // Ensure ObjectMapper does not escape non-ASCII characters so emoji and UTF-8 text remain intact
+                try {
+                        this.objectMapper.getFactory().configure(JsonGenerator.Feature.ESCAPE_NON_ASCII, false);
+                } catch (Exception ignore) {
+                        // no-op: if configuration fails, continue with defaults
+                }
+        }
 
     public String createDataView(String indexTitle) {
         try {
@@ -35,8 +42,8 @@ public class KibanaService {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/api/data_views/data_view"))
                     .header("kbn-xsrf", "true")
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(body, java.nio.charset.StandardCharsets.UTF_8))
                     .build();
 
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
@@ -148,8 +155,8 @@ public class KibanaService {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/api/saved_objects/search"))
                     .header("kbn-xsrf", "true")
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), java.nio.charset.StandardCharsets.UTF_8))
                     .build();
 
             HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
@@ -235,45 +242,70 @@ public class KibanaService {
                     "version", "8.19.3"
             );
             panels.add(metricPanel);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "1:indexpattern-datasource-layer-metric1"));
+            // Use the same reference name as inside the embeddableConfig.attributes
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-metric1"));
 
-            // Panel 2: Average Value Metric
-            Map<String, Object> avgMetric = Map.of(
+            // Panel 2: Anomaly Density by Algorithm (Area Chart)
+            Map<String, Object> density = Map.of(
                     "type", "lens",
                     "panelIndex", "2",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
-                                    "title", "📊 Avg Anomaly Value",
-                                    "visualizationType", "lnsMetric",
+                                    "title", "📈 Anomaly Density by Algorithm",
+                                    "visualizationType", "lnsXY",
                                     "type", "lens",
                                     "references", List.of(Map.of(
                                             "type", "index-pattern",
                                             "id", dataViewId,
-                                            "name", "indexpattern-datasource-layer-metric2"
+                                            "name", "indexpattern-datasource-layer-density"
                                     )),
                                     "state", Map.of(
                                             "filters", List.of(),
                                             "adHocDataViews", Map.of(),
                                             "visualization", Map.of(
-                                                    "layerId", "metric2",
-                                                    "layerType", "data",
-                                                    "metricAccessor", "avg"
+                                                    "title", "",
+                                                    "preferredSeriesType", "area",
+                                                    "layers", List.of(Map.of(
+                                                            "accessors", List.of("count"),
+                                                            "layerType", "data",
+                                                            "seriesType", "area",
+                                                            "layerId", "density",
+                                                            "xAccessor", "time",
+                                                            "splitAccessor", "algorithm"
+                                                    )),
+                                                    "legend", Map.of("isVisible", true, "position", "right")
                                             ),
                                             "datasourceStates", Map.of(
                                                     "formBased", Map.of(
                                                             "layers", Map.of(
-                                                                    "metric2", Map.of(
+                                                                    "density", Map.of(
                                                                             "columns", Map.of(
-                                                                                    "avg", Map.of(
-                                                                                            "label", "Average Value",
+                                                                                    "time", Map.of(
+                                                                                            "params", Map.of("interval", "auto"),
+                                                                                            "isBucketed", true,
+                                                                                            "operationType", "date_histogram",
+                                                                                            "sourceField", "created_at",
+                                                                                            "label", "Time",
+                                                                                            "dataType", "date"
+                                                                                    ),
+                                                                                    "algorithm", Map.of(
+                                                                                            "label", "Algorithm",
+                                                                                            "dataType", "string",
+                                                                                            "operationType", "terms",
+                                                                                            "sourceField", "algorithm.keyword",
+                                                                                            "isBucketed", true,
+                                                                                            "params", Map.of("size", 10, "orderBy", Map.of("type", "column", "columnId", "count"), "orderDirection", "desc")
+                                                                                    ),
+                                                                                    "count", Map.of(
+                                                                                            "label", "Anomaly Count",
                                                                                             "dataType", "number",
-                                                                                            "operationType", "average",
-                                                                                            "sourceField", "value",
+                                                                                            "operationType", "count",
+                                                                                            "sourceField", "___records___",
                                                                                             "isBucketed", false,
                                                                                             "params", Map.of()
                                                                                     )
                                                                             ),
-                                                                            "columnOrder", List.of("avg")
+                                                                            "columnOrder", List.of("time", "algorithm", "count")
                                                                     )
                                                             )
                                                     )
@@ -282,67 +314,17 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 8, "y", 8, "w", 8, "h", 6, "i", "2"),
+                    "gridData", Map.of("x", 8, "y", 8, "w", 16, "h", 6, "i", "2"),
                     "version", "8.19.3"
             );
-            panels.add(avgMetric);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "2:indexpattern-datasource-layer-metric2"));
+            panels.add(density);
+            // Keep reference name consistent with the lens saved object reference name
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-density"));
 
-            // Panel 3: Max Z-Score Metric
-            Map<String, Object> maxZScore = Map.of(
-                    "type", "lens",
-                    "panelIndex", "3",
-                    "embeddableConfig", Map.of(
-                            "attributes", Map.of(
-                                    "title", "⚡ Max Z-Score",
-                                    "visualizationType", "lnsMetric",
-                                    "type", "lens",
-                                    "references", List.of(Map.of(
-                                            "type", "index-pattern",
-                                            "id", dataViewId,
-                                            "name", "indexpattern-datasource-layer-metric3"
-                                    )),
-                                    "state", Map.of(
-                                            "filters", List.of(),
-                                            "adHocDataViews", Map.of(),
-                                            "visualization", Map.of(
-                                                    "layerId", "metric3",
-                                                    "layerType", "data",
-                                                    "metricAccessor", "maxz"
-                                            ),
-                                            "datasourceStates", Map.of(
-                                                    "formBased", Map.of(
-                                                            "layers", Map.of(
-                                                                    "metric3", Map.of(
-                                                                            "columns", Map.of(
-                                                                                    "maxz", Map.of(
-                                                                                            "label", "Max Z-Score",
-                                                                                            "dataType", "number",
-                                                                                            "operationType", "max",
-                                                                                            "sourceField", "algorithm_details.z_score",
-                                                                                            "isBucketed", false,
-                                                                                            "params", Map.of()
-                                                                                    )
-                                                                            ),
-                                                                            "columnOrder", List.of("maxz")
-                                                                    )
-                                                            )
-                                                    )
-                                            ),
-                                            "query", Map.of("query", "", "language", "kuery")
-                                    )
-                            )
-                    ),
-                    "gridData", Map.of("x", 16, "y", 8, "w", 8, "h", 6, "i", "3"),
-                    "version", "8.19.3"
-            );
-            panels.add(maxZScore);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "3:indexpattern-datasource-layer-metric3"));
-
-            // Panel 4: Anomalies by KB Name (Pie Chart)
+            // Panel 3: Anomalies by KB Name (Pie Chart)
             Map<String, Object> kbPie = Map.of(
                     "type", "lens",
-                    "panelIndex", "4",
+                    "panelIndex", "3",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
                                     "title", "🎯 Anomalies by Knowledge Base",
@@ -400,16 +382,16 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 24, "y", 8, "w", 12, "h", 12, "i", "4"),
+                    "gridData", Map.of("x", 24, "y", 8, "w", 12, "h", 12, "i", "3"),
                     "version", "8.19.3"
             );
             panels.add(kbPie);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "4:indexpattern-datasource-layer-pie1"));
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-pie1"));
 
-            // Panel 5: Anomalies by Algorithm (Pie Chart)
+            // Panel 4: Anomalies by Algorithm (Pie Chart)
             Map<String, Object> algPie = Map.of(
                     "type", "lens",
-                    "panelIndex", "5",
+                    "panelIndex", "4",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
                                     "title", "🔬 Anomalies by Algorithm",
@@ -467,16 +449,16 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 36, "y", 8, "w", 12, "h", 12, "i", "5"),
+                    "gridData", Map.of("x", 36, "y", 8, "w", 12, "h", 12, "i", "4"),
                     "version", "8.19.3"
             );
             panels.add(algPie);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "5:indexpattern-datasource-layer-pie2"));
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-pie2"));
 
-            // Panel 6: Anomalies Timeline (Area Chart)
+            // Panel 5: Anomalies Timeline (Area Chart)
             Map<String, Object> timeline = Map.of(
                     "type", "lens",
-                    "panelIndex", "6",
+                    "panelIndex", "5",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
                                     "title", "📈 Anomalies Timeline",
@@ -542,16 +524,16 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 0, "y", 14, "w", 24, "h", 12, "i", "6"),
+                    "gridData", Map.of("x", 0, "y", 14, "w", 24, "h", 12, "i", "5"),
                     "version", "8.19.3"
             );
             panels.add(timeline);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "6:indexpattern-datasource-layer-timeline"));
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-timeline"));
 
-            // Panel 7: Anomaly Values Over Time (Line Chart)
+            // Panel 6: Anomaly Values Over Time (Line Chart)
             Map<String, Object> valuesChart = Map.of(
                     "type", "lens",
-                    "panelIndex", "7",
+                    "panelIndex", "6",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
                                     "title", "📉 Anomaly Values Over Time",
@@ -616,16 +598,16 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 0, "y", 26, "w", 24, "h", 10, "i", "7"),
+                    "gridData", Map.of("x", 0, "y", 26, "w", 24, "h", 10, "i", "6"),
                     "version", "8.19.3"
             );
             panels.add(valuesChart);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "7:indexpattern-datasource-layer-values"));
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-values"));
 
-            // Panel 8: Anomalies by Metric (Horizontal Bar)
+            // Panel 7: Anomalies by Metric (Horizontal Bar)
             Map<String, Object> metricBar = Map.of(
                     "type", "lens",
-                    "panelIndex", "8",
+                    "panelIndex", "7",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
                                     "title", "📊 Anomalies by Metric",
@@ -682,16 +664,16 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 24, "y", 20, "w", 12, "h", 8, "i", "8"),
+                    "gridData", Map.of("x", 24, "y", 20, "w", 12, "h", 8, "i", "7"),
                     "version", "8.19.3"
             );
             panels.add(metricBar);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "8:indexpattern-datasource-layer-metricbar"));
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-metricbar"));
 
-            // Panel 9: Anomalies by Bucket Key (Horizontal Bar)
+            // Panel 8: Anomalies by Bucket Key (Horizontal Bar)
             Map<String, Object> bucketBar = Map.of(
                     "type", "lens",
-                    "panelIndex", "9",
+                    "panelIndex", "8",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
                                     "title", "🪣 Anomalies by Time Bucket",
@@ -748,25 +730,25 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 36, "y", 20, "w", 12, "h", 8, "i", "9"),
+                    "gridData", Map.of("x", 36, "y", 20, "w", 12, "h", 8, "i", "8"),
                     "version", "8.19.3"
             );
             panels.add(bucketBar);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "9:indexpattern-datasource-layer-bucketbar"));
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-bucketbar"));
 
-            // Panel 10: Z-Score Distribution Over Time (Heatmap-like bar)
-            Map<String, Object> zscoreChart = Map.of(
+            // Panel 9: Severity Over Time by Algorithm (Stacked Bar)
+            Map<String, Object> severityChart = Map.of(
                     "type", "lens",
-                    "panelIndex", "10",
+                    "panelIndex", "9",
                     "embeddableConfig", Map.of(
                             "attributes", Map.of(
-                                    "title", "⚡ Z-Score Severity Over Time",
+                                    "title", "📊Anomalies Severity Over Time (By Algorithm)",
                                     "visualizationType", "lnsXY",
                                     "type", "lens",
                                     "references", List.of(Map.of(
                                             "type", "index-pattern",
                                             "id", dataViewId,
-                                            "name", "indexpattern-datasource-layer-zscore"
+                                            "name", "indexpattern-datasource-layer-severity"
                                     )),
                                     "state", Map.of(
                                             "filters", List.of(),
@@ -775,18 +757,19 @@ public class KibanaService {
                                                     "title", "",
                                                     "preferredSeriesType", "bar_stacked",
                                                     "layers", List.of(Map.of(
-                                                            "accessors", List.of("avgz", "maxz"),
+                                                            "accessors", List.of("count"),
                                                             "layerType", "data",
                                                             "seriesType", "bar_stacked",
-                                                            "layerId", "zscore",
-                                                            "xAccessor", "time"
+                                                            "layerId", "severity",
+                                                            "xAccessor", "time",
+                                                            "splitAccessor", "algorithm"
                                                     )),
                                                     "legend", Map.of("isVisible", true, "position", "right")
                                             ),
                                             "datasourceStates", Map.of(
                                                     "formBased", Map.of(
                                                             "layers", Map.of(
-                                                                    "zscore", Map.of(
+                                                                    "severity", Map.of(
                                                                             "columns", Map.of(
                                                                                     "time", Map.of(
                                                                                             "params", Map.of("interval", "auto"),
@@ -796,24 +779,24 @@ public class KibanaService {
                                                                                             "label", "Time",
                                                                                             "dataType", "date"
                                                                                     ),
-                                                                                    "avgz", Map.of(
-                                                                                            "label", "Avg Z-Score",
-                                                                                            "dataType", "number",
-                                                                                            "operationType", "average",
-                                                                                            "sourceField", "algorithm_details.z_score",
-                                                                                            "isBucketed", false,
-                                                                                            "params", Map.of()
+                                                                                    "algorithm", Map.of(
+                                                                                            "label", "Algorithm",
+                                                                                            "dataType", "string",
+                                                                                            "operationType", "terms",
+                                                                                            "sourceField", "algorithm.keyword",
+                                                                                            "isBucketed", true,
+                                                                                            "params", Map.of("size", 10, "orderBy", Map.of("type", "column", "columnId", "count"), "orderDirection", "desc")
                                                                                     ),
-                                                                                    "maxz", Map.of(
-                                                                                            "label", "Max Z-Score",
+                                                                                    "count", Map.of(
+                                                                                            "label", "Anomaly Count",
                                                                                             "dataType", "number",
-                                                                                            "operationType", "max",
-                                                                                            "sourceField", "algorithm_details.z_score",
+                                                                                            "operationType", "count",
+                                                                                            "sourceField", "___records___",
                                                                                             "isBucketed", false,
                                                                                             "params", Map.of()
                                                                                     )
                                                                             ),
-                                                                            "columnOrder", List.of("time", "avgz", "maxz")
+                                                                            "columnOrder", List.of("time", "algorithm", "count")
                                                                     )
                                                             )
                                                     )
@@ -822,11 +805,11 @@ public class KibanaService {
                                     )
                             )
                     ),
-                    "gridData", Map.of("x", 24, "y", 28, "w", 24, "h", 8, "i", "10"),
+                    "gridData", Map.of("x", 24, "y", 28, "w", 24, "h", 8, "i", "9"),
                     "version", "8.19.3"
             );
-            panels.add(zscoreChart);
-            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "10:indexpattern-datasource-layer-zscore"));
+            panels.add(severityChart);
+            references.add(Map.of("type", "index-pattern", "id", dataViewId, "name", "indexpattern-datasource-layer-severity"));
 
             var body = Map.of(
                     "attributes", Map.ofEntries(
@@ -857,20 +840,81 @@ public class KibanaService {
             HttpRequest req = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + "/api/saved_objects/dashboard"))
                     .header("kbn-xsrf", "true")
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
+                    .header("Content-Type", "application/json; charset=utf-8")
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body), java.nio.charset.StandardCharsets.UTF_8))
                     .build();
 
-            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+                        HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
 
-            if (resp.statusCode() == 200 || resp.statusCode() == 201) {
-                return objectMapper.readTree(resp.body()).get("id").asText();
-            }
+                        if (resp.statusCode() == 200 || resp.statusCode() == 201) {
+                                return objectMapper.readTree(resp.body()).get("id").asText();
+                        }
 
-            if (resp.statusCode() == 409) {
-                System.out.println("Dashboard error conflict board already exists" + resp.statusCode() + ": " + resp.body());
-                return null;
-            }
+                        if (resp.statusCode() == 409) {
+                                System.out.println("Dashboard error conflict board already exists" + resp.statusCode() + ": " + resp.body());
+                                // Try updating the existing dashboard by searching for the dashboard title, then updating it
+                                try {
+                                        var findReq = HttpRequest.newBuilder()
+                                                        .uri(URI.create(baseUrl + "/api/saved_objects/_find?type=dashboard&search=" + java.net.URLEncoder.encode(title, java.nio.charset.StandardCharsets.UTF_8) + "&search_fields=title"))
+                                                        .header("kbn-xsrf", "true")
+                                                        .GET().build();
+
+                                        HttpResponse<String> findResp = httpClient.send(findReq, HttpResponse.BodyHandlers.ofString());
+                                        if (findResp.statusCode() != 200) return null;
+
+                                        var arr = objectMapper.readTree(findResp.body()).get("saved_objects");
+                                        if (arr == null || !arr.isArray() || arr.size() == 0) return null;
+
+                                        String existingId = null;
+                                        for (var n : arr) {
+                                                if (n.get("attributes") != null && n.get("attributes").get("title") != null && n.get("attributes").get("title").asText().equals(title)) {
+                                                        existingId = n.get("id").asText();
+                                                        break;
+                                                }
+                                        }
+                                        if (existingId == null || existingId.isBlank()) return null;
+
+                                        // Build update body with same attributes & references
+                                        var updateBody = Map.of("attributes", Map.ofEntries(
+                                                        Map.entry("title", title),
+                                                        Map.entry("version", 3),
+                                                        Map.entry("description", "Comprehensive Anomaly Detection Dashboard - Auto-generated"),
+                                                        Map.entry("timeRestore", true),
+                                                        Map.entry("timeTo", "now"),
+                                                        Map.entry("timeFrom", "now-15m"),
+                                                        Map.entry("refreshInterval", Map.of("pause", false, "value", 5000)),
+                                                        Map.entry("controlGroupInput", Map.of(
+                                                                        "chainingSystem", "HIERARCHICAL",
+                                                                        "controlStyle", "oneLine",
+                                                                        "showApplySelections", false,
+                                                                        "ignoreParentSettingsJSON", "{\"ignoreFilters\":false,\"ignoreQuery\":false,\"ignoreTimerange\":false,\"ignoreValidations\":false}",
+                                                                        "panelsJSON", "{}"
+                                                        )),
+                                                        Map.entry("optionsJSON", "{\"useMargins\":true,\"syncColors\":true,\"syncCursor\":true,\"syncTooltips\":true,\"hidePanelTitles\":false}"),
+                                                        Map.entry("panelsJSON", objectMapper.writeValueAsString(panels)),
+                                                        Map.entry("kibanaSavedObjectMeta", Map.of(
+                                                                        "searchSourceJSON", "{\"filter\":[],\"query\":{\"query\":\"\",\"language\":\"kuery\"}}"
+                                                        ))
+                                        ), "references", references);
+
+                                        HttpRequest updateReq = HttpRequest.newBuilder()
+                                                        .uri(URI.create(baseUrl + "/api/saved_objects/dashboard/" + existingId))
+                                                        .header("kbn-xsrf", "true")
+                                                        .header("Content-Type", "application/json; charset=utf-8")
+                                                        .method("PUT", HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(updateBody), java.nio.charset.StandardCharsets.UTF_8))
+                                                        .build();
+
+                                        HttpResponse<String> updateResp = httpClient.send(updateReq, HttpResponse.BodyHandlers.ofString());
+                                        if (updateResp.statusCode() == 200) {
+                                                return existingId;
+                                        }
+
+                                } catch (Exception updateEx) {
+                                        // if update fails, fall back to null
+                                        return null;
+                                }
+                                return null;
+                        }
 
             return null;
 
