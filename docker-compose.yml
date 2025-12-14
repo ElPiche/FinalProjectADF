@@ -122,6 +122,55 @@ services:
       echo "Esperando a Elasticsearch..."
       until curl -sf http://elasticsearch-dataset:9200 >/dev/null; do sleep 2; done
 
+      echo "Creando index template para logs-* (message/log_message keyword ignore_above=5000)..."
+      
+      curl -s -X PUT http://elasticsearch-dataset:9200/_index_template/logs_template \
+        -H "Content-Type: application/json" \
+        -d '{
+          "index_patterns": ["logs-*"],
+          "priority": 200,
+          "template": {
+            "mappings": {
+              "dynamic_templates": [
+                {
+                  "strings_as_text_with_keyword": {
+                    "match_mapping_type": "string",
+                    "mapping": {
+                      "type": "text",
+                      "fields": {
+                        "keyword": {
+                          "type": "keyword",
+                          "ignore_above": 25000
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "properties": {
+                "message": {
+                  "type": "text",
+                  "fields": {
+                    "keyword": {
+                      "type": "keyword",
+                      "ignore_above": 25000
+                    }
+                  }
+                },
+                "log_message": {
+                  "type": "text",
+                  "fields": {
+                    "keyword": {
+                      "type": "keyword",
+                      "ignore_above": 25000
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }' >/dev/null || true
+
       echo "Esperando a Kibana..."
       until curl -sf http://kibana:5601/api/status >/dev/null; do sleep 2; done
 
@@ -404,6 +453,7 @@ services:
       resources:
         limits:
           memory: 1g
+          cpus: "0.50" 
         reservations:
           memory: 512m
     volumes:
