@@ -236,10 +236,10 @@ Ensemble methods combine multiple algorithms for more robust detection.
 
 ### Phase 1: Point Algorithms (Current)
 - ✅ Z-Score (implemented)
-- ⬜ IQR
+- ✅ IQR
 - ⬜ Modified Z-Score
 - ⬜ Threshold
-- ⬜ K-Means
+- ✅ K-Means
 
 ### Phase 2: Series Algorithms (Requires HistoryProvider)
 - ⬜ Add `HistoryProvider` to fetch recent values
